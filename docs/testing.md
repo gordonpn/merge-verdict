@@ -15,6 +15,7 @@ Therefore, testing is organized around strict verification tiers:
 Testing leverages recorded fixtures from real-world pull requests in `gordonpn/snaptally`:
 
 ### Fixture Set A: Multi-Reviewer Resolution (SnapTally PR #119)
+
 - **Characteristics**:
   - CodeRabbit check run returns `conclusion: "neutral"` due to free-tier rate limits.
   - Sourcery raises high-severity finding `Previous defaults carry over`, followed by commit `6d2d457...`, comment edit `Addressed in 6d2d457...`, and thread resolution by `sourcery-ai[bot]`.
@@ -25,6 +26,7 @@ Testing leverages recorded fixtures from real-world pull requests in `gordonpn/s
   - Verifies that rate-limited CodeRabbit check fails policy unless rate-limit exemptions are enabled in configuration.
 
 ### Fixture Set B: Stale Review Commit Detection (SnapTally PR #120)
+
 - **Characteristics**:
   - Pull request head commit is `35c286dc84db8dc22ffd3e58b3457a1c77acb019`.
   - Codex summary comment records: `<!-- codex-review-state:v1 {"code_review":{"commit_sha":"a895efe284efc2ebf1ef2894c9a093af929cd98f",...}} -->`.
@@ -34,6 +36,7 @@ Testing leverages recorded fixtures from real-world pull requests in `gordonpn/s
   - If Codex is configured as a mandatory reviewer, overall verdict is `PENDING`, withholding approval until Codex evaluates `35c286d...`.
 
 ### Fixture Set C: Reviewer Commit Divergence & Minor Findings (SnapTally PR #121)
+
 - **Characteristics**:
   - DeepSeek Review submits review on commit `6ad1952...` with `Verdict: APPROVE WITH MINOR FINDINGS`.
   - Final PR commit is `ce22a74...`.
@@ -48,30 +51,37 @@ Testing leverages recorded fixtures from real-world pull requests in `gordonpn/s
 The test suite must explicitly cover the following edge cases:
 
 ### 3.1. Reviewer Rate Limiting
+
 - **Scenario**: Reviewer check run returns status `completed` with conclusion `neutral` and body containing rate-limit warnings.
 - **Expected Outcome**: Engine categorizes reviewer as `RATE_LIMITED`. Does not treat neutral check as passing. PR approval is withheld.
 
 ### 3.2. Conflicting Reviewer Conclusions
+
 - **Scenario**: Reviewer A (e.g. Sourcery) submits an approval or resolves threads, while Reviewer B (e.g. DeepSeek) submits `REQUEST CHANGES` or `BLOCK`.
 - **Expected Outcome**: Blocking decision rule triggers; verdict is `FAIL`. Approval withheld.
 
 ### 3.3. Outdated Comments on Modified Files
+
 - **Scenario**: A comment was posted on line 45. A new commit is pushed modifying line 45. GitHub marks the thread `isOutdated: true`, but `isResolved` remains `false`.
 - **Expected Outcome**: Outdated status alone is not treated as resolved. The thread remains blocking unless marked resolved or validated by semantic verification.
 
 ### 3.4. Pre-Flight Race Condition (Head SHA Mutated Mid-Run)
+
 - **Scenario**: Evaluation starts for commit `SHA-1`. While the engine is evaluating policies, a developer pushes commit `SHA-2`. Pre-flight check queries `current_head_sha` and discovers mismatch.
 - **Expected Outcome**: Execution aborts immediately with status `STALE`. No success status check or approval is posted for `SHA-1`.
 
 ### 3.5. Late-Arriving Comment During Run
+
 - **Scenario**: Evaluation starts for commit `SHA-1`. A reviewer posts an unresolved blocking comment while policies are being computed.
 - **Expected Outcome**: State fingerprint check detects comment count mismatch. Execution aborts, allowing the newly triggered workflow run to evaluate the updated comment set.
 
 ### 3.6. Partial Publication Failure
+
 - **Scenario**: Status check publication (`POST /statuses/{sha}`) succeeds, but PR review submission fails due to a network glitch.
 - **Expected Outcome**: Process exits with code 1. Branch protection remains enforced because the status check is the authoritative gate. Subsequent workflow retry succeeds in posting the review.
 
 ### 3.7. Fork Security and Privilege Escalation
+
 - **Scenario**: PR submitted from external fork contains modified `.github/merge-verdict.yml` relaxing approval rules.
 - **Expected Outcome**: For fork PRs, configuration is loaded exclusively from the target base branch (e.g. `main`), ignoring changes in the fork.
 
@@ -90,7 +100,7 @@ describe("Offline Replay: SnapTally PR #120", () => {
     const mockClient = new MockGitHubClient(pr120Fixture);
     const result = await evaluatePullRequest(mockClient, {
       requiredReviewers: ["chatgpt-codex-connector", "sourcery-ai"],
-      requiredChecks: ["runner / test", "runner / biome"]
+      requiredChecks: ["runner / test", "runner / biome"],
     });
 
     expect(result.verdict).toBe("PENDING");

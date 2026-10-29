@@ -50,6 +50,7 @@ This document details:
   - A persistent top-level summary comment with machine-readable metadata.
 - **Observed Behavior on Reference PRs**:
   - In PR #120, Codex posted a machine-readable state comment:
+
     ```html
     <!-- codex-pull-request-review-summary -->
     <!-- codex-review-state:v1 {"code_review":{"commit_sha":"a895efe284efc2ebf1ef2894c9a093af929cd98f","has_any_findings":false,"has_unresolved_findings":false,"status":"completed"},"security_review":{"commit_sha":null,"has_any_findings":null,"has_unresolved_findings":null,"status":null}} -->
@@ -122,7 +123,7 @@ export const ReviewerStatusSchema = z.enum([
   "RATE_LIMITED",
   "FAILED",
   "SKIPPED",
-  "EXEMPT"
+  "EXEMPT",
 ]);
 export type ReviewerStatus = z.infer<typeof ReviewerStatusSchema>;
 
@@ -139,7 +140,7 @@ export const NormalizedFindingSchema = z.object({
   isResolved: z.boolean(),
   resolvedBy: z.string().optional(),
   acknowledgedCommitSha: z.string().optional(),
-  rawCommentUrl: z.string().url().optional()
+  rawCommentUrl: z.string().url().optional(),
 });
 export type NormalizedFinding = z.infer<typeof NormalizedFindingSchema>;
 
@@ -152,24 +153,18 @@ export const ReviewerExecutionRecordSchema = z.object({
   verdict: z.enum(["APPROVE", "CHANGES_REQUESTED", "COMMENTED", "NONE"]),
   summary: z.string().optional(),
   findings: z.array(NormalizedFindingSchema),
-  checkRunConclusion: z.string().nullable()
+  checkRunConclusion: z.string().nullable(),
 });
 export type ReviewerExecutionRecord = z.infer<typeof ReviewerExecutionRecordSchema>;
 
 export const CheckRunRecordSchema = z.object({
   name: z.string(),
   status: z.enum(["queued", "in_progress", "completed"]),
-  conclusion: z.enum([
-    "success",
-    "failure",
-    "neutral",
-    "cancelled",
-    "timed_out",
-    "action_required",
-    "skipped"
-  ]).nullable(),
+  conclusion: z
+    .enum(["success", "failure", "neutral", "cancelled", "timed_out", "action_required", "skipped"])
+    .nullable(),
   commitSha: z.string(),
-  detailsUrl: z.string().url().optional()
+  detailsUrl: z.string().url().optional(),
 });
 export type CheckRunRecord = z.infer<typeof CheckRunRecordSchema>;
 
@@ -184,20 +179,20 @@ export const ReviewSnapshotSchema = z.object({
   unresolvedThreadCount: z.number(),
   blockingDecisionCount: z.number(),
   checkRuns: z.record(z.string(), CheckRunRecordSchema),
-  capturedAt: z.string().datetime()
+  capturedAt: z.string().datetime(),
 });
 export type ReviewSnapshot = z.infer<typeof ReviewSnapshotSchema>;
 ```
 
 ## 4. Distinguishing Facts from Assumptions
 
-| Element | Status | Supporting Evidence / Validation Requirement |
-|---|---|---|
-| CodeRabbit neutral check runs on rate limit | Verified Fact | Observed directly in SnapTally PR #119, #120, #121 check run rollups. |
-| Sourcery `Addressed in [sha]` comment modification | Verified Fact | Observed in SnapTally PR #119 review thread `PRRT_kwDOUey2HM6w-DWe`. |
-| Sourcery bot resolving GitHub review threads | Verified Fact | Confirmed in GraphQL query for PR #119 (`resolvedBy.login: "sourcery-ai[bot]"`). |
-| Codex review summary JSON marker (`codex-review-state:v1`) | Verified Fact | Observed in SnapTally PR #120 comment `IC_kwDOUey2HM8AAAABgoJ9MA`. |
-| Codex commit SHA divergence from PR head | Verified Fact | Verified in SnapTally PR #120: Codex reviewed `a895efe`, PR merged at `35c286d`. |
-| DeepSeek Review textual verdict format | Verified Fact | Observed in SnapTally PR #121 review by `github-actions[bot]`. |
-| Reviewer adapters stability across bot updates | Working Assumption | External bots may update Markdown formatting or comment markers without notice. Regex patterns must be resilient and supplemented by GraphQL thread metadata. |
-| Custom reviewer config extensibility | Proposed Design | Adapters are designed as pure TypeScript modules with standardized interfaces to allow community additions without core engine modification. |
+| Element                                                    | Status             | Supporting Evidence / Validation Requirement                                                                                                                  |
+| ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CodeRabbit neutral check runs on rate limit                | Verified Fact      | Observed directly in SnapTally PR #119, #120, #121 check run rollups.                                                                                         |
+| Sourcery `Addressed in [sha]` comment modification         | Verified Fact      | Observed in SnapTally PR #119 review thread `PRRT_kwDOUey2HM6w-DWe`.                                                                                          |
+| Sourcery bot resolving GitHub review threads               | Verified Fact      | Confirmed in GraphQL query for PR #119 (`resolvedBy.login: "sourcery-ai[bot]"`).                                                                              |
+| Codex review summary JSON marker (`codex-review-state:v1`) | Verified Fact      | Observed in SnapTally PR #120 comment `IC_kwDOUey2HM8AAAABgoJ9MA`.                                                                                            |
+| Codex commit SHA divergence from PR head                   | Verified Fact      | Verified in SnapTally PR #120: Codex reviewed `a895efe`, PR merged at `35c286d`.                                                                              |
+| DeepSeek Review textual verdict format                     | Verified Fact      | Observed in SnapTally PR #121 review by `github-actions[bot]`.                                                                                                |
+| Reviewer adapters stability across bot updates             | Working Assumption | External bots may update Markdown formatting or comment markers without notice. Regex patterns must be resilient and supplemented by GraphQL thread metadata. |
+| Custom reviewer config extensibility                       | Proposed Design    | Adapters are designed as pure TypeScript modules with standardized interfaces to allow community additions without core engine modification.                  |

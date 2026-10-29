@@ -10,15 +10,15 @@ However, GitHub Actions and GitHub Webhooks do not have identical event coverage
 
 The following events are directly supported by GitHub Actions workflows and will trigger the Merge Verdict verification workflow:
 
-| Lifecycle Event | Workflow Trigger Configuration | Trigger Payload Details |
-|---|---|---|
-| PR opened, updated, reopened | `pull_request: [opened, synchronize, reopened, ready_for_review]` | Provides target `pull_request.head.sha`. |
-| PR review submitted, edited, dismissed | `pull_request_review: [submitted, edited, dismissed]` | Contains reviewer identity, state (`APPROVED`, `CHANGES_REQUESTED`), and commit ID. |
-| Inline review comment created, edited, deleted | `pull_request_review_comment: [created, edited, deleted]` | Contains comment body and diff position. |
-| PR conversation comment created, edited | `issue_comment: [created, edited]` | Captures bot summary comments and developer commands. |
-| External CI check run completed | `check_run: [completed]` | Fires when third-party tools (e.g. CodeRabbit, CodeQL) complete a check run. |
-| CI workflow completed | `workflow_run: [completed]` | Fires when a specific parent workflow (e.g. `ci.yml`) finishes. |
-| Manual or dispatch trigger | `workflow_dispatch`, `repository_dispatch` | Enables manual re-verification or bridge-initiated verification. |
+| Lifecycle Event                                | Workflow Trigger Configuration                                    | Trigger Payload Details                                                             |
+| ---------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| PR opened, updated, reopened                   | `pull_request: [opened, synchronize, reopened, ready_for_review]` | Provides target `pull_request.head.sha`.                                            |
+| PR review submitted, edited, dismissed         | `pull_request_review: [submitted, edited, dismissed]`             | Contains reviewer identity, state (`APPROVED`, `CHANGES_REQUESTED`), and commit ID. |
+| Inline review comment created, edited, deleted | `pull_request_review_comment: [created, edited, deleted]`         | Contains comment body and diff position.                                            |
+| PR conversation comment created, edited        | `issue_comment: [created, edited]`                                | Captures bot summary comments and developer commands.                               |
+| External CI check run completed                | `check_run: [completed]`                                          | Fires when third-party tools (e.g. CodeRabbit, CodeQL) complete a check run.        |
+| CI workflow completed                          | `workflow_run: [completed]`                                       | Fires when a specific parent workflow (e.g. `ci.yml`) finishes.                     |
+| Manual or dispatch trigger                     | `workflow_dispatch`, `repository_dispatch`                        | Enables manual re-verification or bridge-initiated verification.                    |
 
 ### 1.2. The Thread-Resolution Gap: `pull_request_review_thread`
 
@@ -64,6 +64,7 @@ Because Merge Verdict publishes status checks, check runs, and PR review submiss
 
 **Mandatory Guard Rules**:
 1. **Actor Filtering**: Workflows must ignore events authored by the bot identity:
+
    ```yaml
    if: |
      github.actor != 'merge-verdict[bot]' &&

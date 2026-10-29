@@ -10,20 +10,22 @@ Every milestone defines concrete dependencies, individual tasks, acceptance crit
 
 ## 2. Milestone Overview
 
-| Milestone | Name | Core Deliverable | Infrastructure Dependency |
-|---|---|---|---|
-| Milestone 1 | Deterministic Engine | Pure TypeScript policy engine, normalization adapters, and unit test suite | None (Local execution) |
-| Milestone 2 | GitHub Actions Integration | Reusable Action publishing `merge-verdict` commit status and submitting PR approval | GitHub Actions (`GITHUB_TOKEN`) |
-| Milestone 3 | GitHub App Integration | Dedicated bot identity, installation token authentication, and Checks API rich reports | GitHub App registration |
-| Milestone 4 | Complete Event Coverage | Edge webhook bridge forwarding `pull_request_review_thread` events | Optional Cloudflare Worker |
-| Milestone 5 | Optional Semantic Verification | OpenAI-compatible LLM escalation for ambiguous unresolved threads | OpenAI / DeepSeek API key |
+| Milestone   | Name                           | Core Deliverable                                                                       | Infrastructure Dependency       |
+| ----------- | ------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------- |
+| Milestone 1 | Deterministic Engine           | Pure TypeScript policy engine, normalization adapters, and unit test suite             | None (Local execution)          |
+| Milestone 2 | GitHub Actions Integration     | Reusable Action publishing `merge-verdict` commit status and submitting PR approval    | GitHub Actions (`GITHUB_TOKEN`) |
+| Milestone 3 | GitHub App Integration         | Dedicated bot identity, installation token authentication, and Checks API rich reports | GitHub App registration         |
+| Milestone 4 | Complete Event Coverage        | Edge webhook bridge forwarding `pull_request_review_thread` events                     | Optional Cloudflare Worker      |
+| Milestone 5 | Optional Semantic Verification | OpenAI-compatible LLM escalation for ambiguous unresolved threads                      | OpenAI / DeepSeek API key       |
 
 ## 3. Milestone 1: Deterministic Engine
 
 ### Objective
+
 Implement the domain models, GitHub API data collection clients, reviewer normalizers, and deterministic policy engine as a pure, standalone TypeScript library.
 
 ### Dependencies
+
 - Node.js 22+
 - pnpm 10+
 - Vitest
@@ -31,6 +33,7 @@ Implement the domain models, GitHub API data collection clients, reviewer normal
 - Octokit (`@octokit/rest`, `@octokit/graphql`)
 
 ### Tasks
+
 1. **Scaffold Project**:
    - Initialize package with strict TypeScript settings (`tsconfig.json`), Biome linter, and Vitest test runner.
    - Configure project task runner (`Justfile`) with standard recipes (`test`, `lint`, `typecheck`, `build`).
@@ -51,11 +54,13 @@ Implement the domain models, GitHub API data collection clients, reviewer normal
    - Build fixture-driven unit tests in `tests/normalizers/` and `tests/policy/` using recorded payloads from SnapTally PRs #119, #120, and #121.
 
 ### Acceptance Criteria
+
 - 100% of domain schemas validate valid payloads and reject malformed data.
 - Normalizers correctly identify rate-limited CodeRabbit runs, stale Codex review commits, and Sourcery thread resolutions across SnapTally test fixtures.
 - Policy evaluator produces deterministic verdicts with zero network calls in unit tests.
 
 ### Verification Commands
+
 ```bash
 just typecheck
 just lint
@@ -65,14 +70,17 @@ just test
 ## 4. Milestone 2: GitHub Actions Integration
 
 ### Objective
+
 Package the engine into a reusable GitHub Action that executes in workflow runs, publishes the `merge-verdict` status check via the Commit Status API, and submits genuine PR approval reviews.
 
 ### Dependencies
+
 - Milestone 1 completed
 - `@actions/core`, `@actions/github`
 - Build bundler (e.g. `ncc` or `esbuild`) to produce a standalone distribution bundle (`dist/index.js`)
 
 ### Tasks
+
 1. **Implement Action Entry Point**:
    - Create `src/action/index.ts` to parse GitHub Actions workflow environment variables (`GITHUB_TOKEN`, `GITHUB_EVENT_PATH`).
 2. **Define Action Metadata**:
@@ -87,11 +95,13 @@ Package the engine into a reusable GitHub Action that executes in workflow runs,
    - Add `.github/workflows/merge-verdict.yml` demonstrating multi-event triggers with PR concurrency grouping.
 
 ### Acceptance Criteria
+
 - Workflow executes successfully on `pull_request` and `pull_request_review` events.
 - On a passing PR, the action posts a green `merge-verdict` status check on the current head commit and submits an `APPROVE` review under `github-actions[bot]`.
 - Pushing a new commit immediately reverts the check to `pending` until re-evaluated.
 
 ### Verification Commands
+
 ```bash
 just build
 # Execute automated integration test against mock GitHub environment
@@ -101,14 +111,17 @@ pnpm vitest run tests/action/
 ## 5. Milestone 3: GitHub App Integration
 
 ### Objective
+
 Enable Tier 2 authentication via a dedicated GitHub App identity (`merge-verdict[bot]`), supporting rich Markdown reports via the native Checks API and approval reviews without broad repository-level workflow permission overrides.
 
 ### Dependencies
+
 - Milestone 2 completed
 - Registered GitHub App with App ID and private key
 - `actions/create-github-app-token` or internal JWT token generator
 
 ### Tasks
+
 1. **Implement GitHub App Token Minting**:
    - Support reading GitHub App credentials (`app-id`, `private-key`) to generate installation access tokens at runtime.
 2. **Implement Checks API Publisher**:
@@ -119,6 +132,7 @@ Enable Tier 2 authentication via a dedicated GitHub App identity (`merge-verdict
    - Execute test cases verifying that the GitHub App can approve PRs authored by different users and fails cleanly when attempted on self-authored PRs.
 
 ### Acceptance Criteria
+
 - Merge Verdict runs with a dedicated bot avatar and name (`merge-verdict[bot]`).
 - Check run output includes structured Markdown summaries directly inside the GitHub PR Checks tab.
 - Operates in repositories where "Allow GitHub Actions to create and approve pull requests" is disabled.
@@ -126,14 +140,17 @@ Enable Tier 2 authentication via a dedicated GitHub App identity (`merge-verdict
 ## 6. Milestone 4: Complete Event Coverage (Webhook Bridge)
 
 ### Objective
+
 Bridge the GitHub Actions platform limitation regarding thread resolution (`pull_request_review_thread`) by deploying an optional lightweight serverless webhook relay.
 
 ### Dependencies
+
 - Milestone 2 or 3 completed
 - Cloudflare Workers or serverless edge platform
 - GitHub App webhook subscription to `pull_request_review_thread`
 
 ### Tasks
+
 1. **Implement Webhook Bridge Worker**:
    - Create `bridge/worker.ts` with HMAC SHA-256 signature verification for GitHub webhooks.
 2. **Filter and Forward**:
@@ -143,20 +160,24 @@ Bridge the GitHub Actions platform limitation regarding thread resolution (`pull
    - Implement short edge debouncing (e.g. 5-second window) to collapse rapid consecutive thread resolutions into a single dispatch.
 
 ### Acceptance Criteria
+
 - Clicking "Resolve conversation" on a GitHub PR thread without adding a comment triggers a verification workflow run within 10 seconds.
 - Invalid webhook signatures are rejected with HTTP 401.
 
 ## 7. Milestone 5: Optional Semantic Verification
 
 ### Objective
+
 Escalate ambiguous or unacknowledged review findings to an OpenAI-compatible model (such as DeepSeek) for semantic diff evaluation.
 
 ### Dependencies
+
 - Milestone 1 completed
 - OpenAI SDK or lightweight fetch wrapper
 - Valid API key for DeepSeek or OpenAI-compatible provider
 
 ### Tasks
+
 1. **Implement Semantic Adapter**:
    - Create `src/semantic/llm-verifier.ts` accepting finding context, developer comment, and git diff hunk.
 2. **Enforce Delimited Prompting**:
@@ -168,11 +189,13 @@ Escalate ambiguous or unacknowledged review findings to an OpenAI-compatible mod
    - Enforce fail-closed fallback: any timeout, schema violation, or `UNCERTAIN` response preserves the thread as unresolved.
 
 ### Acceptance Criteria
+
 - Semantic verifier correctly distinguishes resolved versus unresolved findings across mock diff fixtures.
 - Prompt injection attempts inside comments fail to alter the JSON verdict.
 - Zero API calls are executed when semantic verification is disabled in configuration.
 
 ### Verification Commands
+
 ```bash
 just test-semantic
 ```
