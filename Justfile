@@ -3,6 +3,22 @@
 default:
     @just --list
 
+# Run unit tests
+test:
+    pnpm test
+
+# Run linter checks
+lint:
+    pnpm run lint
+
+# Automatically format codebase
+format:
+    pnpm run format
+
+# Run TypeScript typechecker
+typecheck:
+    pnpm run typecheck
+
 # Verify markdown files for broken links, em dashes, and emojis
 check-docs:
     #!/usr/bin/env python3
@@ -17,6 +33,8 @@ check-docs:
     errors = False
 
     for path in md_files:
+        if "node_modules" in path:
+            continue
         with open(path) as f:
             text = f.read()
         if "\u2014" in text:
