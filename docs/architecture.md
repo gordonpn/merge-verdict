@@ -125,15 +125,15 @@ The publisher translates the engine verdict into official GitHub artifacts:
 
 Merge Verdict supports two deployment models to accommodate different repository requirements.
 
-| Feature / Dimension | Actions-Only (Tier 1) | Actions + GitHub App Identity (Tier 2) |
-|---|---|---|
-| Infrastructure required | None | GitHub App registration (free, self-hosted) |
-| Authentication credential | Runner `${{ secrets.GITHUB_TOKEN }}` | Dynamic token via `${{ secrets.APP_PRIVATE_KEY }}` |
-| Status Check API | GitHub Commit Status API (`POST /statuses/{sha}`) | GitHub Checks API (`POST /check-runs`) |
-| Check annotations & markdown | Basic status description (up to 140 chars) | Full Markdown body, summary tables, inline annotations |
-| PR Approval Review | Supported if repo allows Actions PR approval | Fully supported under dedicated bot identity |
-| Repo settings requirement | "Allow GitHub Actions to create and approve pull requests" | Standard repository settings; no special workflow overrides |
-| Security boundary | Bounded by workflow token permissions | Bounded by scoped GitHub App installation permissions |
+| Feature / Dimension          | Actions-Only (Tier 1)                                      | Actions + GitHub App Identity (Tier 2)                      |
+| ---------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- |
+| Infrastructure required      | None                                                       | GitHub App registration (free, self-hosted)                 |
+| Authentication credential    | Runner `${{ secrets.GITHUB_TOKEN }}`                       | Dynamic token via `${{ secrets.APP_PRIVATE_KEY }}`          |
+| Status Check API             | GitHub Commit Status API (`POST /statuses/{sha}`)          | GitHub Checks API (`POST /check-runs`)                      |
+| Check annotations & markdown | Basic status description (up to 140 chars)                 | Full Markdown body, summary tables, inline annotations      |
+| PR Approval Review           | Supported if repo allows Actions PR approval               | Fully supported under dedicated bot identity                |
+| Repo settings requirement    | "Allow GitHub Actions to create and approve pull requests" | Standard repository settings; no special workflow overrides |
+| Security boundary            | Bounded by workflow token permissions                      | Bounded by scoped GitHub App installation permissions       |
 
 ### Relationship Between Actions and GitHub App
 
@@ -201,17 +201,19 @@ Summary of rejected approaches:
 The following technical questions require live platform validation during early milestone implementation:
 
 ### 7.1. GitHub App Approval Satisfaction Under Branch Protection
+
 - **Uncertainty**: While a GitHub App installation token with `pull_requests: write` can submit an `APPROVE` review, platform behavior varies based on whether branch protection requires approvals from specific Code Owners or human members, and whether "Dismiss stale approvals" cleanly dismisses App reviews upon new commits.
 - **Recommended Default**: Rely on the required status check (`merge-verdict`) as the authoritative hard merge gate under branch protection, treating the PR approval review as the visible native review endorsement.
 - **Validation Plan**: Execute Milestone 3 live test cases against protected branches with different branch rule permutations.
 
 ### 7.2. Zero-Comment Thread Resolution Latency
+
 - **Uncertainty**: Because GitHub Actions does not trigger on `pull_request_review_thread`, zero-comment thread resolutions do not immediately trigger in-band workflows without the optional edge bridge. How frequently do developers resolve threads without leaving a comment or pushing a commit?
 - **Recommended Default**: Start with in-band triggers in Milestone 2. Provide the Cloudflare Worker webhook relay in Milestone 4 for teams requiring instant zero-comment reaction.
 - **Validation Plan**: Monitor user workflows and measure frequency of orphaned thread resolution events.
 
 ### 7.3. Handling External Reviewer Free-Tier Rate Limits
+
 - **Uncertainty**: Tools like CodeRabbit return `conclusion: "neutral"` when repository hourly review quotas are exceeded. Should Merge Verdict treat this as `PENDING` (waiting for quota reset) or `FAIL`?
 - **Recommended Default**: Treat as `PENDING` with a configurable timeout (default 30 minutes), after which it transitions to `FAIL` unless an explicit reviewer exemption is configured in `.github/merge-verdict.yml`.
 - **Validation Plan**: Test with simulated rate-limited check runs in Milestone 1 and 2 fixtures.
-

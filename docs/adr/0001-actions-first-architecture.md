@@ -57,11 +57,11 @@ Authentication will support a two-tier model:
 ### Disadvantages and Mitigations
 
 - **Actions Queue Latency**: Running in GitHub Actions incurs container startup latency (typically 15 to 45 seconds).
-  - *Mitigation*: Merge Verdict runs lightweight Node.js code with minimal dependencies, completing execution within seconds once the runner is allocated.
+  - _Mitigation_: Merge Verdict runs lightweight Node.js code with minimal dependencies, completing execution within seconds once the runner is allocated.
 - **Missing Webhook Triggers**: Actions cannot trigger natively on `pull_request_review_thread` (thread resolution/unresolution).
-  - *Mitigation*: Native triggers cover the vast majority of review lifecycle events (`pull_request`, `pull_request_review`, `pull_request_review_comment`, `issue_comment`, `workflow_run`, `check_run`). An optional lightweight Cloudflare Worker webhook bridge is specified for environments requiring immediate zero-click thread resolution triggering.
+  - _Mitigation_: Native triggers cover the vast majority of review lifecycle events (`pull_request`, `pull_request_review`, `pull_request_review_comment`, `issue_comment`, `workflow_run`, `check_run`). An optional lightweight Cloudflare Worker webhook bridge is specified for environments requiring immediate zero-click thread resolution triggering.
 - **Workflow Concurrency**: High-frequency review comments can trigger multiple concurrent Action runs.
-  - *Mitigation*: Workflows will utilize GitHub Actions concurrency groups (`cancel-in-progress: true` keyed by PR number) combined with atomic snapshot validation against the PR head SHA and review fingerprint.
+  - _Mitigation_: Workflows will utilize GitHub Actions concurrency groups (`cancel-in-progress: true` keyed by PR number) combined with atomic snapshot validation against the PR head SHA and review fingerprint.
 
 ## Consequences
 

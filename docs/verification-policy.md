@@ -23,51 +23,59 @@ Accordingly, Merge Verdict documentation, commit messages, and status outputs mu
 A pull request is eligible for a passing verdict (`PASS`) and an official `APPROVE` review if and only if all eight of the following conditions are simultaneously met:
 
 ### Condition 1: Required CI Checks Succeeded
+
 Every status check, workflow run, and check run configured in the policy's required checks list (e.g. `ci / test`, `runner / actionlint`, `runner / biome`, `CodeQL`) must report a status of `completed` and a conclusion of `success`.
 - `failure`, `timed_out`, `action_required`: Immediate policy failure (`FAIL`).
 - `queued`, `in_progress`: Immediate pending status (`PENDING`).
 - `neutral`, `skipped`, `cancelled`: Treated as `FAIL` unless explicitly whitelisted in the repository policy.
 
 ### Condition 2: Required Reviewers Completed
+
 Every reviewer configured as mandatory (e.g. `coderabbitai`, `sourcery-ai`, `chatgpt-codex-connector`, `deepseek-review`) must have submitted a completed review evaluation for the current PR snapshot.
 - A missing reviewer run is treated as `PENDING`, not `PASS`. The system never assumes that the absence of comments indicates approval.
 - Rate-limited runs (such as CodeRabbit returning a neutral check with a rate-limit notice) are treated as incomplete/unfulfilled unless an explicit fallback exemption is configured.
 
 ### Condition 3: No Unresolved Blocking Review Threads
+
 Every review comment thread must be in state `isResolved: true`.
 - If any thread remains unresolved (`isResolved: false`), the policy evaluates the findings within that thread.
 - If the thread contains an actionable blocking finding, verification resolves to `FAIL`.
 - If the thread is classified as purely advisory or informational under policy, it may be exempted if advisory exemption is explicitly enabled in `.github/merge-verdict.yml`.
 
 ### Condition 4: No Outstanding Blocking Review Decisions
+
 No required reviewer may have an active review submission with state `CHANGES_REQUESTED`.
 - If a reviewer previously submitted `CHANGES_REQUESTED`, that review must be explicitly superseded by a subsequent `APPROVED` or `COMMENTED` review from that reviewer, or dismissed by an authorized repository administrator.
 
 ### Condition 5: Reviewer Freshness (No Stale Evidence)
+
 Every required reviewer result must evaluate the current PR head commit SHA.
 - If a reviewer posted a review or summary matching commit `SHA-A`, and a subsequent commit `SHA-B` was pushed, that reviewer's state is considered stale.
 - Stale reviewer evaluations must not be used to satisfy reviewer completion requirements.
 
 ### Condition 6: Unchanged PR and Review Snapshot
+
 The PR snapshot must remain strictly identical between the beginning of evaluation and the final publication of results.
 - If the PR head SHA changes or new comments arrive during evaluation, the evaluation is declared `STALE` and aborted without publishing a passing verdict.
 
 ### Condition 7: Error-Free Execution
+
 The verification engine itself must have completed all API queries, normalization routines, and policy checks without unhandled exceptions or network timeouts. Any execution anomaly forces an outcome of `ERROR`.
 
 ### Condition 8: Repository-Specific Policy Constraints
+
 Any custom repository rules configured in `.github/merge-verdict.yml` (such as minimum test coverage thresholds, required ticket references, or mandatory human review tags) must be satisfied.
 
 ## 4. Finding Severity Classification and Handling
 
 Findings extracted from reviewer comments and check runs are classified into four severity tiers:
 
-| Severity Tier | Definition and Examples | Thread Resolution Required | Blocks PR Approval? |
-|---|---|---|---|
-| `BLOCKER` / `P0` | Security vulnerabilities, data corruption, crashes, authentication bypasses, broken contracts. | Yes | Yes (Always blocks) |
-| `HIGH` / `P1` | Functional bugs, logic inversions, broken state machines, transaction/sign invariant violations. | Yes | Yes (Always blocks) |
-| `MEDIUM` / `P2` | Boundary condition edge cases, missing defensive checks, dead branches, minor performance risks. | Yes | Yes (Blocks by default, configurable) |
-| `LOW` / `P3` / `ADVISORY` | Style observations, documentation typos, speculative suggestions, walkthrough guides, bot tips. | No | No (Informational only) |
+| Severity Tier             | Definition and Examples                                                                          | Thread Resolution Required | Blocks PR Approval?                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------- |
+| `BLOCKER` / `P0`          | Security vulnerabilities, data corruption, crashes, authentication bypasses, broken contracts.   | Yes                        | Yes (Always blocks)                   |
+| `HIGH` / `P1`             | Functional bugs, logic inversions, broken state machines, transaction/sign invariant violations. | Yes                        | Yes (Always blocks)                   |
+| `MEDIUM` / `P2`           | Boundary condition edge cases, missing defensive checks, dead branches, minor performance risks. | Yes                        | Yes (Blocks by default, configurable) |
+| `LOW` / `P3` / `ADVISORY` | Style observations, documentation typos, speculative suggestions, walkthrough guides, bot tips.  | No                         | No (Informational only)               |
 
 ## 5. Stale Review Evaluation Rules
 
@@ -100,14 +108,14 @@ When `semantic_verification.enabled: true` is configured:
 
 The following decision matrix defines the final verdict based on system inputs:
 
-| Case | Required CI Checks | Required Reviewers Completed | Unresolved Blocking Threads | Active CHANGES_REQUESTED | Reviewer Results Fresh? | Snapshot Unchanged? | Verdict | Status Check Output | PR Approval Review |
-|---|---|---|---|---|---|---|---|---|---|
-| 1 | All Success | All Complete | None (All Resolved) | None | Yes | Yes | `PASS` | `success` | Submit `APPROVE` |
-| 2 | Queued / Running | Any Incomplete | None | None | Yes | Yes | `PENDING` | `pending` | Withhold |
-| 3 | Any Failed | All Complete | None | None | Yes | Yes | `FAIL` | `failure` | Withhold |
-| 4 | All Success | Any Incomplete / Rate-Limited | None | None | Yes | Yes | `PENDING` | `pending` | Withhold |
-| 5 | All Success | All Complete | >= 1 Unresolved | None | Yes | Yes | `FAIL` | `failure` | Withhold |
-| 6 | All Success | All Complete | None | >= 1 Active | Yes | Yes | `FAIL` | `failure` | Withhold |
-| 7 | All Success | All Complete | None | None | No (Stale SHA) | Yes | `PENDING` | `pending` | Withhold |
-| 8 | All Success | All Complete | None | None | Yes | No (Race) | `STALE` | Abort / Invalidate | Withhold |
-| 9 | API Error / Timeout | N/A | N/A | N/A | N/A | N/A | `ERROR` | `error` | Withhold |
+| Case | Required CI Checks  | Required Reviewers Completed  | Unresolved Blocking Threads | Active CHANGES_REQUESTED | Reviewer Results Fresh? | Snapshot Unchanged? | Verdict   | Status Check Output | PR Approval Review |
+| ---- | ------------------- | ----------------------------- | --------------------------- | ------------------------ | ----------------------- | ------------------- | --------- | ------------------- | ------------------ |
+| 1    | All Success         | All Complete                  | None (All Resolved)         | None                     | Yes                     | Yes                 | `PASS`    | `success`           | Submit `APPROVE`   |
+| 2    | Queued / Running    | Any Incomplete                | None                        | None                     | Yes                     | Yes                 | `PENDING` | `pending`           | Withhold           |
+| 3    | Any Failed          | All Complete                  | None                        | None                     | Yes                     | Yes                 | `FAIL`    | `failure`           | Withhold           |
+| 4    | All Success         | Any Incomplete / Rate-Limited | None                        | None                     | Yes                     | Yes                 | `PENDING` | `pending`           | Withhold           |
+| 5    | All Success         | All Complete                  | >= 1 Unresolved             | None                     | Yes                     | Yes                 | `FAIL`    | `failure`           | Withhold           |
+| 6    | All Success         | All Complete                  | None                        | >= 1 Active              | Yes                     | Yes                 | `FAIL`    | `failure`           | Withhold           |
+| 7    | All Success         | All Complete                  | None                        | None                     | No (Stale SHA)          | Yes                 | `PENDING` | `pending`           | Withhold           |
+| 8    | All Success         | All Complete                  | None                        | None                     | Yes                     | No (Race)           | `STALE`   | Abort / Invalidate  | Withhold           |
+| 9    | API Error / Timeout | N/A                           | N/A                         | N/A                      | N/A                     | N/A                 | `ERROR`   | `error`             | Withhold           |

@@ -18,6 +18,7 @@ The developer remains responsible for executing the merge. Automatic merging is 
 ## What Merge Verdict Does and Does Not Do
 
 ### What It Does
+
 - Evaluates PR review feedback against a configurable, deterministic verification policy.
 - Reconciles heterogeneous review outputs from multiple tools into a unified data model.
 - Verifies that all required CI tests, security analyzers, and linters completed with success.
@@ -28,6 +29,7 @@ The developer remains responsible for executing the merge. Automatic merging is 
 - Publishes status checks (`merge-verdict`) and submits official PR `APPROVE` reviews.
 
 ### What It Does Not Do
+
 - **Not a Code Reviewer**: It does not replace tools like CodeRabbit, Sourcery, or CodeQL; it verifies that those tools have completed and that their findings are addressed.
 - **No Automatic Merging**: It does not merge pull requests automatically.
 - **No Code Patching**: It does not write application code or automatically apply fixes to the PR branch.

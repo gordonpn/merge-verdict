@@ -43,6 +43,7 @@ Merge Verdict is not a general-purpose AI code reviewer. It does not replace Cod
 ## 3. Functional Requirements
 
 ### FR-01: Automated Re-Evaluation on PR Lifecycle Events
+
 The system must automatically evaluate or re-evaluate a pull request whenever relevant code or review state changes occur:
 - Pull request opened, reopened, marked ready for review, or synchronized (new commit pushed).
 - PR review submitted, edited, or dismissed.
@@ -52,92 +53,113 @@ The system must automatically evaluate or re-evaluate a pull request whenever re
 - Review thread marked resolved or unresolved (via webhook bridge or comment dispatch).
 
 ### FR-02: Multi-Reviewer Feedback Ingestion
+
 The system must query GitHub APIs to ingest feedback from all configured review tools, including external GitHub Apps (such as CodeRabbit), connected bot integrations (such as Sourcery, Codex connector, PR-Agent), workflow-based reviewers (such as DeepSeek Review, reviewdog), and status checks (such as CodeQL, Codecov, CI test suites).
 
 ### FR-03: Review Output Normalization
+
 The system must normalize heterogeneous reviewer data into an internal, strongly typed schema that abstracts reviewer-specific idiosyncrasies into uniform entities: findings, summaries, execution signals, and check results.
 
 ### FR-04: Actionable vs Informational Classification
+
 The system must differentiate actionable findings (such as defect reports, security warnings, missing tests, and contract violations) from purely informational comments (such as walkthrough summaries, high-level reviewer guides, change statistics, tip boxes, and conversational chatter).
 
 ### FR-05: Review Thread Resolution Tracking
+
 The system must inspect every review thread on the pull request via the GitHub GraphQL API, verifying whether the thread is marked resolved (`isResolved: true`), which actor resolved it, and whether any unresolved comments remain.
 
 ### FR-06: Blocking Review Decision Detection
+
 The system must identify any outstanding review decisions with state `CHANGES_REQUESTED`. A PR must not be approved while an active `CHANGES_REQUESTED` review from a required reviewer remains unaddressed and undismissed.
 
 ### FR-07: Required CI and Validation Status Verification
+
 The system must verify that all required CI checks, test suites, linters, and security scanners have completed with a successful conclusion (`conclusion: "success"`) before approving.
 
 ### FR-08: Stale Reviewer Result Detection
+
 The system must verify whether each reviewer's latest analysis corresponds to the current PR head commit SHA. If a reviewer evaluated an older commit and has not re-evaluated the latest commit, the system must flag the reviewer output as stale and enforce policy rules regarding stale evidence.
 
 ### FR-09: Incomplete, Skipped, and Rate-Limited Review Detection
+
 The system must identify reviewer runs that did not perform a substantive review. Specifically, it must detect:
 - Check runs with neutral or skipped conclusions resulting from rate limits (such as CodeRabbit free-tier hourly quotas).
 - Workflow runs that failed or timed out.
 - Reviewers that never ran or posted no completion signal.
-The system must not treat missing, skipped, or neutral results as successful review completion by default.
+  The system must not treat missing, skipped, or neutral results as successful review completion by default.
 
 ### FR-10: Snapshot Freshness and Pre-Publication Verification
+
 Before publishing a status check or submitting an approval review, the system must verify that the PR head SHA and review state have not changed during the execution window. If a race condition is detected (such as a new commit pushed or a new comment posted while the action was evaluating), the current evaluation must be discarded without publishing a success verdict.
 
 ### FR-11: Required Status Check Publication
+
 The system must publish a status check named `merge-verdict` targeting the current PR head commit SHA. This check must support both:
 - GitHub Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) using `GITHUB_TOKEN`.
 - GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) when authenticated as a GitHub App.
-The check must reflect the computed outcome (`pending`, `success`, `failure`, `error`).
+  The check must reflect the computed outcome (`pending`, `success`, `failure`, `error`).
 
 ### FR-12: Official GitHub PR Approval Submission
+
 When all configured verification requirements are satisfied, the system must submit an official GitHub pull request review with event `APPROVE`. The review body must provide a concise, structured evidence summary detailing which checks passed, which reviewers completed, and why all threads are considered reconciled.
 
 ### FR-13: Policy-Driven Approval Withholding and Invalidation
+
 The system must withhold approval whenever verification is incomplete, failing, stale, or ambiguous under configured rules. Furthermore, if a PR was previously approved by Merge Verdict and subsequent activity (such as a new commit or a reopened review thread) invalidates that approval:
 - The `merge-verdict` status check must immediately transition to `pending` or `failure`.
 - The existing approval must be dismissed or superseded according to configuration.
 
 ### FR-14: Loop Prevention and Self-Event Filtering
+
 The system must detect and ignore events generated by its own bot identity or workflow runs (such as its own status check creations, comments, and review submissions) to prevent recursive event loops.
 
 ### FR-15: Reusable Multi-Repository Configuration
+
 The system must load repository-specific policies from a tracked YAML configuration file (defaulting to `.github/merge-verdict.yml`). Sensible, secure defaults must apply when configuration options are omitted.
 
 ### FR-16: Optional Semantic Verification via LLM
+
 The system must support an optional semantic verification module. When enabled, ambiguous or contested findings that cannot be resolved deterministically can be submitted to an OpenAI-compatible endpoint (such as DeepSeek) with strict token budgets, structured JSON schema outputs, and fail-closed defaults.
 
 ## 4. Verification Outcome States
 
 Every evaluation must resolve to exactly one of the following five core outcome states:
 
-| Internal State | Description | GitHub Commit Status | GitHub Check Run Conclusion | PR Approval Review Eligible |
-|---|---|---|---|---|
-| `PENDING` | Required checks or reviewers have not yet completed; evaluation is waiting for completion signals. | `pending` | `in_progress` (or omitted) | No |
-| `PASS` | All configured verification conditions and policy rules are strictly satisfied for the current PR snapshot. | `success` | `success` | Yes (Submit `APPROVE`) |
-| `FAIL` | One or more mandatory verification criteria are violated (e.g. failing CI, unresolved blocking thread, unaddressed `CHANGES_REQUESTED`). | `failure` | `failure` | No |
-| `ERROR` | Verification could not complete reliably due to infrastructure failures, API rate limits, or network errors. | `error` | `action_required` / `timed_out` | No |
-| `STALE` | The evaluation snapshot has been superseded by a newer commit or newer review activity. | `pending` | `neutral` / `cancelled` | No |
+| Internal State | Description                                                                                                                              | GitHub Commit Status | GitHub Check Run Conclusion     | PR Approval Review Eligible |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------- | --------------------------- |
+| `PENDING`      | Required checks or reviewers have not yet completed; evaluation is waiting for completion signals.                                       | `pending`            | `in_progress` (or omitted)      | No                          |
+| `PASS`         | All configured verification conditions and policy rules are strictly satisfied for the current PR snapshot.                              | `success`            | `success`                       | Yes (Submit `APPROVE`)      |
+| `FAIL`         | One or more mandatory verification criteria are violated (e.g. failing CI, unresolved blocking thread, unaddressed `CHANGES_REQUESTED`). | `failure`            | `failure`                       | No                          |
+| `ERROR`        | Verification could not complete reliably due to infrastructure failures, API rate limits, or network errors.                             | `error`              | `action_required` / `timed_out` | No                          |
+| `STALE`        | The evaluation snapshot has been superseded by a newer commit or newer review activity.                                                  | `pending`            | `neutral` / `cancelled`         | No                          |
 
 ## 5. Non-Functional Requirements
 
 ### NFR-01: Execution Latency
+
 - Deterministic policy evaluation must execute in under 15 seconds once runner resources are allocated.
 - GitHub API queries must be batched using GraphQL where possible to minimize round-trip network latency.
 
 ### NFR-02: Deterministic Reproducibility
+
 - Given identical inputs (GitHub API PR payload, review threads, check runs, and repository configuration), the deterministic policy engine must produce identical verdicts.
 - All policy decisions must be traceable to explicit, verifiable rules.
 
 ### NFR-03: Zero Inference Cost by Default
+
 - The system must function completely without calling external AI inference APIs unless semantic verification is explicitly enabled in configuration.
 
 ### NFR-04: Fail-Closed Resilience
+
 - Any unexpected API failure, malformed payload, missing check, or unrecognized reviewer format must fail closed, resolving to `PENDING` or `ERROR` rather than defaulting to `PASS`.
 
 ### NFR-05: Least-Privilege Security Boundaries
+
 - The engine must strictly enforce least-privilege token permissions (`pull-requests: write`, `statuses: write`, `checks: write`, `contents: read`).
 - Workflows handling untrusted code from fork pull requests must execute inspection logic in unprivileged contexts. Privileged approval operations must never execute untrusted user code.
 
 ### NFR-06: Zero Data Retention and Privacy
+
 - The core Actions-first architecture requires no external operational database. PR metadata and reviewer comments are processed in ephemeral runner memory and discarded upon workflow completion.
 
 ## 6. Success Criteria and Acceptance

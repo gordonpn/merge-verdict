@@ -31,10 +31,10 @@ When running under default Actions credentials, workflow jobs must declare expli
 
 ```yaml
 permissions:
-  contents: read          # Read configuration and metadata
-  pull-requests: write    # Submit PR reviews and comment dismissals
-  statuses: write         # Publish commit status checks (merge-verdict)
-  issues: read            # Read issue comments and conversation threads
+  contents: read # Read configuration and metadata
+  pull-requests: write # Submit PR reviews and comment dismissals
+  statuses: write # Publish commit status checks (merge-verdict)
+  issues: read # Read issue comments and conversation threads
 ```
 
 Workflows must never request wildcard `write-all` permissions.
@@ -43,12 +43,12 @@ Workflows must never request wildcard `write-all` permissions.
 
 When using a dedicated GitHub App to generate installation access tokens, the App registration must be restricted to:
 
-| Permission | Access Level | Justification |
-|---|---|---|
-| `Checks` | Read & Write | Required to create and update rich check runs via the Checks API (`POST /repos/{owner}/{repo}/check-runs`). |
-| `Pull Requests` | Read & Write | Required to query review threads, submit `APPROVE` reviews, and dismiss stale reviews. |
-| `Commit Statuses` | Read & Write | Required if fallback to the Commit Status API is utilized. |
-| `Metadata` | Read-Only | Default requirement for all GitHub Apps to query repository structure. |
+| Permission        | Access Level | Justification                                                                                               |
+| ----------------- | ------------ | ----------------------------------------------------------------------------------------------------------- |
+| `Checks`          | Read & Write | Required to create and update rich check runs via the Checks API (`POST /repos/{owner}/{repo}/check-runs`). |
+| `Pull Requests`   | Read & Write | Required to query review threads, submit `APPROVE` reviews, and dismiss stale reviews.                      |
+| `Commit Statuses` | Read & Write | Required if fallback to the Commit Status API is utilized.                                                  |
+| `Metadata`        | Read-Only    | Default requirement for all GitHub Apps to query repository structure.                                      |
 
 Permissions such as `Administration`, `Workflows`, `Secrets`, or `Repository contents (write)` are strictly prohibited.
 
@@ -92,6 +92,7 @@ When the optional semantic verification module is active, untrusted review comme
 ### 5.2. Countermeasures
 
 1. **Strict Data Delimitation**: Untrusted user inputs (finding descriptions, developer comments, diff hunks) are wrapped inside explicit, non-executable XML delimiters:
+
    ```text
    <untrusted_finding_context>
    ...
