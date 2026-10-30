@@ -96,23 +96,24 @@ safe-outputs:
                 || payload.check_run?.pull_requests?.[0]?.number || Number(payload.inputs?.pr_number || 0);
               if (!eventNumber || number !== Number(eventNumber)) throw new Error('Missing or mismatched triggering PR; cross-PR output refused');
               const required = (process.env.REQUIRED_CHECKS || '').split(',').map(x => x.trim()).filter(Boolean);
-              if (!required.length) throw new Error('Configure MERGE_VERDICT_REQUIRED_CHECKS explicitly');
-              if (!/^[a-f0-9]{40}$/i.test(d.head_sha)) throw new Error('Invalid SHA');
               const getPR = async () => (await github.rest.pulls.get({ owner, repo, pull_number: number })).data;
               const original = await getPR();
-              if (original.state !== 'open' || original.draft || original.head.repo?.full_name !== owner + '/' + repo) {
-                throw new Error('Only open, non-draft, same-repository PRs supported by this prototype');
-              }
               const sha = original.head.sha;
-              if (sha !== d.head_sha || original.updated_at !== d.pr_updated_at) {
-                throw new Error('Stale agent snapshot; refusing approval');
-              }
               const status = async (state, description) => github.rest.repos.createCommitStatus({
                 owner, repo, sha, state, context: 'merge-verdict', description: description.slice(0, 140)
               });
+              // Invalidate any prior successful status on this SHA before checking agent freshness.
               await status('pending', 'Validating exact SHA and current review/CI state');
               let failure = '';
               try {
+                if (!required.length) throw new Error('Configure MERGE_VERDICT_REQUIRED_CHECKS explicitly');
+                if (!/^[a-f0-9]{40}$/i.test(d.head_sha)) throw new Error('Invalid SHA');
+                if (original.state !== 'open' || original.draft || original.head.repo?.full_name !== owner + '/' + repo) {
+                  throw new Error('Only open, non-draft, same-repository PRs supported');
+                }
+                if (sha !== d.head_sha || original.updated_at !== d.pr_updated_at) {
+                  throw new Error('Stale agent snapshot; refusing approval');
+                }
                 const evidence = JSON.parse(d.evidence_json);
                 if (!Array.isArray(evidence) || evidence.length < 1 || evidence.length > 150) {
                   throw new Error('At least one structured code citation is required');
@@ -160,7 +161,9 @@ safe-outputs:
                 const latest = new Map();
                 for (const review of reviews) {
                   if (!review.user?.login || review.state === 'PENDING') continue;
-                  if (review.state === 'DISMISSED') { latest.delete(review.user.login); continue; }
+                  // COMMENTED reviews do not supersede an active CHANGES_REQUESTED review.
+                  if (review.state === 'DISMISSED' || review.state === 'COMMENTED') continue;
+                  if (review.state !== 'APPROVED' && review.state !== 'CHANGES_REQUESTED') continue;
                   const old = latest.get(review.user.login);
                   if (!old || (review.submitted_at || '') >= (old.submitted_at || '')) {
                     latest.set(review.user.login, review);
