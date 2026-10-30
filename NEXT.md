@@ -4,6 +4,12 @@ Last Refined: 2026-10-29T12:11:00-04:00
 Repository: gordonpn/merge-verdict
 GitHub Backlog: https://github.com/gordonpn/merge-verdict/issues
 
+## EXPERIMENT FIRST: gh-aw vertical slice
+
+Before starting the bespoke TypeScript scaffold in issue #7, compile and test the [GitHub Agentic Workflows prototype](docs/prototypes/gh-aw.md). The prototype branch contains a Markdown workflow source that is deliberately **not installed, compiled, or activated**. Test against a disposable PR with actual review findings, required CI, and deliberate SHA drift. Keep the required `merge-verdict` check disabled on protected production branches until automated invalidation, reviewer-completion enforcement, and stale-review races are addressed.
+
+**Decision checkpoint:** Keep `gh-aw` if its existing sandbox and safe-output model achieve acceptable fidelity, latency, and cost; implement custom orchestration only for demonstrated gaps. Existing backlog remains an alternative path, not an immediate commitment.
+
 ## NOW: Recommended Next Task
 
 ### [#7: feat(core): scaffold TypeScript project structure and task runner tooling](https://github.com/gordonpn/merge-verdict/issues/7)
