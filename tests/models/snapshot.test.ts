@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import {
   computeStateFingerprint,
   createReviewSnapshot,
@@ -49,6 +50,24 @@ describe("ReviewSnapshotSchema", () => {
     expect(ReviewSnapshotSchema.parse(snapshot)).toEqual(snapshot);
   });
 
+  it("uses explicitly provided stateFingerprint when specified", () => {
+    const customFingerprint = "e".repeat(64);
+    const snapshot = createReviewSnapshot({
+      ...validSnapshotInput,
+      stateFingerprint: customFingerprint,
+    });
+    expect(snapshot.stateFingerprint).toBe(customFingerprint);
+  });
+
+  it("uses explicitly provided capturedAt timestamp when specified", () => {
+    const customTime = "2026-01-01T00:00:00.000Z";
+    const snapshot = createReviewSnapshot({
+      ...validSnapshotInput,
+      capturedAt: customTime,
+    });
+    expect(snapshot.capturedAt).toBe(customTime);
+  });
+
   it("rejects non-positive pull request numbers", () => {
     expect(() => createReviewSnapshot({ ...validSnapshotInput, pullRequestNumber: 0 })).toThrow();
     expect(() => createReviewSnapshot({ ...validSnapshotInput, pullRequestNumber: -1 })).toThrow();
@@ -78,6 +97,28 @@ describe("ReviewSnapshotSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("throws ZodError on creation when reviewer record lacks findings", () => {
+    const malformedInput = {
+      ...validSnapshotInput,
+      reviewers: {
+        coderabbitai: {
+          reviewerId: "coderabbitai",
+          reviewerName: "CodeRabbit",
+          status: "COMPLETED" as const,
+          evaluatedCommitSha: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+          isFresh: true,
+          verdict: "APPROVE" as const,
+          checkRunConclusion: "success",
+        },
+      },
+    };
+
+    expect(() =>
+      // @ts-expect-error Testing runtime schema validation of malformed input
+      createReviewSnapshot(malformedInput),
+    ).toThrowError(ZodError);
+  });
 });
 
 describe("computeStateFingerprint", () => {
@@ -89,6 +130,8 @@ describe("computeStateFingerprint", () => {
     severity: "MEDIUM" as const,
     isBlocking: true,
     isResolved: false,
+    resolvedBy: "user-1",
+    acknowledgedCommitSha: "1111111111111111111111111111111111111111",
   };
 
   const findingTwo = {
@@ -99,6 +142,8 @@ describe("computeStateFingerprint", () => {
     severity: "LOW" as const,
     isBlocking: false,
     isResolved: true,
+    resolvedBy: "sourcery-ai[bot]",
+    acknowledgedCommitSha: "2222222222222222222222222222222222222222",
   };
 
   const baseInput = {
@@ -192,6 +237,176 @@ describe("computeStateFingerprint", () => {
     expect(hash1).toBe(hash2);
   });
 
+  it("deterministically breaks ties for findings with duplicate IDs", () => {
+    const dupFindingA = {
+      id: "dup-id",
+      reviewerId: "coderabbitai",
+      title: "Alpha finding",
+      description: "First finding with dup ID",
+      filePath: "src/a.ts",
+      lineNumber: 10,
+      severity: "HIGH" as const,
+      isBlocking: true,
+      isResolved: false,
+    };
+    const dupFindingB = {
+      id: "dup-id",
+      reviewerId: "coderabbitai",
+      title: "Beta finding",
+      description: "Second finding with dup ID",
+      filePath: "src/b.ts",
+      lineNumber: 20,
+      severity: "LOW" as const,
+      isBlocking: false,
+      isResolved: true,
+    };
+
+    const orderOne = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [dupFindingA, dupFindingB],
+        },
+      },
+    };
+
+    const orderTwo = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [dupFindingB, dupFindingA],
+        },
+      },
+    };
+
+    expect(computeStateFingerprint(orderOne)).toBe(computeStateFingerprint(orderTwo));
+  });
+
+  it("deterministically breaks ties when duplicate IDs share file path", () => {
+    const findingLine10 = {
+      id: "dup-id",
+      reviewerId: "coderabbitai",
+      title: "Shared title",
+      description: "Description",
+      filePath: "src/shared.ts",
+      lineNumber: 10,
+      severity: "HIGH" as const,
+      isBlocking: true,
+      isResolved: false,
+    };
+    const findingLine20 = {
+      ...findingLine10,
+      lineNumber: 20,
+    };
+
+    const orderOne = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [findingLine10, findingLine20],
+        },
+      },
+    };
+    const orderTwo = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [findingLine20, findingLine10],
+        },
+      },
+    };
+
+    expect(computeStateFingerprint(orderOne)).toBe(computeStateFingerprint(orderTwo));
+  });
+
+  it("deterministically breaks ties when duplicate IDs share file path and line number", () => {
+    const findingAlpha = {
+      id: "dup-id",
+      reviewerId: "coderabbitai",
+      title: "Alpha title",
+      description: "Description",
+      filePath: "src/shared.ts",
+      lineNumber: 10,
+      severity: "HIGH" as const,
+      isBlocking: true,
+      isResolved: false,
+    };
+    const findingBeta = {
+      ...findingAlpha,
+      title: "Beta title",
+    };
+
+    const orderOne = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [findingAlpha, findingBeta],
+        },
+      },
+    };
+    const orderTwo = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [findingBeta, findingAlpha],
+        },
+      },
+    };
+
+    expect(computeStateFingerprint(orderOne)).toBe(computeStateFingerprint(orderTwo));
+  });
+
+  it("deterministically breaks ties when duplicate IDs have undefined file path or line number", () => {
+    const findingNoPathA = {
+      id: "dup-id",
+      reviewerId: "coderabbitai",
+      title: "Alpha no path",
+      description: "Description",
+      severity: "HIGH" as const,
+      isBlocking: true,
+      isResolved: false,
+    };
+    const findingNoPathB = {
+      ...findingNoPathA,
+      title: "Beta no path",
+    };
+
+    const orderOne = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [findingNoPathA, findingNoPathB],
+        },
+      },
+    };
+    const orderTwo = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [findingNoPathB, findingNoPathA],
+        },
+      },
+    };
+
+    expect(computeStateFingerprint(orderOne)).toBe(computeStateFingerprint(orderTwo));
+  });
+
   it("changes hash when headSha changes", () => {
     const modified = {
       ...baseInput,
@@ -212,6 +427,86 @@ describe("computeStateFingerprint", () => {
       },
     };
     expect(computeStateFingerprint(modified)).not.toBe(computeStateFingerprint(baseInput));
+  });
+
+  it("changes hash when finding acknowledgedCommitSha changes", () => {
+    const modified = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [
+            {
+              ...findingOne,
+              acknowledgedCommitSha: "3333333333333333333333333333333333333333",
+            },
+            findingTwo,
+          ],
+        },
+      },
+    };
+    expect(computeStateFingerprint(modified)).not.toBe(computeStateFingerprint(baseInput));
+  });
+
+  it("changes hash when finding resolvedBy changes", () => {
+    const modified = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [
+            {
+              ...findingOne,
+              resolvedBy: "admin-reviewer",
+            },
+            findingTwo,
+          ],
+        },
+      },
+    };
+    expect(computeStateFingerprint(modified)).not.toBe(computeStateFingerprint(baseInput));
+  });
+
+  it("changes hash when finding title or description changes", () => {
+    const modifiedTitle = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [
+            {
+              ...findingOne,
+              title: "Modified title",
+            },
+            findingTwo,
+          ],
+        },
+      },
+    };
+    expect(computeStateFingerprint(modifiedTitle)).not.toBe(computeStateFingerprint(baseInput));
+
+    const modifiedDescription = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          findings: [
+            {
+              ...findingOne,
+              description: "Modified description content",
+            },
+            findingTwo,
+          ],
+        },
+      },
+    };
+    expect(computeStateFingerprint(modifiedDescription)).not.toBe(
+      computeStateFingerprint(baseInput),
+    );
   });
 
   it("changes hash when check run conclusion changes", () => {

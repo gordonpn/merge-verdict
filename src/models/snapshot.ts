@@ -36,6 +36,10 @@ export interface StateFingerprintInput {
   readonly checkRuns: Readonly<Record<string, z.infer<typeof CheckRunRecordSchema>>>;
 }
 
+function compareCodeUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /**
  * Computes a deterministic SHA-256 fingerprint from snapshot state components.
  *
@@ -44,17 +48,35 @@ export interface StateFingerprintInput {
  */
 export function computeStateFingerprint(input: StateFingerprintInput): string {
   const sortedReviewerEntries = Object.entries(input.reviewers).sort(([keyA], [keyB]) =>
-    keyA.localeCompare(keyB),
+    compareCodeUnits(keyA, keyB),
   );
 
   const normalizedReviewers = sortedReviewerEntries.map(([, rev]) => {
     const sortedFindings = [...rev.findings]
-      .sort((a, b) => a.id.localeCompare(b.id))
+      .sort((a, b) => {
+        const idComparison = compareCodeUnits(a.id, b.id);
+        if (idComparison !== 0) {
+          return idComparison;
+        }
+        const pathComparison = compareCodeUnits(a.filePath ?? "", b.filePath ?? "");
+        if (pathComparison !== 0) {
+          return pathComparison;
+        }
+        const lineComparison = (a.lineNumber ?? 0) - (b.lineNumber ?? 0);
+        if (lineComparison !== 0) {
+          return lineComparison;
+        }
+        return compareCodeUnits(a.title, b.title);
+      })
       .map((finding) => ({
         id: finding.id,
+        title: finding.title,
+        description: finding.description,
         severity: finding.severity,
         isBlocking: finding.isBlocking,
         isResolved: finding.isResolved,
+        resolvedBy: finding.resolvedBy ?? null,
+        acknowledgedCommitSha: finding.acknowledgedCommitSha ?? null,
         threadId: finding.threadId ?? null,
         filePath: finding.filePath ?? null,
         lineNumber: finding.lineNumber ?? null,
@@ -72,7 +94,7 @@ export function computeStateFingerprint(input: StateFingerprintInput): string {
   });
 
   const sortedCheckRunEntries = Object.entries(input.checkRuns).sort(([keyA], [keyB]) =>
-    keyA.localeCompare(keyB),
+    compareCodeUnits(keyA, keyB),
   );
 
   const normalizedCheckRuns = sortedCheckRunEntries.map(([, run]) => ({
@@ -101,6 +123,14 @@ export type CreateReviewSnapshotInput = Omit<ReviewSnapshot, "stateFingerprint" 
   readonly capturedAt?: string;
 };
 
+const CreateReviewSnapshotInputSchema = ReviewSnapshotSchema.omit({
+  stateFingerprint: true,
+  capturedAt: true,
+}).extend({
+  stateFingerprint: z.string().min(1).optional(),
+  capturedAt: z.string().datetime().optional(),
+});
+
 /**
  * Constructs and validates a complete ReviewSnapshot with computed fingerprint.
  *
@@ -109,19 +139,20 @@ export type CreateReviewSnapshotInput = Omit<ReviewSnapshot, "stateFingerprint" 
  * @throws {z.ZodError} If any field violates ReviewSnapshotSchema constraints.
  */
 export function createReviewSnapshot(input: CreateReviewSnapshotInput): ReviewSnapshot {
-  const capturedAt = input.capturedAt ?? new Date().toISOString();
+  const validatedInput = CreateReviewSnapshotInputSchema.parse(input);
+  const capturedAt = validatedInput.capturedAt ?? new Date().toISOString();
   const stateFingerprint =
-    input.stateFingerprint ??
+    validatedInput.stateFingerprint ??
     computeStateFingerprint({
-      headSha: input.headSha,
-      unresolvedThreadCount: input.unresolvedThreadCount,
-      blockingDecisionCount: input.blockingDecisionCount,
-      reviewers: input.reviewers,
-      checkRuns: input.checkRuns,
+      headSha: validatedInput.headSha,
+      unresolvedThreadCount: validatedInput.unresolvedThreadCount,
+      blockingDecisionCount: validatedInput.blockingDecisionCount,
+      reviewers: validatedInput.reviewers,
+      checkRuns: validatedInput.checkRuns,
     });
 
   return ReviewSnapshotSchema.parse({
-    ...input,
+    ...validatedInput,
     capturedAt,
     stateFingerprint,
   });
