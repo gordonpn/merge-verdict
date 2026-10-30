@@ -48,6 +48,10 @@ Merge Verdict adopts an **Actions-first hybrid architecture**:
 
 For full architectural details, see [docs/architecture.md](file:///Users/gordonpn/workspace/merge-verdict/docs/architecture.md).
 
+## Agentic Workflows prototype (experimental)
+
+A source-only [GitHub Agentic Workflows prototype](docs/prototypes/gh-aw.md) is available under `.github/workflows/merge-verdict-prototype.md`. It tests evidence-backed PR reconciliation using a Copilot agent while reserving CI checks, freshness validation, and approval publication for a deterministic, permission-scoped safe-output job. It is **not yet compiled or validated**; approval is off by default. Test this alternative before committing to a bespoke orchestration framework.
+
 ## Project Status
 
 Merge Verdict is currently in the **foundation and architecture phase**. The architectural specifications, integration models, verification policies, and implementation roadmap have been established. Application implementation will proceed incrementally according to the milestone roadmap.
