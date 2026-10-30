@@ -79,6 +79,10 @@ safe-outputs:
           with:
             github-token: ${{ secrets.GITHUB_TOKEN }}
             script: |
+              if (process.env.GH_AW_SAFE_OUTPUTS_STAGED === 'true') {
+                core.info('Safe outputs are staged; no status or PR review will be published.');
+                return;
+              }
               const fs = require('node:fs');
               const data = JSON.parse(fs.readFileSync(process.env.GH_AW_AGENT_OUTPUT, 'utf8'));
               const decisions = (data.items || []).filter(x => x.type === 'publish_verdict');
@@ -90,7 +94,7 @@ safe-outputs:
               const payload = context.payload;
               const eventNumber = payload.pull_request?.number || (payload.issue?.pull_request ? payload.issue.number : undefined)
                 || payload.check_run?.pull_requests?.[0]?.number || Number(payload.inputs?.pr_number || 0);
-              if (eventNumber && number !== Number(eventNumber)) throw new Error('Cross-PR output refused');
+              if (!eventNumber || number !== Number(eventNumber)) throw new Error('Missing or mismatched triggering PR; cross-PR output refused');
               const required = (process.env.REQUIRED_CHECKS || '').split(',').map(x => x.trim()).filter(Boolean);
               if (!required.length) throw new Error('Configure MERGE_VERDICT_REQUIRED_CHECKS explicitly');
               if (!/^[a-f0-9]{40}$/i.test(d.head_sha)) throw new Error('Invalid SHA');
