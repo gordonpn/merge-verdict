@@ -12,9 +12,9 @@ GitHub Backlog: https://github.com/gordonpn/merge-verdict/issues
 - **Estimate:** S
 - **Readiness:** READY
 - **Why this task is next:** Now that the project structure and TypeScript tooling are in place (#7), establishing strongly typed domain models is the foundational dependency required before implementing GitHub data collectors (#9), reviewer normalization adapters (#10), and the deterministic policy evaluator (#11).
-- **First implementation action:** Install `zod` dependency (`pnpm add zod`) and implement schemas in `src/models/` for `Severity`, `NormalizedFinding`, `ReviewerExecutionRecord`, `CheckRunRecord`, and `ReviewSnapshot`.
+- **First implementation action:** Install `zod` dependency (`pnpm add zod`) and implement schemas in `src/models/` for `Severity`, `ReviewerStatus`, `NormalizedFinding`, `ReviewerExecutionRecord`, `CheckRunRecord`, and `ReviewSnapshot`.
 - **Definition of Done:** All Zod domain schemas validate compliant reviewer/PR payloads, reject malformed inputs with typed errors, compute deterministic state fingerprints, and pass 100% of unit tests in `tests/models/`.
-- **Tasks it unblocks:** Unblocks [#9](https://github.com/gordonpn/merge-verdict/issues/9) (Collector), [#10](https://github.com/gordonpn/merge-verdict/issues/10) (Normalizers), and [#11](https://github.com/gordonpn/merge-verdict/issues/11) (Policy evaluator).
+- **Tasks it unblocks:** Unblocks [#9](https://github.com/gordonpn/merge-verdict/issues/9) (Collector) and [#10](https://github.com/gordonpn/merge-verdict/issues/10) (Normalizers); partially unblocks [#11](https://github.com/gordonpn/merge-verdict/issues/11) (which also requires #10).
 
 ## NEXT: Upcoming Work
 
