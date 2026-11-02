@@ -65,3 +65,5 @@ Merge Verdict is currently in the **foundation and architecture phase**. The arc
 - [Implementation Plan](file:///Users/gordonpn/workspace/merge-verdict/docs/implementation-plan.md): Five-milestone roadmap with explicit tasks and acceptance criteria.
 - [Testing Strategy](file:///Users/gordonpn/workspace/merge-verdict/docs/testing.md): Unit tests, reference PR replay fixtures, and simulated edge-case testing.
 - [ADR 0001: Actions-First Architecture](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0001-actions-first-architecture.md): Architectural decision record evaluating standalone service vs Actions-first design.
+- [ADR 0002: Authoritative Status Check vs PR Approval](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0002-authoritative-status-check-vs-pr-approval.md): Architectural decision record establishing required status checks as the authoritative merge gate over formal PR approvals.
+- [Agent Engineering Guidelines](file:///Users/gordonpn/workspace/merge-verdict/AGENTS.md): Repository guidelines, memory authority rules, and project invariants for coding agents.
