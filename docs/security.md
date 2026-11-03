@@ -33,6 +33,7 @@ When running under default Actions credentials, workflow jobs must declare expli
 ```yaml
 permissions:
   contents: read # Read configuration and metadata
+  checks: read # Read check runs for verification
   pull-requests: write # Submit PR reviews and comment dismissals
   statuses: write # Publish commit status checks (merge-verdict)
   issues: read # Read issue comments and conversation threads
