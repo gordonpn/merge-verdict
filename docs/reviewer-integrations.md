@@ -106,6 +106,23 @@ This document details:
 - **Merge Verdict Policy Rule**:
   - Required checks are evaluated strictly against their check run conclusions.
 
+### 2.8. GitHub Copilot Code Review
+
+- **Identity**: Native GitHub reviewer integration (`copilot-pull-request-reviewer[bot]`).
+- **Artifacts Emitted**:
+  - Pull request review submissions with state `COMMENTED` or `APPROVE` (when Copilot approvals are enabled in repository settings), including an explicit approval readiness assessment.
+  - Inline review comment threads on modified lines.
+- **Platform Capabilities (October 2026 GA)**:
+  - **Programmatic Review Requests**: Copilot code reviews can be requested via GitHub REST and GraphQL APIs with per-request effort selection (`Lite`, `Balanced`, `Max`).
+  - **Qualifying Formal Approvals**: When enabled by repository administrators, Copilot `APPROVE` reviews can count toward required pull request review thresholds (optionally restricted to up to 15 allowed file-path patterns) and are automatically dismissed when new commits are pushed.
+  - **Cost and Credit Tiers**: GitHub estimates rough per-review credit costs at approximately $0.25 (`Lite`), $1.50 (`Balanced`), and $10.00 (`Max`). `Max` runs multiple reviewing agents across models and reconciles findings via an aggregation agent, so it should be reserved for high-risk path tiers rather than run on every push.
+- **Dual Role in Merge Verdict**:
+  1. **Normalized Reviewer**: Merge Verdict ingests `copilot-pull-request-reviewer[bot]` reviews, checks whether the reviewed commit (`review.commit_id`) matches `pull_request.head.sha`, and verifies that all inline threads created by Copilot are resolved.
+  2. **Optional Approval Provider (`github_copilot`)**: When configured under `approval.providers`, Merge Verdict can request or await a Copilot review for `head_sha` (selecting effort based on the matched path risk tier) and verify whether GitHub recognizes its formal `APPROVE` review.
+- **Trust Boundary and Staleness Constraints**:
+  - **Head-Branch Instruction Risk**: GitHub Copilot reads custom instructions and skills from the pull request's head branch rather than the protected base branch, meaning an unmerged PR can alter instructions that influence its own Copilot review. Merge Verdict mitigates this by loading `.github/merge-verdict.yml` exclusively from the protected base branch.
+  - **Review-Only Staleness**: A Copilot approval is dismissed on new commits, but is not invalidated when CodeRabbit, Sourcery, or Codex posts a new blocking finding on an unchanged commit SHA. Therefore, the `merge-verdict` required check run remains mandatory alongside native Copilot approval.
+
 ## 3. Normalized Internal Data Schema
 
 Merge Verdict transforms all external reviewer signals into a unified TypeScript data model validated at runtime via Zod schemas.
@@ -194,5 +211,7 @@ export type ReviewSnapshot = z.infer<typeof ReviewSnapshotSchema>;
 | Codex review summary JSON marker (`codex-review-state:v1`) | Verified Fact      | Observed in SnapTally PR #120 comment `IC_kwDOUey2HM8AAAABgoJ9MA`.                                                                                            |
 | Codex commit SHA divergence from PR head                   | Verified Fact      | Verified in SnapTally PR #120: Codex reviewed `a895efe`, PR merged at `35c286d`.                                                                              |
 | DeepSeek Review textual verdict format                     | Verified Fact      | Observed in SnapTally PR #121 review by `github-actions[bot]`.                                                                                                |
+| Copilot reviewer identity and API effort levels            | Verified Fact      | Documented in GitHub Changelog (Oct 2026): `copilot-pull-request-reviewer[bot]`, REST/GraphQL review requests, `Lite`/`Balanced`/`Max` effort tiers.          |
+| Copilot reads instructions from PR head branch             | Verified Fact      | Documented in GitHub Docs; requires Merge Verdict to enforce base-branch policy loading as a trust-boundary safeguard.                                        |
 | Reviewer adapters stability across bot updates             | Working Assumption | External bots may update Markdown formatting or comment markers without notice. Regex patterns must be resilient and supplemented by GraphQL thread metadata. |
 | Custom reviewer config extensibility                       | Proposed Design    | Adapters are designed as pure TypeScript modules with standardized interfaces to allow community additions without core engine modification.                  |

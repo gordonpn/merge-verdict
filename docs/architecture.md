@@ -74,11 +74,11 @@ The trigger subsystem is responsible for invoking the verification engine whenev
 The data collector queries the GitHub REST and GraphQL APIs to assemble a coherent point-in-time snapshot of the PR.
 
 Responsibilities:
-- Fetch PR metadata: base branch, head branch, head SHA, mergeable status, draft state, author identity.
+- Fetch PR metadata: base branch, head branch, head SHA, mergeable status, draft state, author identity, and changed file paths.
 - Query review threads via GraphQL: thread ID, resolution status (`isResolved`), resolved by user, outdated status (`isOutdated`), and thread comment history.
 - Query pull request reviews: reviewer identity, state (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), submission timestamp, commit SHA associated with the review.
 - Query check runs and commit statuses: check names, status (`queued`, `in_progress`, `completed`), conclusion (`success`, `failure`, `neutral`, `cancelled`, `timed_out`, `skipped`), and started/completed timestamps.
-- Read repository configuration file (`.github/merge-verdict.yml`) from the PR head commit (or base commit according to security policy).
+- Read repository configuration file (`.github/merge-verdict.yml`) exclusively from the protected base branch revision (`pull_request.base.sha` or default branch), preventing an unmerged pull request from tampering with its own verification rules or risk tiers.
 
 ### 3.3. Reviewer Normalization Layer
 
@@ -88,6 +88,7 @@ Standardized adapter responsibilities:
 - **CodeRabbit Adapter**: Parses summary comments, identifies free-tier rate limit warnings (which produce neutral check runs without actual review), extracts inline actionable findings, and filters out high-level change summaries and promotional links.
 - **Sourcery Adapter**: Extracts inline review comments, maps severity badges (High, Medium, Low) to normalized severities, tracks explicit author acknowledgements (such as `Addressed in [commit]`), and recognizes bot thread resolutions.
 - **Codex Adapter**: Detects machine-readable review state markers (such as `<!-- codex-review-state:v1 ... -->`), extracts target commit SHA, verification status, and unresolved finding counters.
+- **GitHub Copilot Adapter**: Normalizes reviews from `copilot-pull-request-reviewer[bot]`, extracts approval readiness assessments and inline review threads, and verifies that the reviewed `commit_id` matches the current PR `head_sha`.
 - **DeepSeek Review Adapter**: Parses textual verdicts from workflow outputs or PR comments (e.g. `APPROVE`, `APPROVE WITH MINOR FINDINGS`, `REQUEST CHANGES`, `BLOCK`), extracts material findings and failure scenarios.
 - **PR-Agent Adapter**: Parses ticket compliance analysis and review guide comments.
 - **Generic Linter / Status Adapter**: Normalizes GitHub check runs (Biome, Actionlint, CodeQL, CI test suites) into uniform check assertions.
@@ -102,6 +103,7 @@ Responsibilities:
 - **Thread Resolution Rule**: Asserts that no review threads remain unresolved, or that all unresolved threads are non-blocking advisory notes according to policy.
 - **Blocking Decision Rule**: Asserts that no active `CHANGES_REQUESTED` review decisions remain.
 - **Freshness Rule**: Asserts that all reviewer findings and review states evaluate the current PR head SHA.
+- **Path Risk-Tier Rule**: Evaluates modified file paths against repository-defined risk tiers (`low`, `high`) using the strictest-matching-tier-wins rule to determine automated approval eligibility, mandatory human review requirements, and verification effort level (`lite`, `balanced`, `max`).
 - **Atomic Pre-Flight Guard**: Computes a state fingerprint of the PR snapshot and re-verifies that the head SHA and review count have not mutated before proceeding to publication.
 
 ### 3.5. Optional Semantic Verification Engine
@@ -110,6 +112,7 @@ When deterministic rules encounter ambiguous findings (for example, a thread lef
 
 Characteristics:
 - Communicates with any OpenAI-compatible API endpoint (such as DeepSeek).
+- Conditioned on configured effort tiers (`lite`, `balanced`, `max`) so expensive semantic inference is invoked only for unresolved ambiguity or high-risk file paths.
 - Receives only the isolated finding, the specific code diff hunk, and developer comments.
 - Uses structured JSON outputs with strict Zod validation.
 - Operates under strict token and budget limits.
@@ -117,12 +120,16 @@ Characteristics:
 
 ### 3.6. Verdict and Approval Publisher
 
-The publisher translates the engine verdict into official GitHub artifacts:
+The publisher translates the engine verdict into official GitHub artifacts while separating the verification assessment, approval emission eligibility, and branch-protection recognition:
 - **Status Check (Authoritative Gate)**:
   - **Tier 1 (Commit Status Fallback)**: When running under default `GITHUB_TOKEN`, the publisher calls the Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) with context `merge-verdict`. It emits commit status states (`pending`, `success`, `failure`, `error`) and a concise description up to 140 characters.
   - **Tier 2 (Checks API Check Run)**: When authenticated with a dedicated GitHub App installation token, the publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the PR `head_sha`. It manages the full check run lifecycle (`status: in_progress`, `status: completed` with conclusions `success`, `failure`, or `action_required`), rich Markdown summaries, finding breakdowns, and commit-pinned annotations.
     As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), both tiers serve as the primary automated merge gate required by branch protection.
-- **Pull Request Review (Optional Secondary Signal)**: When verdict is `PASS`, Merge Verdict may optionally submit an official review (`POST /repos/{owner}/{repo}/pulls/{number}/reviews`) with event `APPROVE` as an endorsement and audit record. If a previously approved PR becomes `FAIL` or `STALE`, the publisher dismisses the prior approval review or posts an invalidating status update. Formal review approvals are treated as secondary to avoid self-approval failures and human-review threshold conflicts.
+- **Configurable Approval Provider Abstraction (Optional Secondary Signal)**: When verdict is `PASS` and the matched path risk tier permits automated approval, Merge Verdict delegates review endorsement to a configurable provider (`github_copilot`, `github_app`, or `none`):
+  - `github_copilot`: Requests a Copilot code review on `head_sha` (with effort matched to the path risk tier) or verifies an existing active `APPROVE` review from `copilot-pull-request-reviewer[bot]`.
+  - `github_app`: Submits an official review (`POST /repos/{owner}/{repo}/pulls/{number}/reviews`) with event `APPROVE` under the Merge Verdict App identity as a dedicated audit endorsement.
+  - `none`: Emits only the authoritative `merge-verdict` check run.
+    If a previously approved PR becomes `FAIL` or `STALE`, the publisher dismisses its prior approval review or posts an invalidating status update.
 
 ## 4. GitHub Actions vs. GitHub App Integration Models
 
@@ -212,11 +219,14 @@ Summary of rejected approaches:
 
 The following technical questions require live platform validation during early milestone implementation:
 
-### 7.1. GitHub App Approval Satisfaction Under Branch Protection
+### 7.1. GitHub App and Copilot Approval Satisfaction Under Branch Protection
 
-- **Uncertainty**: While a GitHub App installation token with `pull_requests: write` can submit an `APPROVE` review, platform behavior varies based on whether branch protection requires approvals from specific Code Owners or human members, and whether "Dismiss stale approvals" cleanly dismisses App reviews upon new commits.
-- **Recommended Default**: Rely on the required status check (`merge-verdict`) as the authoritative hard merge gate under branch protection, treating the PR approval review as the visible native review endorsement.
-- **Validation Plan**: Execute Milestone 3 live test cases against protected branches with different branch rule permutations.
+- **Uncertainty**: While GitHub Copilot (`copilot-pull-request-reviewer[bot]`) received native merge-approval privileges in October 2026 when enabled in repository settings, arbitrary third-party GitHub Apps (`merge-verdict[bot]`) do not automatically receive the same privilege under human or Code Owner review rules.
+- **Recommended Default**: Rely on the required status check (`merge-verdict`) as the non-bypassable authoritative merge gate across all approval providers (`github_copilot`, `github_app`, `none`), separating the verification verdict from approval emission and merge-rule recognition.
+- **Validation Plan**: Execute three live validation experiments on a disposable pull request:
+  1. Whether native Copilot approval counts toward GitHub's configured required-review threshold.
+  2. Whether the `merge-verdict` required check run independently blocks merging despite an active Copilot approval.
+  3. Whether a new blocking review comment on an unchanged commit SHA invalidates Merge Verdict's prior `success` check run.
 
 ### 7.2. Zero-Comment Thread Resolution Latency
 

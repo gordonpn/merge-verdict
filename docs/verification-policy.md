@@ -164,17 +164,24 @@ In addition to human-readable Markdown output, every check run persists a struct
 
 Permalinks must always be pinned to the verified 40-character commit SHA, never to moving branch refs.
 
-### 4.4. Approval as an Optional Secondary Output
+### 4.4. Three-Stage Approval Model and Provider Abstraction
 
-When verification passes (`PASS`), the formal approval review submitted by Merge Verdict is compact and refers directly to the authoritative check run:
+Merge Verdict strictly separates three concepts that are often conflated in automated review systems:
+1. **Verification Assessment (`verdict`)**: Whether the PR snapshot satisfies all required policy conditions (`PASS`, `PENDING`, `FAIL`, `STALE`, `ERROR`).
+2. **Approval Emission Eligibility**: Whether repository configuration and matched path risk tiers permit issuing or requesting an automated `APPROVE` review.
+3. **Merge-Rule Recognition**: Whether GitHub branch protection recognizes that approval as satisfying a required-review threshold. Merge Verdict never reports that a posted bot approval unblocked merging unless verified against repository review state.
 
-> Merge Verdict approved commit `abc123f` after reconciling 10 review threads and verifying four required CI checks. See the linked verification report for supporting evidence.
+When verification passes (`PASS`) and the matched risk tier permits automated approval, Merge Verdict delegates review publication to a configurable approval provider:
+- `github_copilot`: Requests or verifies a review from GitHub's native `copilot-pull-request-reviewer[bot]` on the current `head_sha` (which can count toward required review counts when repository settings enable Copilot approvals) and confirms whether its `APPROVE` review is active.
+- `github_app`: Submits a compact `APPROVE` review via the Merge Verdict GitHub App identity (`merge-verdict[bot]`) referring directly to the authoritative check run:
+  > Merge Verdict approved commit `abc123f` after reconciling 10 review threads and verifying four required CI checks. See the linked verification report for supporting evidence.
+- `none`: Publishes only the authoritative `merge-verdict` check run without emitting a formal PR approval review.
 
-Reasons formal PR approval is secondary rather than primary:
+Reasons formal PR approval remains secondary to the `merge-verdict` check run across all providers:
 - GitHub prevents PR authors from approving their own pull requests (API returns HTTP 422).
-- Many organizations mandate approvals from specific human Code Owners; automated bot reviews cannot satisfy these requirements.
+- GitHub Copilot's merge-approval privilege does not generalize to arbitrary third-party GitHub Apps under human or Code Owner review rules.
 - Approval invalidation upon new commits depends on repository settings ("Dismiss stale approvals").
-- New review comments on unchanged commits do not natively dismiss existing approvals.
+- New review comments on unchanged commits do not natively dismiss existing approvals (including native Copilot approvals).
 
 ## 5. Fast Invalidation Path and Lifecycle Management
 
@@ -187,7 +194,7 @@ To close the race window where a previously passing check run could be used to m
 3. **Pre-Publication Revalidation**:
    The engine re-verifies that the head SHA and review state fingerprint match the initial snapshot.
 4. **Final Publication**:
-   - If verdict is `PASS`: update check run status to `completed` with conclusion `success` (or commit status state `success`), and optionally submit `APPROVE` review.
+   - If verdict is `PASS`: update check run status to `completed` with conclusion `success` (or commit status state `success`), and execute the configured approval provider (`github_copilot`, `github_app`, or `none`) if the matched path risk tier permits automated approval.
    - If verdict is `PENDING`: update or maintain check run status as `in_progress` with conclusion `null` (or commit status state `pending`), withholding approvals while awaiting in-flight CI runs or reviewer evaluations.
    - If verdict is `FAIL` or `ERROR`: update check run status to `completed` with conclusion `failure` or `action_required` (or commit status state `failure` or `error`), and dismiss any prior approval review.
    - If verdict is `STALE`: re-read the current `merge-verdict` check ownership. Do not publish only when a newer evaluation already owns the check with status `in_progress` or a blocking conclusion. Otherwise, publish a blocking conclusion to prevent a prior success from remaining mergeable.
@@ -201,12 +208,63 @@ When repositories use GitHub Merge Queues:
 - Workflows triggered by `merge_group` evaluate this synthetic merge commit SHA rather than the PR branch head SHA.
 - Merge Verdict detects whether the triggering event is a standard pull request or a `merge_group` event, binding its snapshot verification and status check to the corresponding target SHA.
 
-## 7. Version-Controlled Policy Authority
+## 7. Version-Controlled Policy Authority, Path Risk Tiers, and Effort Levels
 
-All verification policies, required checks, mandatory reviewers, and severity exemptions must reside in version control (specifically `.github/merge-verdict.yml`).
+### 7.1. Base-Branch Policy Authority
+
+All verification policies, required checks, mandatory reviewers, path risk tiers, and severity exemptions must reside in version control (specifically `.github/merge-verdict.yml`).
+- **Base-Branch Trust Boundary**: Unlike tools (such as GitHub Copilot) that read custom instructions and skills from the pull request's head branch, Merge Verdict always loads `.github/merge-verdict.yml` from the **protected base branch revision** (`pull_request.base.sha` or repository default branch). An unmerged pull request cannot modify the verification rules or risk tiers that govern its own evaluation.
 - Inferred developer preferences or observed patterns must never silently weaken verification gates.
-- Any change to review standards or blocking conditions must occur via an explicit, reviewable commit or pull request to the repository configuration.
+- Any change to review standards or blocking conditions must occur via an explicit, reviewable commit merged into the base branch.
 - The policy evaluator records the `policyVersion` commit SHA in every check report for full traceability.
+
+### 7.2. Path-Based Risk Tiers and Strictest-Tier-Wins Rule
+
+Repositories can define path-scoped risk tiers in `.github/merge-verdict.yml` to tailor automated approval eligibility, human review requirements, and verification effort to the sensitivity of modified files:
+- **Low-Risk Paths** (for example `docs/**`, `**/*.md`): Eligible for automated approval (`automated_approval: allowed`) and deterministic or `lite` review effort.
+- **High-Risk Paths** (for example `.github/workflows/**`, `src/auth/**`, `src/security/**`): Can require additional review evidence (`automated_approval: additional_review`), elevated review effort (`balanced` or `max`), or mandatory human endorsement (`require_human_review: true`).
+- **Strictest-Tier-Wins Rule**: For a pull request modifying files across multiple tiers, the strictest matching risk tier governs the entire pull request. Files that do not match an explicit low-risk pattern default to the repository's strictest baseline tier (fail-closed).
+
+### 7.3. Configurable Verification and Review Effort
+
+Rather than unconditionally invoking the most expensive model or multi-agent review mode on every commit push, Merge Verdict supports tiered effort control (`lite`, `balanced`, `max`):
+- `lite`: Purely deterministic metadata and check-run reconciliation (zero inference cost), or lightweight reviewer effort on low-risk documentation changes.
+- `balanced`: Standard multi-reviewer reconciliation with targeted single-pass semantic escalation only when an unresolved thread has a concrete diff modification on the reported lines.
+- `max`: Reserved for high-risk path tiers or contested security-sensitive findings where deep semantic diff verification or `Max`-effort Copilot re-review is warranted.
+
+### 7.4. Illustrative Policy Configuration (`.github/merge-verdict.yml`)
+
+```yaml
+verification:
+  require_current_head_sha: true
+  require_resolved_threads: true
+  require_successful_ci: true
+  require_code_evidence: true
+
+approval:
+  required_check: merge-verdict
+  providers:
+    - github_copilot
+    - github_app
+  require_verified_commit: true
+
+  risk:
+    low:
+      paths:
+        - "docs/**"
+        - "**/*.md"
+      automated_approval: allowed
+      effort: lite
+
+    high:
+      paths:
+        - ".github/workflows/**"
+        - "src/auth/**"
+        - "src/security/**"
+      automated_approval: additional_review
+      require_human_review: true
+      effort: max
+```
 
 ## 8. Finding Severity Classification and Handling
 

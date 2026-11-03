@@ -80,10 +80,10 @@ The test suite must explicitly cover the following edge cases:
 - **Scenario**: Status check publication (`POST /statuses/{sha}`) succeeds, but PR review submission fails due to a network glitch.
 - **Expected Outcome**: Process exits with code 1. Branch protection remains enforced because the status check is the authoritative gate. Subsequent workflow retry succeeds in posting the review.
 
-### 3.7. Fork Security and Privilege Escalation
+### 3.7. Base-Branch Policy Authority and Tamper Prevention
 
-- **Scenario**: PR submitted from external fork contains modified `.github/merge-verdict.yml` relaxing approval rules.
-- **Expected Outcome**: For fork PRs, configuration is loaded exclusively from the target base branch (e.g. `main`), ignoring changes in the fork.
+- **Scenario**: A pull request (either from a same-repository branch or an external fork) modifies `.github/merge-verdict.yml` or agent instruction files to relax approval rules or reclassify high-risk paths as low-risk.
+- **Expected Outcome**: Configuration is loaded exclusively from the protected base target branch (e.g. `main` or `pull_request.base.sha`), ignoring unmerged policy edits on the PR head branch.
 
 ## 4. Replay Test Plan (Zero External API Calls)
 
@@ -118,3 +118,7 @@ For validating live platform interactions before major releases:
 2. **Scenario 1 - Negative Path**: Open PR with broken CI and unresolved threads. Assert `merge-verdict` reports `failure` and GitHub blocks merging.
 3. **Scenario 2 - Positive Path**: Fix CI, resolve all threads, simulate reviewer approvals. Assert `merge-verdict` reports `success`, an official `APPROVE` review is posted, and GitHub unlocks the merge button.
 4. **Scenario 3 - Commit Invalidation**: Push new commit to previously approved PR. Assert `merge-verdict` reverts to `pending` and approval is invalidated.
+5. **Scenario 4 - Disposable-PR Copilot & Check Gate Validation**:
+   - Verify whether native Copilot approval (`copilot-pull-request-reviewer[bot]`) satisfies GitHub's configured required-review threshold.
+   - Verify that `merge-verdict` independently blocks merging when failing or in progress, even when a native Copilot `APPROVE` review is active.
+   - Verify that a new blocking review comment posted on an unchanged commit SHA immediately invalidates Merge Verdict's prior `success` check run.

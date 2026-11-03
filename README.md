@@ -4,14 +4,14 @@ Merge Verdict is an automated, evidence-based pull request (PR) verification and
 
 ## Overview
 
-Modern software development teams increasingly employ AI coding agents to author pull requests, followed by multiple automated code review tools (such as CodeRabbit, Sourcery, Codex review connectors, PR-Agent, DeepSeek Review, Biome, Actionlint, and CodeQL) to review changes.
+Modern software development teams increasingly employ AI coding agents to author pull requests, followed by multiple automated code review tools (such as GitHub Copilot, CodeRabbit, Sourcery, Codex review connectors, PR-Agent, DeepSeek Review, Biome, Actionlint, and CodeQL) to review changes.
 
 These automated reviewers generate disparate, overlapping, and sometimes contradictory feedback across GitHub comments, review threads, and check runs. Engineering developers are left with the tedious task of manually tracking down reviewer outputs, verifying whether unresolved threads were addressed, checking that automated reviewers actually finished on the latest commit, and deciding whether the pull request is safe to merge.
 
-Merge Verdict solves this reconciliation bottleneck. It acts as an automated verification orchestrator that monitors pull request activity, normalizes reviewer findings, verifies review completion and thread resolution against a defined policy, and publishes:
+Merge Verdict solves this reconciliation bottleneck. It acts as an automated verification orchestrator that monitors pull request activity, normalizes reviewer findings, verifies review completion and thread resolution against a base-branch policy, and publishes:
 
-1. A **GitHub required status check** (named `merge-verdict`) to enforce branch protection.
-2. An optional **official GitHub pull request review with `APPROVE`** when all policy requirements are met.
+1. A **GitHub required status check** (named `merge-verdict`) to enforce branch protection as the authoritative automated merge gate.
+2. An optional **official GitHub pull request review with `APPROVE`** via a configurable approval provider (`github_copilot`, `github_app`, or `none`) when all policy and path risk-tier requirements are met.
 
 The developer remains responsible for executing the merge. Automatic merging is explicitly out of scope.
 
@@ -19,14 +19,15 @@ The developer remains responsible for executing the merge. Automatic merging is 
 
 ### What It Does
 
-- Evaluates PR review feedback against a configurable, deterministic verification policy.
+- Evaluates PR review feedback against a configurable, deterministic verification policy loaded from the protected base branch.
+- Enforces path-based risk tiers (strictest-matching-tier-wins) to tailor automated approval eligibility, human review requirements, and verification effort levels (`lite`, `balanced`, `max`).
 - Reconciles heterogeneous review outputs from multiple tools into a unified data model.
 - Verifies that all required CI tests, security analyzers, and linters completed with success.
 - Detects unresolved review threads and outstanding `CHANGES_REQUESTED` decisions.
 - Identifies stale reviewer findings that evaluate older commits rather than the PR head.
 - Detects rate-limited, incomplete, or skipped reviewer runs.
 - Enforces state freshness to prevent race conditions during review updates.
-- Publishes status checks (`merge-verdict`) and can submit optional official PR `APPROVE` reviews.
+- Separates the verification verdict (`PASS`) from approval emission and branch-protection recognition across configurable approval providers (`github_copilot`, `github_app`, `none`).
 
 ### What It Does Not Do
 

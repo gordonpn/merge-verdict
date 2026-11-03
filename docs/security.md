@@ -10,6 +10,7 @@ The following system inputs originate outside the trust boundary and must be tre
 - **Pull Request Source Code and Diffs**: May contain malicious scripts or crafted exploits.
 - **Pull Request Descriptions and Commit Messages**: May contain social-engineering payloads or prompt injection attempts.
 - **Review Comments and Summaries**: Even comments from automated bots may echo untrusted strings originally injected into code or PR descriptions.
+- **Head-Branch Policy and Agent Instructions**: An unmerged pull request branch can modify repository configuration (`.github/merge-verdict.yml`) or agent instruction files. Tools such as GitHub Copilot read custom instructions and skills from the PR head branch, creating a policy trust-boundary risk where a PR can influence its own review criteria.
 - **Fork Pull Request Repositories**: Code running from public forks must have zero access to repository secrets or write tokens.
 
 ### 1.2. Privileged Operations
@@ -70,7 +71,7 @@ Merge Verdict eliminates this vulnerability through strict architectural separat
 2. **Checkout Base Workflow Only**: If running under `pull_request_target` to obtain write permissions on fork PRs, the workflow:
    - Must only check out the trusted base repository code (`ref: ${{ github.event.repository.default_branch }}`), or run from a pre-packaged action without local repository checkout.
    - Must never execute code or scripts checked out from `github.event.pull_request.head.sha`.
-3. **Configuration Isolation**: Repository configuration (`.github/merge-verdict.yml`) for fork PRs is read exclusively from the base target branch (e.g. `main`), preventing an external contributor from modifying the verification policy in their fork PR.
+3. **Base-Branch Configuration Authority**: Repository configuration (`.github/merge-verdict.yml`) for all pull requests (both same-repository branches and external forks) is read exclusively from the protected base target branch (for example `main` or `pull_request.base.sha`). This prevents an unmerged pull request from weakening verification rules, path risk tiers, or required reviewer lists to approve itself.
 
 ## 4. Webhook Security and Signature Verification
 

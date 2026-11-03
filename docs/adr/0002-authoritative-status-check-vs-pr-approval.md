@@ -29,12 +29,14 @@ We must decide which mechanism serves as the authoritative automated merge gate 
 
 ### Critical Platform Behaviors
 
-Two specific GitHub platform behaviors directly affect this architectural decision:
+Three specific GitHub platform behaviors directly affect this architectural decision:
 
 1. **GitHub Branch Protection Accepts `neutral` and `skipped` as Passing**:
    GitHub branch protection considers check conclusions of `neutral` and `skipped` to satisfy required status checks. Therefore, Merge Verdict must never emit `neutral` or `skipped` for non-passing outcomes. Every terminal non-passing outcome (`FAIL`, `STALE`, `ERROR`) must be published with a blocking conclusion (`failure` or `action_required`) to prevent premature merge enablement. `PENDING` remains an in-progress check run with conclusion `null`.
 2. **Workflow-Triggered Jobs May Not Count as Required PR Checks**:
    An ordinary GitHub Actions workflow triggered via `workflow_dispatch` or `issue_comment` does not automatically register as a required pull request check run unless created explicitly through the GitHub Checks API via a GitHub App token. Using Checks API check runs created under GitHub App identity avoids this workflow trigger limitation.
+3. **GitHub Copilot's Native Approval Privilege Does Not Generalize to Third-Party Apps**:
+   GitHub introduced native Copilot pull request approvals (`copilot-pull-request-reviewer[bot]`) with general availability in October 2026, allowing Copilot `APPROVE` reviews to count toward required-review branch protection rules when enabled by administrators. However, this merge-approval privilege is specific to GitHub Copilot; arbitrary third-party GitHub Apps (such as `merge-verdict[bot]`) do not automatically receive the same special treatment under human or Code Owner review requirements. Furthermore, Copilot approvals are dismissed on new commits, but are not invalidated when external reviewers post new blocking findings on an unchanged commit SHA.
 
 ### The Semantic Staleness Problem
 
@@ -48,20 +50,35 @@ This semantic staleness on unchanged code is the primary correctness challenge M
 
 ## Decision
 
-We designate the **required status check (implemented as a GitHub Checks API check run named `merge-verdict`) as the authoritative merge gate**, and treat the **formal GitHub PR approval review as an optional secondary output**.
+We designate the **required status check (implemented as a GitHub Checks API check run named `merge-verdict`) as the authoritative merge gate**, and treat **formal GitHub PR approval reviews as a configurable secondary output** managed through an explicit approval-provider abstraction (`github_copilot`, `github_app`, or `none`).
 
 ### Key Tenets
 
 1. **Required Status Check is Primary**:
    The `merge-verdict` check run communicates _what_ was verified, against _which_ commit, using _what_ evidence. Branch protection rulesets must require this check as a mandatory merge gate.
-2. **Formal Approval is Secondary**:
-   When policy evaluation succeeds (`PASS`), Merge Verdict may optionally submit a formal GitHub PR review with event `APPROVE` as an endorsement and audit notification. However, repositories must not rely on this approval as their sole automated protection.
+2. **Separate Verification Verdict, Approval Emission, and Merge-Rule Recognition**:
+   Merge Verdict strictly separates:
+   - The deterministic verification assessment (`PASS`, `PENDING`, `FAIL`, `STALE`, `ERROR`),
+   - Whether the configured policy and path-based risk tier permit issuing or requesting an automated approval, and
+   - Whether GitHub branch protection actually recognizes that approval as satisfying required-review thresholds.
+     When policy evaluation succeeds (`PASS`) and the matched path risk tier allows automated approval, Merge Verdict delegates approval handling to a configurable provider (`github_copilot`, `github_app`, or `none`). Repositories must never rely on formal approval alone as their sole automated protection.
 3. **Checks API Over Commit Statuses**:
    The publisher must utilize the GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) rather than the legacy Commit Status API wherever possible. Check runs provide rich Markdown formatting, status summaries, duration metrics, and file-level annotations, which are critical for auditability.
 4. **Fast Invalidation Path**:
    To minimize the race window when new review feedback arrives, the trigger layer must execute a fast invalidation path: immediately setting the `merge-verdict` check run to `in_progress` or non-passing upon receiving any PR update, comment, or review event, before the full evaluation engine begins analysis.
-5. **Defense in Depth**:
-   Repositories deploying Merge Verdict should also enable GitHub's native "Require conversation resolution before merging" branch protection setting as an independent platform-level safeguard against race conditions.
+5. **Base-Branch Policy Authority and Defense in Depth**:
+   Unlike tools that read instructions from the untrusted PR head branch, Merge Verdict always evaluates `.github/merge-verdict.yml` from the protected base branch revision. Repositories deploying Merge Verdict should also enable GitHub's native "Require conversation resolution before merging" branch protection setting as an independent platform-level safeguard against race conditions.
+
+### Trade-Offs Across Publication Strategies
+
+| Approach                                                  | Main Benefit                                                         | Main Limitation                                                                                             |
+| :-------------------------------------------------------- | :------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| Native Copilot approval only                              | Minimal implementation; GitHub-recognized approval                   | Does not reconcile external reviewers or independently enforce CI evidence; blind to comment-only staleness |
+| Merge Verdict check + Copilot approval (`github_copilot`) | Strong separation of multi-reviewer verification and review sign-off | Depends on Copilot entitlement, repository settings, and review execution                                   |
+| Merge Verdict check + own App approval (`github_app`)     | Vendor-neutral, dedicated bot identity                               | Third-party App approval may not satisfy required human or Code Owner review rules                          |
+| Merge Verdict check only (`none`)                         | Simplest reliable automated enforcement                              | Emits no formal PR approval review                                                                          |
+
+When GitHub Copilot is available and enabled, combining the required `merge-verdict` check run with the `github_copilot` approval provider offers native approval recognition alongside multi-reviewer reconciliation. When Copilot is unavailable, `github_app` or `none` provides a vendor-neutral fallback without weakening the authoritative check gate.
 
 ## Alternatives Evaluated
 

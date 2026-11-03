@@ -40,16 +40,17 @@ Implement the domain models, GitHub API data collection clients, reviewer normal
 2. **Implement Domain Models**:
    - Define and export Zod schemas in `src/models/` for `Severity`, `ReviewerStatus`, `NormalizedFinding`, `ReviewerExecutionRecord`, `CheckRunRecord`, and `ReviewSnapshot`.
 3. **Implement GitHub Data Collector**:
-   - Create `src/collector/github-collector.ts` using Octokit to execute batched GraphQL queries for PR review threads, reviews, check runs, and commit statuses.
+   - Create `src/collector/github-collector.ts` using Octokit to execute batched GraphQL queries for PR review threads, reviews, check runs, commit statuses, changed file paths, and base-branch `.github/merge-verdict.yml` policy configuration.
 4. **Implement Reviewer Normalization Adapters**:
    - `src/normalizers/coderabbit.ts`: Parse neutral check runs, rate-limit notices, and inline comments.
    - `src/normalizers/sourcery.ts`: Parse severity badges, `Addressed in [sha]` comment edits, and bot thread resolutions.
    - `src/normalizers/codex.ts`: Parse `codex-review-state:v1` JSON metadata and compare commit SHAs.
+   - `src/normalizers/copilot.ts`: Normalize `copilot-pull-request-reviewer[bot]` reviews, readiness assessments, and inline threads against `head_sha`.
    - `src/normalizers/deepseek.ts`: Parse textual verdicts (`APPROVE`, `APPROVE WITH MINOR FINDINGS`, `REQUEST CHANGES`, `BLOCK`).
    - `src/normalizers/generic-checks.ts`: Normalize CI check runs (`runner / test`, `runner / biome`, `CodeQL`, `codecov`).
 5. **Implement Deterministic Policy Engine**:
-   - Create `src/policy/evaluator.ts` implementing the 8 mandatory verification conditions from the policy specification.
-   - Output structured verdicts: `PASS`, `PENDING`, `FAIL`, `ERROR`, `STALE`.
+   - Create `src/policy/evaluator.ts` implementing the 8 mandatory verification conditions and path-based risk-tier evaluation (strictest-matching-tier-wins) from the policy specification.
+   - Output structured verdicts (`PASS`, `PENDING`, `FAIL`, `ERROR`, `STALE`), approval eligibility, and effort level (`lite`, `balanced`, `max`).
 6. **Create Comprehensive Unit Test Suite**:
    - Build fixture-driven unit tests in `tests/normalizers/` and `tests/policy/` using recorded payloads from SnapTally PRs #119, #120, and #121.
 
