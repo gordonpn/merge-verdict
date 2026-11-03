@@ -116,7 +116,7 @@ For validating live platform interactions before major releases:
 
 1. **Repository Setup**: A dedicated test repository with branch protection requiring status check `merge-verdict` and 1 approving review.
 2. **Scenario 1 - Negative Path**: Open PR with broken CI and unresolved threads. Assert `merge-verdict` reports `failure` and GitHub blocks merging.
-3. **Scenario 2 - Positive Path**: Fix CI, resolve all threads, simulate reviewer approvals. Assert `merge-verdict` reports `success`, an official `APPROVE` review is posted, and GitHub unlocks the merge button.
+3. **Scenario 2 - Positive Path**: Fix CI, resolve all threads, simulate reviewer approvals. Assert `merge-verdict` reports `success`, an official `APPROVE` review is posted when eligible under the matched risk tier and configured approval provider (or withheld when human review is required or provider is `none`), and GitHub unlocks the merge button once required reviews are satisfied.
 4. **Scenario 3 - Commit Invalidation**: Push new commit to previously approved PR. Assert `merge-verdict` reverts to `pending` and approval is invalidated.
 5. **Scenario 4 - Disposable-PR Copilot & Check Gate Validation**:
    - Verify whether native Copilot approval (`copilot-pull-request-reviewer[bot]`) satisfies GitHub's configured required-review threshold.

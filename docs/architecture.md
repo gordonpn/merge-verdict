@@ -67,6 +67,7 @@ The trigger subsystem is responsible for invoking the verification engine whenev
   - `check_run`: `completed` (optional filter for required external checks)
   - `workflow_run`: `completed` (optional trigger on CI pipeline finish)
   - `workflow_dispatch`: Manual invocation or programmatic trigger from external bridge
+  - `merge_group`: `checks_requested` (merge queue; evaluates the synthetic merge commit SHA)
 - **Optional Webhook Bridge**: A serverless edge function (such as Cloudflare Worker) that listens for `pull_request_review_thread` events (`resolved`, `unresolved`), which GitHub Actions cannot trigger on natively. The bridge dispatches a `workflow_dispatch` run to the target repository.
 
 ### 3.2. GitHub Data Collector
@@ -78,7 +79,7 @@ Responsibilities:
 - Query review threads via GraphQL: thread ID, resolution status (`isResolved`), resolved by user, outdated status (`isOutdated`), and thread comment history.
 - Query pull request reviews: reviewer identity, state (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), submission timestamp, commit SHA associated with the review.
 - Query check runs and commit statuses: check names, status (`queued`, `in_progress`, `completed`), conclusion (`success`, `failure`, `neutral`, `cancelled`, `timed_out`, `skipped`), and started/completed timestamps.
-- Read repository configuration file (`.github/merge-verdict.yml`) exclusively from the protected base branch revision (`pull_request.base.sha` or default branch), preventing an unmerged pull request from tampering with its own verification rules or risk tiers.
+- Read repository configuration file (`.github/merge-verdict.yml`) exclusively from the protected base branch revision (`pull_request.base.sha` for pull request events, or `merge_group.base_sha` / `merge_group.base_ref` for merge queue events) and record that exact commit SHA as `policyVersion`, preventing an unmerged pull request from tampering with its own verification rules or risk tiers.
 
 ### 3.3. Reviewer Normalization Layer
 
@@ -88,7 +89,7 @@ Standardized adapter responsibilities:
 - **CodeRabbit Adapter**: Parses summary comments, identifies free-tier rate limit warnings (which produce neutral check runs without actual review), extracts inline actionable findings, and filters out high-level change summaries and promotional links.
 - **Sourcery Adapter**: Extracts inline review comments, maps severity badges (High, Medium, Low) to normalized severities, tracks explicit author acknowledgements (such as `Addressed in [commit]`), and recognizes bot thread resolutions.
 - **Codex Adapter**: Detects machine-readable review state markers (such as `<!-- codex-review-state:v1 ... -->`), extracts target commit SHA, verification status, and unresolved finding counters.
-- **GitHub Copilot Adapter**: Normalizes reviews from `copilot-pull-request-reviewer[bot]`, extracts approval readiness assessments and inline review threads, and verifies that the reviewed `commit_id` matches the current PR `head_sha`.
+- **GitHub Copilot Adapter**: Normalizes reviews from `copilot-pull-request-reviewer[bot]`, extracts approval readiness assessments and inline review threads, and verifies reviewer freshness by comparing `review.commit_id` against the current PR `head_sha` (distinct from the synthetic `merge_group.head_sha` used to publish the merge-queue check run, so PR reviews are evaluated against the underlying PR head SHA while CI checks and status publication bind to the merge-group evaluation SHA).
 - **DeepSeek Review Adapter**: Parses textual verdicts from workflow outputs or PR comments (e.g. `APPROVE`, `APPROVE WITH MINOR FINDINGS`, `REQUEST CHANGES`, `BLOCK`), extracts material findings and failure scenarios.
 - **PR-Agent Adapter**: Parses ticket compliance analysis and review guide comments.
 - **Generic Linter / Status Adapter**: Normalizes GitHub check runs (Biome, Actionlint, CodeQL, CI test suites) into uniform check assertions.
@@ -98,13 +99,13 @@ Standardized adapter responsibilities:
 The core policy engine evaluates the normalized snapshot against configured rules without calling external AI models.
 
 Responsibilities:
-- **Required Check Rule**: Asserts that every configured CI check has completed with conclusion `success`.
+- **Required Check Rule**: Asserts that every configured CI check has completed with conclusion `success`, or with `neutral` or `skipped` when explicitly permitted by repository configuration.
 - **Reviewer Completion Rule**: Asserts that all mandatory reviewers have posted completed reviews for the current PR snapshot.
 - **Thread Resolution Rule**: Asserts that no review threads remain unresolved, or that all unresolved threads are non-blocking advisory notes according to policy.
 - **Blocking Decision Rule**: Asserts that no active `CHANGES_REQUESTED` review decisions remain.
 - **Freshness Rule**: Asserts that all reviewer findings and review states evaluate the current PR head SHA.
 - **Path Risk-Tier Rule**: Evaluates modified file paths against repository-defined risk tiers (`low`, `high`) using the strictest-matching-tier-wins rule to determine automated approval eligibility, mandatory human review requirements, and verification effort level (`lite`, `balanced`, `max`).
-- **Atomic Pre-Flight Guard**: Computes a state fingerprint of the PR snapshot and re-verifies that the head SHA and review count have not mutated before proceeding to publication.
+- **Atomic Pre-Flight Guard**: Computes a state fingerprint of the PR snapshot (including `head_sha`, thread states, and mutable review/comment identifiers, update timestamps, and body digests) and re-verifies that the fingerprint has not mutated before proceeding to publication.
 
 ### 3.5. Optional Semantic Verification Engine
 

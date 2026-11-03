@@ -50,7 +50,7 @@ Merge Verdict mandates concurrency groups with active cancellation in workflow d
 
 ```yaml
 concurrency:
-  group: merge-verdict-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  group: merge-verdict-${{ inputs.pr_number || github.event.client_payload.pr_number || github.event.pull_request.number || github.event.issue.number || github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: true
 ```
 
@@ -84,24 +84,22 @@ A passing status check or approval review is valid only if the PR state remains 
 At invocation start (T0), the engine captures a **Verification Snapshot** comprising:
 - Target repository and PR number.
 - Authoritative PR head commit SHA (`head_sha`).
-- Total review thread count and array of thread IDs with their boolean `isResolved` values.
-- Array of review submissions with their states and associated commit SHAs.
+- Total review thread count and array of thread records including thread IDs, boolean `isResolved` values, and per-comment identifiers, `updated_at` timestamps, and body digests.
+- Array of review submissions with their review IDs, states, associated commit SHAs, `submitted_at` timestamps, and body digests.
 - Array of required check runs with their completed conclusions.
 
 From this snapshot, the engine computes a deterministic **State Fingerprint**:
 ```text
-state_fingerprint = SHA256(head_sha + ":" + sorted_threads + ":" + sorted_reviews + ":" + sorted_checks)
+state_fingerprint = SHA256(head_sha + ":" + sorted_threads_and_comments + ":" + sorted_reviews + ":" + sorted_checks)
 ```
 
 ### 3.2. Pre-Publication Atomic Check
 
 Immediately prior to publishing the status check or submitting the `APPROVE` review (T1):
-1. The engine queries GitHub API for the latest `pull_request.head.sha` and the current review count.
-2. If `current_head_sha !== snapshot.head_sha`:
-   - A race condition occurred (new commit pushed).
-   - The engine aborts publication immediately and exits with status `STALE`.
-3. If new review comments or thread modifications are detected:
-   - The engine aborts publication and schedules a fresh re-evaluation.
+1. The engine re-queries the GitHub API to recompute the complete state fingerprint (including `pull_request.head.sha`, thread resolution states, and mutable review/comment IDs, update timestamps, and body digests).
+2. If `current_head_sha !== snapshot.head_sha` or `current_state_fingerprint !== snapshot.state_fingerprint`:
+   - A race condition occurred (new commit pushed, thread state mutated, or comment added/edited).
+   - The engine routes the evaluation to `STALE` (`CheckNewerOwner`) rather than proceeding to `Approved`.
 
 ### 3.3. Fast Invalidation Path vs. Evaluation Path
 
@@ -179,7 +177,7 @@ If Merge Verdict previously submitted an `APPROVE` review on commit `SHA-A`, and
 
 ### 5.2. Partial Failure Recovery
 
-If the status check publication succeeds (`POST /repos/{owner}/{repo}/check-runs`) but the subsequent PR review approval submission fails (e.g. temporary secondary rate limit or GitHub review API error):
+If the authoritative status check publication succeeds (via `POST /repos/{owner}/{repo}/statuses/{sha}` with Commit Status state `pending`, `success`, `failure`, or `error` in Tier 1, or via `POST /repos/{owner}/{repo}/check-runs` with Check Run `status` and `conclusion` fields in Tier 2) but the subsequent PR review approval submission fails (e.g. temporary secondary rate limit or GitHub review API error):
 1. The engine records a non-fatal error log.
 2. Because the required status check `merge-verdict` is the authoritative gating mechanism under branch protection, merging remains protected.
 3. The workflow exits with exit code 1, which causes GitHub Actions to flag the run as failed, allowing standard retry mechanics to re-attempt approval submission.

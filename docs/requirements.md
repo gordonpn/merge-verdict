@@ -110,7 +110,7 @@ The system must separate the verification verdict (`PASS`), approval emission el
 ### FR-13: Policy-Driven Approval Withholding and Invalidation
 
 The system must withhold approval whenever verification is incomplete, failing, stale, or ambiguous under configured rules. Furthermore, if a PR was previously approved by Merge Verdict and subsequent activity (such as a new commit or a reopened review thread) invalidates that approval:
-- The `merge-verdict` status check must immediately transition to `pending` or `failure`.
+- The `merge-verdict` check must immediately transition to `pending` or `failure` for Tier 1 Commit Status, or to `status: in_progress` (with `conclusion: null`) or `status: completed` with a blocking conclusion (`failure` or `action_required`) for Tier 2 Checks API runs.
 - The existing approval must be dismissed or superseded according to configuration.
 
 ### FR-14: Loop Prevention and Self-Event Filtering
@@ -169,6 +169,6 @@ Every evaluation must resolve to exactly one of the following five core outcome 
 ## 6. Success Criteria and Acceptance
 
 1. **Deterministic Verification Gate**: Merge Verdict successfully prevents PR merges on protected branches when any required check fails, any thread is unresolved, or any required reviewer is missing.
-2. **Native Approval Delivery**: Upon satisfaction of all policy criteria, Merge Verdict posts a green `merge-verdict` status check and a valid GitHub PR review with state `APPROVE`.
+2. **Native Approval Delivery**: Upon satisfaction of all policy criteria, Merge Verdict posts a green `merge-verdict` status check and, when eligible under the matched path risk tier and configured approval provider (`github_copilot` or `github_app`), emits or verifies a formal GitHub PR review with state `APPROVE` (or withholds approval when the risk tier requires human review or the provider is `none`).
 3. **Staleness Protection**: Pushing a new commit immediately transitions the `merge-verdict` check from `success` back to `pending`, preventing merges until all criteria are re-verified on the new commit SHA.
 4. **Zero-Configuration Viability**: A repository can install Merge Verdict by referencing the standard GitHub Action in a workflow file, immediately obtaining baseline verification without custom server configuration.

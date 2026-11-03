@@ -72,7 +72,7 @@ just test
 
 ### Objective
 
-Package the engine into a reusable GitHub Action that executes in workflow runs, publishes the `merge-verdict` status check via the Commit Status API, and submits genuine PR approval reviews.
+Package the engine into a reusable GitHub Action that executes in workflow runs, publishes the `merge-verdict` status check via the Commit Status API, and conditionally submits or delegates PR approval reviews when eligible under the matched risk tier and configured approval provider.
 
 ### Dependencies
 
@@ -88,8 +88,8 @@ Package the engine into a reusable GitHub Action that executes in workflow runs,
    - Create `action.yml` declaring inputs (`github-token`, `config-path`, `fail-fast`) and outputs (`verdict`, `summary`).
 3. **Implement Status Check Publisher**:
    - Create `src/publisher/commit-status.ts` calling `POST /repos/{owner}/{repo}/statuses/{sha}` with context `merge-verdict` and state `pending`, `success`, `failure`, or `error`.
-4. **Implement PR Review Approval Submitter**:
-   - Create `src/publisher/pr-review.ts` calling `POST /repos/{owner}/{repo}/pulls/{number}/reviews` with event `APPROVE` and structured Markdown summary body.
+4. **Implement Conditional PR Review Approval Submitter**:
+   - Create `src/publisher/pr-review.ts` calling `POST /repos/{owner}/{repo}/pulls/{number}/reviews` with event `APPROVE` and structured Markdown summary body when the matched path risk tier permits automated approval and the configured approval provider is eligible, or withholding approval when human review is required or provider is `none`.
 5. **Implement Concurrency and Self-Trigger Guard**:
    - Add actor and bot check filters to ignore workflow self-events and prevent infinite loops.
 6. **Provide Example Workflow Definition**:
@@ -98,7 +98,7 @@ Package the engine into a reusable GitHub Action that executes in workflow runs,
 ### Acceptance Criteria
 
 - Workflow executes successfully on `pull_request` and `pull_request_review` events.
-- On a passing PR, the action posts a green `merge-verdict` status check on the current head commit and submits an `APPROVE` review under `github-actions[bot]`.
+- On a passing PR, the action posts a green `merge-verdict` status check on the current head commit and submits an `APPROVE` review when eligible under the matched risk tier and configured approval provider (or withholds approval when ineligible).
 - Pushing a new commit immediately reverts the check to `pending` until re-evaluated.
 
 ### Verification Commands
