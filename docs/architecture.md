@@ -118,7 +118,10 @@ Characteristics:
 ### 3.6. Verdict and Approval Publisher
 
 The publisher translates the engine verdict into official GitHub artifacts:
-- **Status Check (Authoritative Gate)**: Creates or updates a check run named `merge-verdict` targeting the PR `head_sha`. As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0002-authoritative-status-check-vs-pr-approval.md), the required status check is the primary automated merge gate. In Tier 1 (`GITHUB_TOKEN`), calls `POST /repos/{owner}/{repo}/statuses/{sha}`. In Tier 2 (GitHub App), calls `POST /repos/{owner}/{repo}/check-runs` with detailed Markdown summaries, finding breakdowns, and commit-pinned annotations.
+- **Status Check (Authoritative Gate)**:
+  - **Tier 1 (Commit Status Fallback)**: When running under default `GITHUB_TOKEN`, the publisher calls the Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) with context `merge-verdict`. It emits commit status states (`pending`, `success`, `failure`, `error`) and a concise description up to 140 characters.
+  - **Tier 2 (Checks API Check Run)**: When authenticated with a dedicated GitHub App installation token, the publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the PR `head_sha`. It manages the full check run lifecycle (`status: in_progress`, `status: completed` with conclusions `success`, `failure`, or `action_required`), rich Markdown summaries, finding breakdowns, and commit-pinned annotations.
+    As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), both tiers serve as the primary automated merge gate required by branch protection.
 - **Pull Request Review (Optional Secondary Signal)**: When verdict is `PASS`, Merge Verdict may optionally submit an official review (`POST /repos/{owner}/{repo}/pulls/{number}/reviews`) with event `APPROVE` as an endorsement and audit record. If a previously approved PR becomes `FAIL` or `STALE`, the publisher dismisses the prior approval review or posts an invalidating status update. Formal review approvals are treated as secondary to avoid self-approval failures and human-review threshold conflicts.
 
 ## 4. GitHub Actions vs. GitHub App Integration Models
@@ -194,8 +197,8 @@ sequenceDiagram
 ## 6. Architectural Alternatives Evaluated
 
 Detailed design rationale and historical alternatives are recorded in:
-- [ADR 0001: Actions-First Hybrid Architecture](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0001-actions-first-architecture.md)
-- [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0002-authoritative-status-check-vs-pr-approval.md)
+- [ADR 0001: Actions-First Hybrid Architecture](docs/adr/0001-actions-first-architecture.md)
+- [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md)
 
 Summary of rejected approaches:
 - **Standalone 24/7 Cloud Service with Database**: Rejected to avoid split-brain review state against GitHub, operational hosting costs, database migration complexity, and customer adoption friction.

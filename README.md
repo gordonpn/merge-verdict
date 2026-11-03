@@ -48,7 +48,7 @@ Merge Verdict adopts an **Actions-first hybrid architecture**:
 - **Flexible Identity**: Supports standard `GITHUB_TOKEN` credentials for zero-infrastructure setups, and seamlessly upgrades to dedicated GitHub App installation tokens for native Checks API integration and independent bot identity.
 - **Decoupled Engine**: Core logic is implemented as a standalone TypeScript library, allowing it to run within GitHub Actions, a CLI, or an edge worker without modification.
 
-For full architectural details, see [docs/architecture.md](file:///Users/gordonpn/workspace/merge-verdict/docs/architecture.md).
+For full architectural details, see [docs/architecture.md](docs/architecture.md).
 
 ## Project Status
 
@@ -56,14 +56,14 @@ Merge Verdict is currently in the **foundation and architecture phase**. The arc
 
 ## Documentation Index
 
-- [Requirements Specification](file:///Users/gordonpn/workspace/merge-verdict/docs/requirements.md): Functional and non-functional requirements, outcome states, and acceptance criteria.
-- [Architecture Design](file:///Users/gordonpn/workspace/merge-verdict/docs/architecture.md): Subsystems, component responsibilities, data flow, and Mermaid diagrams.
-- [Verification Policy](file:///Users/gordonpn/workspace/merge-verdict/docs/verification-policy.md): Verification conditions, severity handling, staleness rules, and decision matrix.
-- [Reviewer Integrations](file:///Users/gordonpn/workspace/merge-verdict/docs/reviewer-integrations.md): Observed behavior from SnapTally reference PRs and normalized schemas.
-- [Events and State](file:///Users/gordonpn/workspace/merge-verdict/docs/events-and-state.md): Event coverage, thread-resolution limitations, concurrency, and state transitions.
-- [Security Architecture](file:///Users/gordonpn/workspace/merge-verdict/docs/security.md): Threat model, token permissions, fork isolation, and prompt injection defense.
-- [Implementation Plan](file:///Users/gordonpn/workspace/merge-verdict/docs/implementation-plan.md): Five-milestone roadmap with explicit tasks and acceptance criteria.
-- [Testing Strategy](file:///Users/gordonpn/workspace/merge-verdict/docs/testing.md): Unit tests, reference PR replay fixtures, and simulated edge-case testing.
-- [ADR 0001: Actions-First Architecture](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0001-actions-first-architecture.md): Architectural decision record evaluating standalone service vs Actions-first design.
-- [ADR 0002: Authoritative Status Check vs PR Approval](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0002-authoritative-status-check-vs-pr-approval.md): Architectural decision record establishing required status checks as the authoritative merge gate over formal PR approvals.
-- [Agent Engineering Guidelines](file:///Users/gordonpn/workspace/merge-verdict/AGENTS.md): Repository guidelines, memory authority rules, and project invariants for coding agents.
+- [Requirements Specification](docs/requirements.md): Functional and non-functional requirements, outcome states, and acceptance criteria.
+- [Architecture Design](docs/architecture.md): Subsystems, component responsibilities, data flow, and Mermaid diagrams.
+- [Verification Policy](docs/verification-policy.md): Verification conditions, severity handling, staleness rules, and decision matrix.
+- [Reviewer Integrations](docs/reviewer-integrations.md): Observed behavior from SnapTally reference PRs and normalized schemas.
+- [Events and State](docs/events-and-state.md): Event coverage, thread-resolution limitations, concurrency, and state transitions.
+- [Security Architecture](docs/security.md): Threat model, token permissions, fork isolation, and prompt injection defense.
+- [Implementation Plan](docs/implementation-plan.md): Five-milestone roadmap with explicit tasks and acceptance criteria.
+- [Testing Strategy](docs/testing.md): Unit tests, reference PR replay fixtures, and simulated edge-case testing.
+- [ADR 0001: Actions-First Architecture](docs/adr/0001-actions-first-architecture.md): Architectural decision record evaluating standalone service vs Actions-first design.
+- [ADR 0002: Authoritative Status Check vs PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md): Architectural decision record establishing required status checks as the authoritative merge gate over formal PR approvals.
+- [Agent Engineering Guidelines](AGENTS.md): Repository guidelines, memory authority rules, and project invariants for coding agents.

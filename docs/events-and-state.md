@@ -18,6 +18,7 @@ The following events are directly supported by GitHub Actions workflows and will
 | PR conversation comment created, edited        | `issue_comment: [created, edited]`                                | Captures bot summary comments and developer commands.                               |
 | External CI check run completed                | `check_run: [completed]`                                          | Fires when third-party tools (e.g. CodeRabbit, CodeQL) complete a check run.        |
 | CI workflow completed                          | `workflow_run: [completed]`                                       | Fires when a specific parent workflow (e.g. `ci.yml`) finishes.                     |
+| Merge queue checks requested                   | `merge_group: [checks_requested]`                                 | Evaluates the synthetic merge commit SHA for the queued merge group.                |
 | Manual or dispatch trigger                     | `workflow_dispatch`, `repository_dispatch`                        | Enables manual re-verification or bridge-initiated verification.                    |
 
 ### 1.2. The Thread-Resolution Gap: `pull_request_review_thread`

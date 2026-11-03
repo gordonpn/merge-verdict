@@ -6,7 +6,7 @@ Merge Verdict enforces an evidence-based verification policy before granting pul
 
 The system does not claim to mathematically prove that code is bug-free. Rather, it guarantees **review reconciliation** and **verification-policy satisfaction**: confirming that all configured automated checks have succeeded, all required reviewers have completed evaluation of the current commit, and no unaddressed blocking concerns remain in the pull request review record.
 
-As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0002-authoritative-status-check-vs-pr-approval.md), Merge Verdict designates the **required status check (Checks API check run named `merge-verdict`) as the authoritative merge gate**, and treats the **formal GitHub PR review approval as an optional secondary output**. A required check communicates _what_ was verified, against _which_ commit, using _what_ evidence. An approval records _who_ endorsed the changes.
+As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), Merge Verdict designates the **required status check (Checks API check run named `merge-verdict`) as the authoritative merge gate**, and treats the **formal GitHub PR review approval as an optional secondary output**. A required check communicates _what_ was verified, against _which_ commit, using _what_ evidence. An approval records _who_ endorsed the changes.
 
 ## 2. Critical Semantic Limitations and Semantic Staleness
 
@@ -32,7 +32,7 @@ A pull request is eligible for a passing verdict (`PASS`) and a successful `merg
 
 ### Condition 1: Required CI Checks Succeeded
 
-Every status check, workflow run, and check run configured in the policy's required checks list (e.g. `ci / test`, `runner / actionlint`, `runner / biome`, `CodeQL`) must report a status of `completed` and a conclusion of `success`.
+Every status check, workflow run, and check run configured in the policy's required checks list (e.g. `ci / test`, `runner / actionlint`, `runner / biome`, `CodeQL`) must report a status of `completed` and a conclusion of `success` (or an explicitly permitted conclusion such as `neutral` or `skipped` when configured in repository policy).
 - `failure`, `timed_out`, `action_required`: Immediate policy failure (`FAIL`).
 - `queued`, `in_progress`: Immediate pending status (`PENDING`).
 - `neutral`, `skipped`, `cancelled`: Treated as `FAIL` unless explicitly permitted in repository configuration.
@@ -187,8 +187,10 @@ To close the race window where a previously passing check run could be used to m
 3. **Pre-Publication Revalidation**:
    The engine re-verifies that the head SHA and review state fingerprint match the initial snapshot.
 4. **Final Publication**:
-   - If verdict is `PASS`: update check run conclusion to `success` and optionally submit `APPROVE` review.
-   - If verdict is `FAIL`, `STALE`, or `ERROR`: update check run conclusion to `failure` or `action_required`, and withhold or dismiss any approval review.
+   - If verdict is `PASS`: update check run status to `completed` with conclusion `success` (or commit status state `success`), and optionally submit `APPROVE` review.
+   - If verdict is `PENDING`: update or maintain check run status as `in_progress` with conclusion `null` (or commit status state `pending`), withholding approvals while awaiting in-flight CI runs or reviewer evaluations.
+   - If verdict is `FAIL` or `ERROR`: update check run status to `completed` with conclusion `failure` or `action_required` (or commit status state `failure` or `error`), and dismiss any prior approval review.
+   - If verdict is `STALE`: discard the evaluation run without publishing or updating check status, preventing an obsolete concurrent run from overwriting newer in-progress workflow evaluations.
 5. **Defense in Depth**:
    Repositories should enable GitHub's native "Require conversation resolution before merging" branch protection setting as an independent safeguard against race conditions.
 
@@ -248,14 +250,14 @@ When `semantic_verification.enabled: true` is configured:
 
 The following decision matrix defines the final verdict based on system inputs:
 
-| Case | Required CI Checks  | Required Reviewers Completed  | Unresolved Blocking Threads | Active CHANGES_REQUESTED | Reviewer Results Fresh? | Snapshot Unchanged? | Verdict   | Status Check Conclusion           | PR Approval Review |
-| :--- | :------------------ | :---------------------------- | :-------------------------- | :----------------------- | :---------------------- | :------------------ | :-------- | :-------------------------------- | :----------------- |
-| 1    | All Success         | All Complete                  | None (All Resolved)         | None                     | Yes                     | Yes                 | `PASS`    | `success`                         | Submit `APPROVE`   |
-| 2    | Queued / Running    | Any Incomplete                | None                        | None                     | Yes                     | Yes                 | `PENDING` | `action_required` / `in_progress` | Withhold           |
-| 3    | Any Failed          | All Complete                  | None                        | None                     | Yes                     | Yes                 | `FAIL`    | `failure`                         | Withhold           |
-| 4    | All Success         | Any Incomplete / Rate-Limited | None                        | None                     | Yes                     | Yes                 | `PENDING` | `action_required` / `in_progress` | Withhold           |
-| 5    | All Success         | All Complete                  | >= 1 Unresolved             | None                     | Yes                     | Yes                 | `FAIL`    | `failure`                         | Withhold           |
-| 6    | All Success         | All Complete                  | None                        | >= 1 Active              | Yes                     | Yes                 | `FAIL`    | `failure`                         | Withhold           |
-| 7    | All Success         | All Complete                  | None                        | None                     | No (Stale SHA)          | Yes                 | `PENDING` | `action_required` / `in_progress` | Withhold           |
-| 8    | All Success         | All Complete                  | None                        | None                     | Yes                     | No (Race)           | `STALE`   | `failure` (Invalidate)            | Withhold / Dismiss |
-| 9    | API Error / Timeout | N/A                           | N/A                         | N/A                      | N/A                     | N/A                 | `ERROR`   | `failure`                         | Withhold           |
+| Case | Required CI Checks  | Required Reviewers Completed  | Unresolved Blocking Threads | Active CHANGES_REQUESTED | Reviewer Results Fresh? | Snapshot Unchanged? | Verdict   | Check Run Status | Check Run Conclusion | Commit Status State | PR Approval Review |
+| :--- | :------------------ | :---------------------------- | :-------------------------- | :----------------------- | :---------------------- | :------------------ | :-------- | :--------------- | :------------------- | :------------------ | :----------------- |
+| 1    | All Success         | All Complete                  | None (All Resolved)         | None                     | Yes                     | Yes                 | `PASS`    | `completed`      | `success`            | `success`           | Submit `APPROVE`   |
+| 2    | Queued / Running    | Any Incomplete                | None                        | None                     | Yes                     | Yes                 | `PENDING` | `in_progress`    | `null`               | `pending`           | Withhold           |
+| 3    | Any Failed          | All Complete                  | None                        | None                     | Yes                     | Yes                 | `FAIL`    | `completed`      | `failure`            | `failure`           | Withhold / Dismiss |
+| 4    | All Success         | Any Incomplete / Rate-Limited | None                        | None                     | Yes                     | Yes                 | `PENDING` | `in_progress`    | `null`               | `pending`           | Withhold           |
+| 5    | All Success         | All Complete                  | >= 1 Unresolved             | None                     | Yes                     | Yes                 | `FAIL`    | `completed`      | `failure`            | `failure`           | Withhold / Dismiss |
+| 6    | All Success         | All Complete                  | None                        | >= 1 Active              | Yes                     | Yes                 | `FAIL`    | `completed`      | `failure`            | `failure`           | Withhold / Dismiss |
+| 7    | All Success         | All Complete                  | None                        | None                     | No (Stale SHA)          | Yes                 | `PENDING` | `in_progress`    | `null`               | `pending`           | Withhold           |
+| 8    | All Success         | All Complete                  | None                        | None                     | Yes                     | No (Race)           | `STALE`   | `DiscardRun`     | `null`               | Discard (No-op)     | Withhold / Abort   |
+| 9    | API Error / Timeout | N/A                           | N/A                         | N/A                      | N/A                     | N/A                 | `ERROR`   | `completed`      | `failure`            | `error`             | Withhold / Dismiss |

@@ -108,5 +108,5 @@ We designate the **required status check (implemented as a GitHub Checks API che
 
 This decision should be reconsidered if:
 - GitHub introduces native support for automatic approval dismissal upon new review comments on unchanged commits.
-- GitHub Changes API unifies review approvals and check runs into a single transactional primitive.
+- GitHub introduces an API that unifies review approvals and check runs into a single transactional primitive.
 - Branch protection deprecates commit-level status checks in favor of review rules exclusively.
