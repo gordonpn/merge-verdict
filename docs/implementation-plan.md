@@ -40,16 +40,17 @@ Implement the domain models, GitHub API data collection clients, reviewer normal
 2. **Implement Domain Models**:
    - Define and export Zod schemas in `src/models/` for `Severity`, `ReviewerStatus`, `NormalizedFinding`, `ReviewerExecutionRecord`, `CheckRunRecord`, and `ReviewSnapshot`.
 3. **Implement GitHub Data Collector**:
-   - Create `src/collector/github-collector.ts` using Octokit to execute batched GraphQL queries for PR review threads, reviews, check runs, and commit statuses.
+   - Create `src/collector/github-collector.ts` using Octokit to execute batched GraphQL queries for PR review threads, reviews, check runs, commit statuses, changed file paths, and base-branch `.github/merge-verdict.yml` policy configuration.
 4. **Implement Reviewer Normalization Adapters**:
    - `src/normalizers/coderabbit.ts`: Parse neutral check runs, rate-limit notices, and inline comments.
    - `src/normalizers/sourcery.ts`: Parse severity badges, `Addressed in [sha]` comment edits, and bot thread resolutions.
    - `src/normalizers/codex.ts`: Parse `codex-review-state:v1` JSON metadata and compare commit SHAs.
+   - `src/normalizers/copilot.ts`: Normalize `copilot-pull-request-reviewer[bot]` reviews, readiness assessments, and inline threads against `head_sha`.
    - `src/normalizers/deepseek.ts`: Parse textual verdicts (`APPROVE`, `APPROVE WITH MINOR FINDINGS`, `REQUEST CHANGES`, `BLOCK`).
    - `src/normalizers/generic-checks.ts`: Normalize CI check runs (`runner / test`, `runner / biome`, `CodeQL`, `codecov`).
 5. **Implement Deterministic Policy Engine**:
-   - Create `src/policy/evaluator.ts` implementing the 8 mandatory verification conditions from the policy specification.
-   - Output structured verdicts: `PASS`, `PENDING`, `FAIL`, `ERROR`, `STALE`.
+   - Create `src/policy/evaluator.ts` implementing the 8 mandatory verification conditions and path-based risk-tier evaluation (strictest-matching-tier-wins) from the policy specification.
+   - Output structured verdicts (`PASS`, `PENDING`, `FAIL`, `ERROR`, `STALE`), approval eligibility, and effort level (`lite`, `balanced`, `max`).
 6. **Create Comprehensive Unit Test Suite**:
    - Build fixture-driven unit tests in `tests/normalizers/` and `tests/policy/` using recorded payloads from SnapTally PRs #119, #120, and #121.
 
@@ -71,7 +72,7 @@ just test
 
 ### Objective
 
-Package the engine into a reusable GitHub Action that executes in workflow runs, publishes the `merge-verdict` status check via the Commit Status API, and submits genuine PR approval reviews.
+Package the engine into a reusable GitHub Action that executes in workflow runs, publishes the `merge-verdict` status check via the Commit Status API, and conditionally submits or delegates PR approval reviews when eligible under the matched risk tier and configured approval provider.
 
 ### Dependencies
 
@@ -87,8 +88,8 @@ Package the engine into a reusable GitHub Action that executes in workflow runs,
    - Create `action.yml` declaring inputs (`github-token`, `config-path`, `fail-fast`) and outputs (`verdict`, `summary`).
 3. **Implement Status Check Publisher**:
    - Create `src/publisher/commit-status.ts` calling `POST /repos/{owner}/{repo}/statuses/{sha}` with context `merge-verdict` and state `pending`, `success`, `failure`, or `error`.
-4. **Implement PR Review Approval Submitter**:
-   - Create `src/publisher/pr-review.ts` calling `POST /repos/{owner}/{repo}/pulls/{number}/reviews` with event `APPROVE` and structured Markdown summary body.
+4. **Implement Conditional PR Review Approval Submitter**:
+   - Create `src/publisher/pr-review.ts` calling `POST /repos/{owner}/{repo}/pulls/{number}/reviews` with event `APPROVE` and structured Markdown summary body when the matched path risk tier permits automated approval and the configured approval provider is eligible, or withholding approval when human review is required or provider is `none`.
 5. **Implement Concurrency and Self-Trigger Guard**:
    - Add actor and bot check filters to ignore workflow self-events and prevent infinite loops.
 6. **Provide Example Workflow Definition**:
@@ -97,7 +98,7 @@ Package the engine into a reusable GitHub Action that executes in workflow runs,
 ### Acceptance Criteria
 
 - Workflow executes successfully on `pull_request` and `pull_request_review` events.
-- On a passing PR, the action posts a green `merge-verdict` status check on the current head commit and submits an `APPROVE` review under `github-actions[bot]`.
+- On a passing PR, the action posts a green `merge-verdict` status check on the current head commit and submits an `APPROVE` review when eligible under the matched risk tier and configured approval provider (or withholds approval when ineligible).
 - Pushing a new commit immediately reverts the check to `pending` until re-evaluated.
 
 ### Verification Commands

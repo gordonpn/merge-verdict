@@ -67,6 +67,7 @@ The trigger subsystem is responsible for invoking the verification engine whenev
   - `check_run`: `completed` (optional filter for required external checks)
   - `workflow_run`: `completed` (optional trigger on CI pipeline finish)
   - `workflow_dispatch`: Manual invocation or programmatic trigger from external bridge
+  - `merge_group`: `checks_requested` (merge queue; evaluates the synthetic merge commit SHA)
 - **Optional Webhook Bridge**: A serverless edge function (such as Cloudflare Worker) that listens for `pull_request_review_thread` events (`resolved`, `unresolved`), which GitHub Actions cannot trigger on natively. The bridge dispatches a `workflow_dispatch` run to the target repository.
 
 ### 3.2. GitHub Data Collector
@@ -74,11 +75,12 @@ The trigger subsystem is responsible for invoking the verification engine whenev
 The data collector queries the GitHub REST and GraphQL APIs to assemble a coherent point-in-time snapshot of the PR.
 
 Responsibilities:
-- Fetch PR metadata: base branch, head branch, head SHA, mergeable status, draft state, author identity.
+- Fetch PR metadata: base branch, head branch, head SHA, mergeable status, draft state, author identity, and changed file paths.
 - Query review threads via GraphQL: thread ID, resolution status (`isResolved`), resolved by user, outdated status (`isOutdated`), and thread comment history.
+- Query top-level PR conversation comments: comment ID, author, body, update timestamp, and body digest for reviewer summaries and commands.
 - Query pull request reviews: reviewer identity, state (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), submission timestamp, commit SHA associated with the review.
 - Query check runs and commit statuses: check names, status (`queued`, `in_progress`, `completed`), conclusion (`success`, `failure`, `neutral`, `cancelled`, `timed_out`, `skipped`), and started/completed timestamps.
-- Read repository configuration file (`.github/merge-verdict.yml`) from the PR head commit (or base commit according to security policy).
+- Read repository configuration file (`.github/merge-verdict.yml`) exclusively from the protected base branch revision (`pull_request.base.sha` for pull request events, or `merge_group.base_sha` / `merge_group.base_ref` for merge queue events) and record that exact commit SHA as `policyVersion`, preventing an unmerged pull request from tampering with its own verification rules or risk tiers.
 
 ### 3.3. Reviewer Normalization Layer
 
@@ -88,6 +90,7 @@ Standardized adapter responsibilities:
 - **CodeRabbit Adapter**: Parses summary comments, identifies free-tier rate limit warnings (which produce neutral check runs without actual review), extracts inline actionable findings, and filters out high-level change summaries and promotional links.
 - **Sourcery Adapter**: Extracts inline review comments, maps severity badges (High, Medium, Low) to normalized severities, tracks explicit author acknowledgements (such as `Addressed in [commit]`), and recognizes bot thread resolutions.
 - **Codex Adapter**: Detects machine-readable review state markers (such as `<!-- codex-review-state:v1 ... -->`), extracts target commit SHA, verification status, and unresolved finding counters.
+- **GitHub Copilot Adapter**: Normalizes reviews from `copilot-pull-request-reviewer[bot]`, extracts approval readiness assessments and inline review threads, and verifies reviewer freshness by comparing `review.commit_id` against the current PR `head_sha` (distinct from the synthetic `merge_group.head_sha` used to publish the merge-queue check run, so PR reviews are evaluated against the underlying PR head SHA while CI checks and status publication bind to the merge-group evaluation SHA).
 - **DeepSeek Review Adapter**: Parses textual verdicts from workflow outputs or PR comments (e.g. `APPROVE`, `APPROVE WITH MINOR FINDINGS`, `REQUEST CHANGES`, `BLOCK`), extracts material findings and failure scenarios.
 - **PR-Agent Adapter**: Parses ticket compliance analysis and review guide comments.
 - **Generic Linter / Status Adapter**: Normalizes GitHub check runs (Biome, Actionlint, CodeQL, CI test suites) into uniform check assertions.
@@ -97,12 +100,13 @@ Standardized adapter responsibilities:
 The core policy engine evaluates the normalized snapshot against configured rules without calling external AI models.
 
 Responsibilities:
-- **Required Check Rule**: Asserts that every configured CI check has completed with conclusion `success`.
+- **Required Check Rule**: Asserts that every configured CI check has completed with conclusion `success`, or with `neutral` or `skipped` when explicitly permitted by repository configuration.
 - **Reviewer Completion Rule**: Asserts that all mandatory reviewers have posted completed reviews for the current PR snapshot.
 - **Thread Resolution Rule**: Asserts that no review threads remain unresolved, or that all unresolved threads are non-blocking advisory notes according to policy.
 - **Blocking Decision Rule**: Asserts that no active `CHANGES_REQUESTED` review decisions remain.
 - **Freshness Rule**: Asserts that all reviewer findings and review states evaluate the current PR head SHA.
-- **Atomic Pre-Flight Guard**: Computes a state fingerprint of the PR snapshot and re-verifies that the head SHA and review count have not mutated before proceeding to publication.
+- **Path Risk-Tier Rule**: Evaluates modified file paths against repository-defined risk tiers (`low`, `high`) using the strictest-matching-tier-wins rule to determine automated approval eligibility, mandatory human review requirements, and verification effort level (`lite`, `balanced`, `max`).
+- **Atomic Pre-Flight Guard**: Computes a state fingerprint of the PR snapshot (including `head_sha`, thread states, review submissions, and mutable thread or top-level comment identifiers, update timestamps, and body digests) and re-verifies that the fingerprint has not mutated before proceeding to publication.
 
 ### 3.5. Optional Semantic Verification Engine
 
@@ -110,6 +114,7 @@ When deterministic rules encounter ambiguous findings (for example, a thread lef
 
 Characteristics:
 - Communicates with any OpenAI-compatible API endpoint (such as DeepSeek).
+- Conditioned on configured effort tiers (`lite`, `balanced`, `max`) so expensive semantic inference is invoked only for unresolved ambiguity or high-risk file paths.
 - Receives only the isolated finding, the specific code diff hunk, and developer comments.
 - Uses structured JSON outputs with strict Zod validation.
 - Operates under strict token and budget limits.
@@ -117,23 +122,31 @@ Characteristics:
 
 ### 3.6. Verdict and Approval Publisher
 
-The publisher translates the engine verdict into official GitHub artifacts:
-- **Status Check**: Creates or updates a status check named `merge-verdict` targeting the PR `head_sha`. In Tier 1 (`GITHUB_TOKEN`), calls `POST /repos/{owner}/{repo}/statuses/{sha}`. In Tier 2 (GitHub App), calls `POST /repos/{owner}/{repo}/check-runs` with detailed Markdown summaries.
-- **Pull Request Review**: When verdict is `PASS`, submits an official review (`POST /repos/{owner}/{repo}/pulls/{number}/reviews`) with event `APPROVE`. If a previously approved PR becomes `FAIL` or `STALE`, the publisher dismisses the prior approval review or posts an invalidating status update.
+The publisher translates the engine verdict into official GitHub artifacts while separating the verification assessment, approval emission eligibility, and branch-protection recognition:
+- **Status Check (Authoritative Gate)**:
+  - **Tier 1 (Commit Status Fallback)**: When running under default `GITHUB_TOKEN`, the publisher calls the Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) with context `merge-verdict`, targeting the event evaluation SHA: `pull_request.head_sha` for pull request events or `merge_group.head_sha` for `merge_group` events. It emits commit status states (`pending`, `success`, `failure`, `error`) and a concise description up to 140 characters.
+  - **Tier 2 (Checks API Check Run)**: When authenticated with a dedicated GitHub App installation token, the publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the event evaluation SHA: `pull_request.head_sha` for pull request events or `merge_group.head_sha` for `merge_group` events. It manages the full check run lifecycle (`status: in_progress`, `status: completed` with conclusions `success`, `failure`, or `action_required`), rich Markdown summaries, finding breakdowns, and commit-pinned annotations.
+    As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), both tiers serve as the primary automated merge gate required by branch protection.
+- **Configurable Approval Provider Abstraction (PR Review Endorsement)**: When verdict is `PASS` and the matched path risk tier permits automated approval, Merge Verdict submits or verifies a formal `APPROVE` review via a configurable provider (`github_copilot` or `github_app`):
+  - `github_copilot`: Requests a Copilot code review on `head_sha` (with effort matched to the path risk tier) or verifies an existing active `APPROVE` review from `copilot-pull-request-reviewer[bot]`.
+  - `github_app`: Submits an official review (`POST /repos/{owner}/{repo}/pulls/{number}/reviews`) with event `APPROVE` under the Merge Verdict App identity as a dedicated audit endorsement.
+  - When a high-risk path tier requires human endorsement (`require_human_review: true`), automated `APPROVE` emission is withheld until human review is satisfied.
+    If a previously approved PR becomes `FAIL` or `STALE`, the publisher dismisses its prior approval review or posts an invalidating status update.
 
 ## 4. GitHub Actions vs. GitHub App Integration Models
 
 Merge Verdict supports two deployment models to accommodate different repository requirements.
 
-| Feature / Dimension          | Actions-Only (Tier 1)                                      | Actions + GitHub App Identity (Tier 2)                      |
-| ---------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- |
-| Infrastructure required      | None                                                       | GitHub App registration (free, self-hosted)                 |
-| Authentication credential    | Runner `${{ secrets.GITHUB_TOKEN }}`                       | Dynamic token via `${{ secrets.APP_PRIVATE_KEY }}`          |
-| Status Check API             | GitHub Commit Status API (`POST /statuses/{sha}`)          | GitHub Checks API (`POST /check-runs`)                      |
-| Check annotations & markdown | Basic status description (up to 140 chars)                 | Full Markdown body, summary tables, inline annotations      |
-| PR Approval Review           | Supported if repo allows Actions PR approval               | Fully supported under dedicated bot identity                |
-| Repo settings requirement    | "Allow GitHub Actions to create and approve pull requests" | Standard repository settings; no special workflow overrides |
-| Security boundary            | Bounded by workflow token permissions                      | Bounded by scoped GitHub App installation permissions       |
+| Feature / Dimension             | Actions-Only (Tier 1)                                      | Actions + GitHub App Identity (Tier 2)                      |
+| :------------------------------ | :--------------------------------------------------------- | :---------------------------------------------------------- |
+| Infrastructure required         | None                                                       | GitHub App registration (free, self-hosted)                 |
+| Authentication credential       | Runner `${{ secrets.GITHUB_TOKEN }}`                       | Dynamic token via `${{ secrets.APP_PRIVATE_KEY }}`          |
+| Status Check API                | GitHub Commit Status API (`POST /statuses/{sha}`)          | GitHub Checks API (`POST /check-runs`)                      |
+| Check annotations & markdown    | Basic status description (up to 140 chars)                 | Full Markdown body, summary tables, inline annotations      |
+| PR Approval Review              | Supported if repo allows Actions PR approval               | Fully supported under dedicated bot identity                |
+| Repo settings requirement       | "Allow GitHub Actions to create and approve pull requests" | Standard repository settings; no special workflow overrides |
+| Security boundary               | Bounded by workflow token permissions                      | Bounded by scoped GitHub App installation permissions       |
+| Workflow dispatch compatibility | Dispatch jobs may not register as required PR checks       | App-created check runs reliably satisfy branch protection   |
 
 ### Relationship Between Actions and GitHub App
 
@@ -145,7 +158,7 @@ Merge Verdict operates in GitHub Actions in both models. In Tier 2, the workflow
 
 ## 5. Data Flow and Event-to-Verdict Sequence
 
-The sequence diagram below details the execution lifecycle from a code update to published verdict.
+The Tier 2 sequence diagram below details the GitHub App Checks API lifecycle from a code update to a published verdict, including the fast invalidation path. Tier 1 uses the equivalent Commit Status API states: `pending`, `success`, `failure`, and `error`.
 
 ```mermaid
 sequenceDiagram
@@ -156,9 +169,10 @@ sequenceDiagram
     participant Core as Merge Verdict Engine
     participant LLM as Optional LLM (DeepSeek)
 
-    Dev->>GH: Push commit or resolve thread
+    Dev->>GH: Push commit or update review thread
     GH->>WF: Trigger workflow (pull_request / review)
     WF->>WF: Acquire PR concurrency lock (cancel-in-progress)
+    WF->>GH: Fast Invalidation: set Tier 2 check run in_progress / non-passing
     WF->>Core: Invoke verification engine
 
     Core->>GH: Query PR metadata, reviews, threads, checks (REST & GraphQL)
@@ -173,38 +187,48 @@ sequenceDiagram
         LLM-->>Core: Return structured evaluation (RESOLVED / UNRESOLVED)
     end
 
-    Core->>GH: Pre-flight check: re-verify head SHA is unchanged
-    GH-->>Core: Head SHA confirmed current
+    Core->>GH: Pre-flight check: re-verify head SHA and fingerprint unchanged
+    GH-->>Core: Snapshot confirmed current
 
     alt Verification Passed (Verdict = PASS)
-        Core->>GH: Post status check 'merge-verdict' (SUCCESS)
-        Core->>GH: Submit PR Review (APPROVE)
-    else Verification Failed or Incomplete (Verdict != PASS)
-        Core->>GH: Post status check 'merge-verdict' (PENDING or FAILURE)
+        Core->>GH: Update check run 'merge-verdict' (SUCCESS)
+        opt Automated Approval Eligible for Path Risk Tier
+            Core->>GH: Submit PR Review (APPROVE)
+        end
+    else Verification Pending
+        Core->>GH: Maintain check run 'merge-verdict' (IN_PROGRESS)
+    else Verification Failed or Errored
+        Core->>GH: Update check run 'merge-verdict' (FAILURE or ACTION_REQUIRED)
         opt Prior Approval Exists
-            Core->>GH: Dismiss prior approval or post invalidation notice
+            Core->>GH: Dismiss prior approval review
         end
     end
 ```
 
 ## 6. Architectural Alternatives Evaluated
 
-Detailed design rationale and historical alternatives are recorded in [ADR 0001: Actions-First Hybrid Architecture](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0001-actions-first-architecture.md).
+Detailed design rationale and historical alternatives are recorded in:
+- [ADR 0001: Actions-First Hybrid Architecture](docs/adr/0001-actions-first-architecture.md)
+- [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md)
 
 Summary of rejected approaches:
 - **Standalone 24/7 Cloud Service with Database**: Rejected to avoid split-brain review state against GitHub, operational hosting costs, database migration complexity, and customer adoption friction.
 - **Pure Actions Without GitHub App Support**: Rejected as sole design because default `GITHUB_TOKEN` cannot call the Checks API and requires enabling risky repo-wide Actions PR approval settings.
+- **Formal PR Approval as Primary Merge Gate**: Rejected because PR authors cannot approve own PRs, human review thresholds conflict with bot approvals, and approvals do not dismiss automatically on new review comments on unchanged commits.
 - **Heavy Agent Frameworks (LangChain, LangGraph, Vector DBs)**: Rejected because Merge Verdict is a deterministic policy reconciler, not a conversational agent. A lightweight OpenAI-compatible client adapter is sufficient for optional semantic evaluation.
 
 ## 7. Open Questions and Architectural Uncertainties
 
 The following technical questions require live platform validation during early milestone implementation:
 
-### 7.1. GitHub App Approval Satisfaction Under Branch Protection
+### 7.1. GitHub App and Copilot Approval Satisfaction Under Branch Protection
 
-- **Uncertainty**: While a GitHub App installation token with `pull_requests: write` can submit an `APPROVE` review, platform behavior varies based on whether branch protection requires approvals from specific Code Owners or human members, and whether "Dismiss stale approvals" cleanly dismisses App reviews upon new commits.
-- **Recommended Default**: Rely on the required status check (`merge-verdict`) as the authoritative hard merge gate under branch protection, treating the PR approval review as the visible native review endorsement.
-- **Validation Plan**: Execute Milestone 3 live test cases against protected branches with different branch rule permutations.
+- **Uncertainty**: While GitHub Copilot (`copilot-pull-request-reviewer[bot]`) received native merge-approval privileges in October 2026 when enabled in repository settings, arbitrary third-party GitHub Apps (`merge-verdict[bot]`) do not automatically receive the same privilege under human or Code Owner review rules.
+- **Recommended Default**: Rely on the required status check (`merge-verdict`) as the non-bypassable authoritative merge gate across all approval providers (`github_copilot`, `github_app`, `none`), separating the verification verdict from approval emission and merge-rule recognition.
+- **Validation Plan**: Execute three live validation experiments on a disposable pull request:
+  1. Whether native Copilot approval counts toward GitHub's configured required-review threshold.
+  2. Whether the `merge-verdict` required check run independently blocks merging despite an active Copilot approval.
+  3. Whether a new blocking review comment on an unchanged commit SHA invalidates Merge Verdict's prior `success` check run.
 
 ### 7.2. Zero-Comment Thread Resolution Latency
 

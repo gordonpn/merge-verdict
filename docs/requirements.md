@@ -4,34 +4,35 @@
 
 Merge Verdict is an automated, evidence-based pull request (PR) verification and approval engine.
 
-In modern AI-assisted engineering workflows, coding agents (such as Codex CLI, OpenCode, and terminal-based assistants) draft pull requests, while multiple automated code reviewers (such as CodeRabbit, Sourcery, Codex review connectors, PR-Agent, DeepSeek Review, Biome, Actionlint, and CodeQL) inspect the changes. These reviewers produce overlapping, disparate, and sometimes conflicting feedback across GitHub comments, review threads, commit statuses, and check runs.
+In modern AI-assisted engineering workflows, coding agents (such as Codex CLI, OpenCode, and terminal-based assistants) draft pull requests, while multiple automated code reviewers (such as GitHub Copilot, CodeRabbit, Sourcery, Codex review connectors, PR-Agent, DeepSeek Review, Biome, Actionlint, and CodeQL) inspect the changes. These reviewers produce overlapping, disparate, and sometimes conflicting feedback across GitHub comments, review threads, commit statuses, and check runs.
 
 Engineers must manually check whether all automated reviewers have finished, reconcile multiple comment formats, confirm whether unresolved threads were addressed, verify that required CI tests passed, and decide whether the PR is ready to merge.
 
-Merge Verdict automates this reconciliation. It continuously verifies PR review feedback against a defined verification policy and produces two concrete GitHub outputs:
-1. A **GitHub required status check** (named `merge-verdict`) that gates merging via branch protection or repository rulesets.
-2. An **actual GitHub PR review with `APPROVE`** when all policy conditions are satisfied.
+Merge Verdict automates this reconciliation. It continuously verifies PR review feedback against a defined verification policy and produces two core outputs:
+1. A **GitHub required status check** (named `merge-verdict`) that serves as the authoritative merge gate under branch protection or repository rulesets.
+2. An **official GitHub PR review with `APPROVE`** via a configurable approval provider (`github_copilot` or `github_app`) when all policy and path risk-tier conditions are satisfied.
 
 ### Fundamental Distinction
 
-Merge Verdict is not a general-purpose AI code reviewer. It does not replace CodeRabbit, Sourcery, Codex, DeepSeek, or CodeQL. Instead, Merge Verdict is a meta-reviewer and verification orchestrator: it verifies the completion, freshness, and consistency of the existing review process without duplicating the underlying code analysis.
+Merge Verdict is not a general-purpose AI code reviewer. It does not replace GitHub Copilot, CodeRabbit, Sourcery, Codex, DeepSeek, or CodeQL. Instead, Merge Verdict is a meta-reviewer and verification orchestrator: it verifies the completion, freshness, and consistency of the existing review process without duplicating the underlying code analysis.
 
 ## 2. Project Scope and Boundaries
 
 ### In Scope
 
 - Reconciling heterogeneous reviewer outputs into a normalized internal data model.
-- Evaluating pull request review state against deterministic, configurable verification policies.
+- Evaluating pull request review state against deterministic, configurable verification policies loaded from the protected base branch.
+- Evaluating modified file paths against repository-controlled risk tiers (strictest-matching-tier-wins) to govern automated approval eligibility, human review requirements, and verification effort levels.
 - Tracking GitHub review threads, inline comments, top-level review summaries, and review submission states (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`).
 - Checking the completion status and conclusion of required CI checks, linters, and security analyzers.
 - Detecting stale reviewer findings associated with older commits (commit SHA mismatch).
 - Detecting incomplete, skipped, failed, or rate-limited reviewer runs.
 - Publishing required status checks (`merge-verdict`) via the GitHub Commit Status API and GitHub Checks API.
-- Submitting official GitHub `APPROVE` reviews when verification passes.
+- Submitting or verifying official GitHub `APPROVE` reviews via configurable approval providers (`github_copilot` or `github_app`) while separating the `PASS` assessment from approval emission eligibility and branch-protection recognition.
 - Invalidating or updating previous verdicts when new review comments, thread updates, or commits arrive.
 - Idempotent execution and concurrency controls to prevent event storms and self-triggering loops.
-- Reusable configuration via repository-level configuration files (such as `.github/merge-verdict.yml`).
-- Optional escalation to an OpenAI-compatible LLM endpoint (such as DeepSeek) solely for evaluating ambiguous or unresolved findings that cannot be resolved deterministically.
+- Reusable configuration via repository-level configuration files (`.github/merge-verdict.yml`).
+- Optional escalation to an OpenAI-compatible LLM endpoint (such as DeepSeek) conditioned on unresolved ambiguity or path risk tiers (`lite`, `balanced`, `max`).
 
 ### Out of Scope (Non-Goals)
 
@@ -99,39 +100,42 @@ The system must publish a status check named `merge-verdict` targeting the curre
 - GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) when authenticated as a GitHub App.
   The check must reflect the computed outcome (`pending`, `success`, `failure`, `error`).
 
-### FR-12: Official GitHub PR Approval Submission
+### FR-12: Configurable PR Approval Provider and Eligibility Separation
 
-When all configured verification requirements are satisfied, the system must submit an official GitHub pull request review with event `APPROVE`. The review body must provide a concise, structured evidence summary detailing which checks passed, which reviewers completed, and why all threads are considered reconciled.
+The system must separate the verification verdict (`PASS`), approval emission eligibility (governed by repository policy and path risk tiers), and whether GitHub branch protection recognizes that approval as satisfying required review rules. When verification passes and automated approval is permitted, the publisher must support three configurable approval providers:
+- `github_copilot`: Requests or verifies a review from `copilot-pull-request-reviewer[bot]` on the current head SHA and checks whether its formal `APPROVE` review is active.
+- `github_app`: Submits an official GitHub pull request review with event `APPROVE` and a concise evidence summary referencing the authoritative `merge-verdict` check run.
+- `none`: Publishes only the authoritative `merge-verdict` check run without emitting a formal PR approval review.
 
 ### FR-13: Policy-Driven Approval Withholding and Invalidation
 
 The system must withhold approval whenever verification is incomplete, failing, stale, or ambiguous under configured rules. Furthermore, if a PR was previously approved by Merge Verdict and subsequent activity (such as a new commit or a reopened review thread) invalidates that approval:
-- The `merge-verdict` status check must immediately transition to `pending` or `failure`.
+- The `merge-verdict` check must immediately transition to `pending` or `failure` for Tier 1 Commit Status, or to `status: in_progress` (with `conclusion: null`) or `status: completed` with a blocking conclusion (`failure` or `action_required`) for Tier 2 Checks API runs.
 - The existing approval must be dismissed or superseded according to configuration.
 
 ### FR-14: Loop Prevention and Self-Event Filtering
 
 The system must detect and ignore events generated by its own bot identity or workflow runs (such as its own status check creations, comments, and review submissions) to prevent recursive event loops.
 
-### FR-15: Reusable Multi-Repository Configuration
+### FR-15: Base-Branch Policy Configuration and Path-Based Risk Tiers
 
-The system must load repository-specific policies from a tracked YAML configuration file (defaulting to `.github/merge-verdict.yml`). Sensible, secure defaults must apply when configuration options are omitted.
+The system must load repository-specific policies from a tracked YAML configuration file (`.github/merge-verdict.yml`) evaluated exclusively from the protected base branch revision. The configuration must support path-based risk tiers (such as `low` for documentation and `high` for workflows, authentication, or security-critical directories), where the strictest matching risk tier governs mixed-file pull requests. Sensible, fail-closed defaults must apply when configuration options are omitted.
 
-### FR-16: Optional Semantic Verification via LLM
+### FR-16: Configurable Effort Levels and Optional Semantic Verification
 
-The system must support an optional semantic verification module. When enabled, ambiguous or contested findings that cannot be resolved deterministically can be submitted to an OpenAI-compatible endpoint (such as DeepSeek) with strict token budgets, structured JSON schema outputs, and fail-closed defaults.
+The system must support configurable verification and review effort levels (`lite`, `balanced`, `max`) so expensive semantic inference or multi-agent review requests are reserved for unresolved ambiguity or high-risk code paths. When semantic verification is enabled, contested findings that cannot be resolved deterministically can be submitted to an OpenAI-compatible endpoint (such as DeepSeek) with strict token budgets, structured JSON schema outputs, and fail-closed defaults.
 
 ## 4. Verification Outcome States
 
 Every evaluation must resolve to exactly one of the following five core outcome states:
 
-| Internal State | Description                                                                                                                              | GitHub Commit Status | GitHub Check Run Conclusion     | PR Approval Review Eligible |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------- | --------------------------- |
-| `PENDING`      | Required checks or reviewers have not yet completed; evaluation is waiting for completion signals.                                       | `pending`            | `in_progress` (or omitted)      | No                          |
-| `PASS`         | All configured verification conditions and policy rules are strictly satisfied for the current PR snapshot.                              | `success`            | `success`                       | Yes (Submit `APPROVE`)      |
-| `FAIL`         | One or more mandatory verification criteria are violated (e.g. failing CI, unresolved blocking thread, unaddressed `CHANGES_REQUESTED`). | `failure`            | `failure`                       | No                          |
-| `ERROR`        | Verification could not complete reliably due to infrastructure failures, API rate limits, or network errors.                             | `error`              | `action_required` / `timed_out` | No                          |
-| `STALE`        | The evaluation snapshot has been superseded by a newer commit or newer review activity.                                                  | `pending`            | `neutral` / `cancelled`         | No                          |
+| Internal State | Description                                                                                                                              | GitHub Commit Status | GitHub Check Run Status | GitHub Check Run Conclusion   | PR Approval Review Eligible |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ----------------------- | ----------------------------- | --------------------------- |
+| `PENDING`      | Required checks or reviewers have not yet completed; evaluation is waiting for completion signals.                                       | `pending`            | `in_progress`           | `null`                        | No                          |
+| `PASS`         | All configured verification conditions and policy rules are strictly satisfied for the current PR snapshot.                              | `success`            | `completed`             | `success`                     | Yes (If risk tier permits)  |
+| `FAIL`         | One or more mandatory verification criteria are violated (e.g. failing CI, unresolved blocking thread, unaddressed `CHANGES_REQUESTED`). | `failure`            | `completed`             | `failure`                     | No                          |
+| `ERROR`        | Verification could not complete reliably due to infrastructure failures, API rate limits, or network errors.                             | `error`              | `completed`             | `failure` / `action_required` | No                          |
+| `STALE`        | The evaluation snapshot has been superseded by a newer commit or newer review activity.                                                  | `error` or no write  | `completed` or no write | `action_required` or no write | No                          |
 
 ## 5. Non-Functional Requirements
 
@@ -165,6 +169,6 @@ Every evaluation must resolve to exactly one of the following five core outcome 
 ## 6. Success Criteria and Acceptance
 
 1. **Deterministic Verification Gate**: Merge Verdict successfully prevents PR merges on protected branches when any required check fails, any thread is unresolved, or any required reviewer is missing.
-2. **Native Approval Delivery**: Upon satisfaction of all policy criteria, Merge Verdict posts a green `merge-verdict` status check and a valid GitHub PR review with state `APPROVE`.
+2. **Native Approval Delivery**: Upon satisfaction of all policy criteria, Merge Verdict posts a green `merge-verdict` status check and, when eligible under the matched path risk tier and configured approval provider (`github_copilot` or `github_app`), emits or verifies a formal GitHub PR review with state `APPROVE` (or withholds approval when the risk tier requires human review or the provider is `none`).
 3. **Staleness Protection**: Pushing a new commit immediately transitions the `merge-verdict` check from `success` back to `pending`, preventing merges until all criteria are re-verified on the new commit SHA.
 4. **Zero-Configuration Viability**: A repository can install Merge Verdict by referencing the standard GitHub Action in a workflow file, immediately obtaining baseline verification without custom server configuration.

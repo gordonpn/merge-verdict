@@ -4,14 +4,14 @@ Merge Verdict is an automated, evidence-based pull request (PR) verification and
 
 ## Overview
 
-Modern software development teams increasingly employ AI coding agents to author pull requests, followed by multiple automated code review tools (such as CodeRabbit, Sourcery, Codex review connectors, PR-Agent, DeepSeek Review, Biome, Actionlint, and CodeQL) to review changes.
+Modern software development teams increasingly employ AI coding agents to author pull requests, followed by multiple automated code review tools (such as GitHub Copilot, CodeRabbit, Sourcery, Codex review connectors, PR-Agent, DeepSeek Review, Biome, Actionlint, and CodeQL) to review changes.
 
 These automated reviewers generate disparate, overlapping, and sometimes contradictory feedback across GitHub comments, review threads, and check runs. Engineering developers are left with the tedious task of manually tracking down reviewer outputs, verifying whether unresolved threads were addressed, checking that automated reviewers actually finished on the latest commit, and deciding whether the pull request is safe to merge.
 
-Merge Verdict solves this reconciliation bottleneck. It acts as an automated verification orchestrator that monitors pull request activity, normalizes reviewer findings, verifies review completion and thread resolution against a defined policy, and publishes:
+Merge Verdict solves this reconciliation bottleneck. It acts as an automated verification orchestrator that monitors pull request activity, normalizes reviewer findings, verifies review completion and thread resolution against a base-branch policy, and publishes two core outputs:
 
-1. A **GitHub required status check** (named `merge-verdict`) to enforce branch protection.
-2. An **official GitHub pull request review with `APPROVE`** when all policy requirements are met.
+1. A **GitHub required status check** (named `merge-verdict`) to enforce branch protection as the authoritative automated merge gate.
+2. An **official GitHub pull request review with `APPROVE`** via a configurable approval provider (`github_copilot` or `github_app`) when all policy and path risk-tier requirements are met.
 
 The developer remains responsible for executing the merge. Automatic merging is explicitly out of scope.
 
@@ -19,14 +19,15 @@ The developer remains responsible for executing the merge. Automatic merging is 
 
 ### What It Does
 
-- Evaluates PR review feedback against a configurable, deterministic verification policy.
+- Evaluates PR review feedback against a configurable, deterministic verification policy loaded from the protected base branch.
+- Enforces path-based risk tiers (strictest-matching-tier-wins) to tailor automated approval eligibility, human review requirements, and verification effort levels (`lite`, `balanced`, `max`).
 - Reconciles heterogeneous review outputs from multiple tools into a unified data model.
 - Verifies that all required CI tests, security analyzers, and linters completed with success.
 - Detects unresolved review threads and outstanding `CHANGES_REQUESTED` decisions.
 - Identifies stale reviewer findings that evaluate older commits rather than the PR head.
 - Detects rate-limited, incomplete, or skipped reviewer runs.
 - Enforces state freshness to prevent race conditions during review updates.
-- Publishes status checks (`merge-verdict`) and submits official PR `APPROVE` reviews.
+- Separates the verification verdict (`PASS`) from approval emission and branch-protection recognition across configurable approval providers (`github_copilot`, `github_app`, `none`).
 
 ### What It Does Not Do
 
@@ -48,7 +49,7 @@ Merge Verdict adopts an **Actions-first hybrid architecture**:
 - **Flexible Identity**: Supports standard `GITHUB_TOKEN` credentials for zero-infrastructure setups, and seamlessly upgrades to dedicated GitHub App installation tokens for native Checks API integration and independent bot identity.
 - **Decoupled Engine**: Core logic is implemented as a standalone TypeScript library, allowing it to run within GitHub Actions, a CLI, or an edge worker without modification.
 
-For full architectural details, see [docs/architecture.md](file:///Users/gordonpn/workspace/merge-verdict/docs/architecture.md).
+For full architectural details, see [docs/architecture.md](docs/architecture.md).
 
 ## Project Status
 
@@ -56,12 +57,14 @@ Merge Verdict is currently in the **foundation and architecture phase**. The arc
 
 ## Documentation Index
 
-- [Requirements Specification](file:///Users/gordonpn/workspace/merge-verdict/docs/requirements.md): Functional and non-functional requirements, outcome states, and acceptance criteria.
-- [Architecture Design](file:///Users/gordonpn/workspace/merge-verdict/docs/architecture.md): Subsystems, component responsibilities, data flow, and Mermaid diagrams.
-- [Verification Policy](file:///Users/gordonpn/workspace/merge-verdict/docs/verification-policy.md): Verification conditions, severity handling, staleness rules, and decision matrix.
-- [Reviewer Integrations](file:///Users/gordonpn/workspace/merge-verdict/docs/reviewer-integrations.md): Observed behavior from SnapTally reference PRs and normalized schemas.
-- [Events and State](file:///Users/gordonpn/workspace/merge-verdict/docs/events-and-state.md): Event coverage, thread-resolution limitations, concurrency, and state transitions.
-- [Security Architecture](file:///Users/gordonpn/workspace/merge-verdict/docs/security.md): Threat model, token permissions, fork isolation, and prompt injection defense.
-- [Implementation Plan](file:///Users/gordonpn/workspace/merge-verdict/docs/implementation-plan.md): Five-milestone roadmap with explicit tasks and acceptance criteria.
-- [Testing Strategy](file:///Users/gordonpn/workspace/merge-verdict/docs/testing.md): Unit tests, reference PR replay fixtures, and simulated edge-case testing.
-- [ADR 0001: Actions-First Architecture](file:///Users/gordonpn/workspace/merge-verdict/docs/adr/0001-actions-first-architecture.md): Architectural decision record evaluating standalone service vs Actions-first design.
+- [Requirements Specification](docs/requirements.md): Functional and non-functional requirements, outcome states, and acceptance criteria.
+- [Architecture Design](docs/architecture.md): Subsystems, component responsibilities, data flow, and Mermaid diagrams.
+- [Verification Policy](docs/verification-policy.md): Verification conditions, severity handling, staleness rules, and decision matrix.
+- [Reviewer Integrations](docs/reviewer-integrations.md): Observed behavior from SnapTally reference PRs and normalized schemas.
+- [Events and State](docs/events-and-state.md): Event coverage, thread-resolution limitations, concurrency, and state transitions.
+- [Security Architecture](docs/security.md): Threat model, token permissions, fork isolation, and prompt injection defense.
+- [Implementation Plan](docs/implementation-plan.md): Five-milestone roadmap with explicit tasks and acceptance criteria.
+- [Testing Strategy](docs/testing.md): Unit tests, reference PR replay fixtures, and simulated edge-case testing.
+- [ADR 0001: Actions-First Architecture](docs/adr/0001-actions-first-architecture.md): Architectural decision record evaluating standalone service vs Actions-first design.
+- [ADR 0002: Authoritative Status Check vs PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md): Architectural decision record establishing required status checks as the authoritative merge gate over formal PR approvals.
+- [Agent Engineering Guidelines](AGENTS.md): Repository guidelines, memory authority rules, and project invariants for coding agents.
