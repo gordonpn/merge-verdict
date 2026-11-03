@@ -32,7 +32,7 @@ We must decide which mechanism serves as the authoritative automated merge gate 
 Two specific GitHub platform behaviors directly affect this architectural decision:
 
 1. **GitHub Branch Protection Accepts `neutral` and `skipped` as Passing**:
-   GitHub branch protection considers check conclusions of `neutral` and `skipped` to satisfy required status checks. Therefore, Merge Verdict must never emit `neutral` or `skipped` for non-passing outcomes. Every non-passing outcome (`FAIL`, `STALE`, `PENDING`, `ERROR`) must be published with a blocking conclusion (`failure` or `action_required`) to prevent premature merge enablement.
+   GitHub branch protection considers check conclusions of `neutral` and `skipped` to satisfy required status checks. Therefore, Merge Verdict must never emit `neutral` or `skipped` for non-passing outcomes. Every terminal non-passing outcome (`FAIL`, `STALE`, `ERROR`) must be published with a blocking conclusion (`failure` or `action_required`) to prevent premature merge enablement. `PENDING` remains an in-progress check run with conclusion `null`.
 2. **Workflow-Triggered Jobs May Not Count as Required PR Checks**:
    An ordinary GitHub Actions workflow triggered via `workflow_dispatch` or `issue_comment` does not automatically register as a required pull request check run unless created explicitly through the GitHub Checks API via a GitHub App token. Using Checks API check runs created under GitHub App identity avoids this workflow trigger limitation.
 

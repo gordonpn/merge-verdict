@@ -149,7 +149,7 @@ Merge Verdict operates in GitHub Actions in both models. In Tier 2, the workflow
 
 ## 5. Data Flow and Event-to-Verdict Sequence
 
-The sequence diagram below details the execution lifecycle from a code update to published verdict, including the fast invalidation path.
+The Tier 2 sequence diagram below details the GitHub App Checks API lifecycle from a code update to a published verdict, including the fast invalidation path. Tier 1 uses the equivalent Commit Status API states: `pending`, `success`, `failure`, and `error`.
 
 ```mermaid
 sequenceDiagram
@@ -163,7 +163,7 @@ sequenceDiagram
     Dev->>GH: Push commit or update review thread
     GH->>WF: Trigger workflow (pull_request / review)
     WF->>WF: Acquire PR concurrency lock (cancel-in-progress)
-    WF->>GH: Fast Invalidation: set merge-verdict check to in_progress / non-passing
+    WF->>GH: Fast Invalidation: set Tier 2 check run in_progress / non-passing
     WF->>Core: Invoke verification engine
 
     Core->>GH: Query PR metadata, reviews, threads, checks (REST & GraphQL)
@@ -186,7 +186,9 @@ sequenceDiagram
         opt Optional PR Review Approval Enabled
             Core->>GH: Submit PR Review (APPROVE)
         end
-    else Verification Failed or Incomplete (Verdict != PASS)
+    else Verification Pending
+        Core->>GH: Maintain check run 'merge-verdict' (IN_PROGRESS)
+    else Verification Failed or Errored
         Core->>GH: Update check run 'merge-verdict' (FAILURE or ACTION_REQUIRED)
         opt Prior Approval Exists
             Core->>GH: Dismiss prior approval review

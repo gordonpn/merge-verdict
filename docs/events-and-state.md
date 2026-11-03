@@ -142,10 +142,12 @@ stateDiagram-v2
     Evaluating --> Error: GitHub API error or network failure
     Evaluating --> Passing: All 8 policy conditions satisfied
 
-    Pending --> PostCheckPending: Update check run (action_required / in_progress)
+    Pending --> PostCheckPending: Maintain check run (in_progress)
     Failing --> PostCheckFailure: Update check run (failure)
     Error --> PostCheckError: Update check run (failure)
-    Stale --> DiscardRun: Discard without publishing
+    Stale --> CheckNewerOwner: Re-read current check owner
+    CheckNewerOwner --> DiscardRun: Newer owner is in_progress or blocking
+    CheckNewerOwner --> PostCheckStale: Publish blocking conclusion
 
     Passing --> PreFlightVerify: Check head SHA and fingerprint freshness
     PreFlightVerify --> DiscardRun: Head SHA or review fingerprint changed
@@ -157,6 +159,7 @@ stateDiagram-v2
     PostCheckPending --> [*]
     PostCheckFailure --> [*]
     PostCheckError --> [*]
+    PostCheckStale --> [*]
     DiscardRun --> [*]
     SubmitPRApproval --> [*]
 ```
