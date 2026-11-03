@@ -150,7 +150,7 @@ stateDiagram-v2
     CheckNewerOwner --> PostCheckStale: Publish blocking conclusion
 
     Passing --> PreFlightVerify: Check head SHA and fingerprint freshness
-    PreFlightVerify --> DiscardRun: Head SHA or review fingerprint changed
+    PreFlightVerify --> Stale: Head SHA or review fingerprint changed
     PreFlightVerify --> Approved: Snapshot confirmed identical
 
     Approved --> PostCheckSuccess: Update check run (success)
