@@ -8,9 +8,9 @@ In modern AI-assisted engineering workflows, coding agents (such as Codex CLI, O
 
 Engineers must manually check whether all automated reviewers have finished, reconcile multiple comment formats, confirm whether unresolved threads were addressed, verify that required CI tests passed, and decide whether the PR is ready to merge.
 
-Merge Verdict automates this reconciliation. It continuously verifies PR review feedback against a defined verification policy and produces:
+Merge Verdict automates this reconciliation. It continuously verifies PR review feedback against a defined verification policy and produces two core outputs:
 1. A **GitHub required status check** (named `merge-verdict`) that serves as the authoritative merge gate under branch protection or repository rulesets.
-2. An optional **GitHub PR review with `APPROVE`** via a configurable approval provider (`github_copilot`, `github_app`, or `none`) when all policy and path risk-tier conditions are satisfied.
+2. An **official GitHub PR review with `APPROVE`** via a configurable approval provider (`github_copilot` or `github_app`) when all policy and path risk-tier conditions are satisfied.
 
 ### Fundamental Distinction
 
@@ -28,7 +28,7 @@ Merge Verdict is not a general-purpose AI code reviewer. It does not replace Git
 - Detecting stale reviewer findings associated with older commits (commit SHA mismatch).
 - Detecting incomplete, skipped, failed, or rate-limited reviewer runs.
 - Publishing required status checks (`merge-verdict`) via the GitHub Commit Status API and GitHub Checks API.
-- Delegating optional official GitHub `APPROVE` reviews to configurable approval providers (`github_copilot`, `github_app`, or `none`) while separating the `PASS` assessment from approval emission and branch-protection recognition.
+- Submitting or verifying official GitHub `APPROVE` reviews via configurable approval providers (`github_copilot` or `github_app`) while separating the `PASS` assessment from approval emission eligibility and branch-protection recognition.
 - Invalidating or updating previous verdicts when new review comments, thread updates, or commits arrive.
 - Idempotent execution and concurrency controls to prevent event storms and self-triggering loops.
 - Reusable configuration via repository-level configuration files (`.github/merge-verdict.yml`).

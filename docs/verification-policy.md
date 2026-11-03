@@ -6,7 +6,7 @@ Merge Verdict enforces an evidence-based verification policy before granting pul
 
 The system does not claim to mathematically prove that code is bug-free. Rather, it guarantees **review reconciliation** and **verification-policy satisfaction**: confirming that all configured automated checks have succeeded, all required reviewers have completed evaluation of the current commit, and no unaddressed blocking concerns remain in the pull request review record.
 
-As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), Merge Verdict designates the **required status check (Checks API check run named `merge-verdict`) as the authoritative merge gate**, and treats the **formal GitHub PR review approval as an optional secondary output**. A required check communicates _what_ was verified, against _which_ commit, using _what_ evidence. An approval records _who_ endorsed the changes.
+As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), Merge Verdict designates the **required status check (Checks API check run named `merge-verdict`) as the authoritative merge gate**, paired with the **formal GitHub PR review approval (`APPROVE`) as the review endorsement output**. A required check communicates _what_ was verified, against _which_ commit, using _what_ evidence. An approval records _who_ endorsed the changes.
 
 ## 2. Critical Semantic Limitations and Semantic Staleness
 
@@ -210,12 +210,11 @@ When repositories use GitHub Merge Queues:
 
 ## 7. Version-Controlled Policy Authority, Path Risk Tiers, and Effort Levels
 
-### 7.1. Base-Branch Policy Authority
+### 7.1. Base-Branch Policy Authority and Memory Separation
 
 All verification policies, required checks, mandatory reviewers, path risk tiers, and severity exemptions must reside in version control (specifically `.github/merge-verdict.yml`).
-- **Base-Branch Trust Boundary**: Unlike tools (such as GitHub Copilot) that read custom instructions and skills from the pull request's head branch, Merge Verdict always loads `.github/merge-verdict.yml` from the **protected base branch revision** (`pull_request.base.sha` or repository default branch). An unmerged pull request cannot modify the verification rules or risk tiers that govern its own evaluation.
-- Inferred developer preferences or observed patterns must never silently weaken verification gates.
-- Any change to review standards or blocking conditions must occur via an explicit, reviewable commit merged into the base branch.
+- **Base-Branch Trust Boundary**: Unlike tools (such as GitHub Copilot) that read custom instructions and skills from the pull request's head branch, Merge Verdict always loads `.github/merge-verdict.yml` from the **protected base branch revision** (`pull_request.base.sha` for pull requests, or `merge_group.base_sha` / `merge_group.base_ref` for merge queues). An unmerged pull request cannot modify the verification rules or risk tiers that govern its own evaluation.
+- **Version Control Over Persistent Memory**: Persistent agent memory may store personal developer habits or lightweight session context, but version-controlled repository policy always takes precedence. Inferred developer preferences or repeated observations (for example, noticing that low-priority findings were previously ignored or that threads are usually resolved after a commit) must never silently weaken verification gates; any policy change must follow: observed behavior -> proposed convention with evidence and trade-offs -> explicit, reviewed commit merged into the base branch.
 - The policy evaluator records the `policyVersion` commit SHA in every check report for full traceability.
 
 ### 7.2. Path-Based Risk Tiers and Strictest-Tier-Wins Rule

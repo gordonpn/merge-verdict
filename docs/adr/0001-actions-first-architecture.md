@@ -6,15 +6,15 @@ Accepted
 
 ## Context
 
-Merge Verdict is designed to verify that pull requests have satisfied all required review and validation criteria before merge. The system must fulfill one required output and may produce one optional output:
+Merge Verdict is designed to verify that pull requests have satisfied all required review and validation criteria before merge. The system must fulfill two core functional outputs:
 
 1. Publish a required GitHub status check (proposed name: `merge-verdict`) to block merging when verification criteria are not satisfied.
-2. Optionally submit an official GitHub PR review with state `APPROVE` when verification criteria are satisfied.
+2. Submit an official GitHub PR review with state `APPROVE` when verification criteria are satisfied.
 
 Two primary architectural archetypes were considered for implementing Merge Verdict:
 
 1. **Standalone Hosted GitHub App Service**: A persistent, 24/7 cloud service (for example, deployed on Cloudflare Workers or AWS Lambda) backed by an event queue (such as Cloudflare Queues or SQS) and an operational database (such as Cloudflare D1 or PostgreSQL). The service receives GitHub webhooks directly, maintains PR review state in its own database, evaluates policies, and calls GitHub APIs to post check runs and reviews.
-2. **Actions-First Hybrid Architecture**: A standalone TypeScript engine executed directly inside GitHub Actions workflows. The engine inspects live PR state via the GitHub REST and GraphQL APIs, computes a deterministic verification verdict, publishes a commit status or check run, and can submit an optional `APPROVE` review. For authentication, it supports standard workflow tokens (`GITHUB_TOKEN`) for zero-infrastructure setups, and can be augmented with a GitHub App installation token (via `actions/create-github-app-token`) for organizations requiring dedicated bot identity and native Checks API features. An optional, lightweight webhook bridge (such as a serverless worker) is only introduced if specific events (such as `pull_request_review_thread` thread-resolution actions) cannot be triggered directly by native GitHub Actions workflow events.
+2. **Actions-First Hybrid Architecture**: A standalone TypeScript engine executed directly inside GitHub Actions workflows. The engine inspects live PR state via the GitHub REST and GraphQL APIs, computes a deterministic verification verdict, publishes a commit status or check run, and submits an `APPROVE` review. For authentication, it supports standard workflow tokens (`GITHUB_TOKEN`) for zero-infrastructure setups, and can be augmented with a GitHub App installation token (via `actions/create-github-app-token`) for organizations requiring dedicated bot identity and native Checks API features. An optional, lightweight webhook bridge (such as a serverless worker) is only introduced if specific events (such as `pull_request_review_thread` thread-resolution actions) cannot be triggered directly by native GitHub Actions workflow events.
 
 ## Decision
 

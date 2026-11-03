@@ -8,10 +8,10 @@ Modern software development teams increasingly employ AI coding agents to author
 
 These automated reviewers generate disparate, overlapping, and sometimes contradictory feedback across GitHub comments, review threads, and check runs. Engineering developers are left with the tedious task of manually tracking down reviewer outputs, verifying whether unresolved threads were addressed, checking that automated reviewers actually finished on the latest commit, and deciding whether the pull request is safe to merge.
 
-Merge Verdict solves this reconciliation bottleneck. It acts as an automated verification orchestrator that monitors pull request activity, normalizes reviewer findings, verifies review completion and thread resolution against a base-branch policy, and publishes:
+Merge Verdict solves this reconciliation bottleneck. It acts as an automated verification orchestrator that monitors pull request activity, normalizes reviewer findings, verifies review completion and thread resolution against a base-branch policy, and publishes two core outputs:
 
 1. A **GitHub required status check** (named `merge-verdict`) to enforce branch protection as the authoritative automated merge gate.
-2. An optional **official GitHub pull request review with `APPROVE`** via a configurable approval provider (`github_copilot`, `github_app`, or `none`) when all policy and path risk-tier requirements are met.
+2. An **official GitHub pull request review with `APPROVE`** via a configurable approval provider (`github_copilot` or `github_app`) when all policy and path risk-tier requirements are met.
 
 The developer remains responsible for executing the merge. Automatic merging is explicitly out of scope.
 

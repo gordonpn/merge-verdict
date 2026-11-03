@@ -50,7 +50,7 @@ This semantic staleness on unchanged code is the primary correctness challenge M
 
 ## Decision
 
-We designate the **required status check (implemented as a GitHub Checks API check run named `merge-verdict`) as the authoritative merge gate**, and treat **formal GitHub PR approval reviews as a configurable secondary output** managed through an explicit approval-provider abstraction (`github_copilot`, `github_app`, or `none`).
+We designate the **required status check (implemented as a GitHub Checks API check run named `merge-verdict`) as the authoritative merge gate**, paired with **formal GitHub PR approval reviews (`APPROVE`) as a mandatory core review endorsement** managed through an explicit approval-provider abstraction (`github_copilot` or `github_app`, with `none` available only when repositories explicitly disable approval emission for specific high-risk paths requiring human review).
 
 ### Key Tenets
 
@@ -61,7 +61,7 @@ We designate the **required status check (implemented as a GitHub Checks API che
    - The deterministic verification assessment (`PASS`, `PENDING`, `FAIL`, `STALE`, `ERROR`),
    - Whether the configured policy and path-based risk tier permit issuing or requesting an automated approval, and
    - Whether GitHub branch protection actually recognizes that approval as satisfying required-review thresholds.
-     When policy evaluation succeeds (`PASS`) and the matched path risk tier allows automated approval, Merge Verdict delegates approval handling to a configurable provider (`github_copilot`, `github_app`, or `none`). Repositories must never rely on formal approval alone as their sole automated protection.
+     When policy evaluation succeeds (`PASS`) and the matched path risk tier allows automated approval, Merge Verdict delegates approval submission to a configurable provider (`github_copilot` or `github_app`). Repositories must always pair the approval review with the authoritative `merge-verdict` check run rather than relying on formal approval alone.
 3. **Checks API Over Commit Statuses**:
    The publisher must utilize the GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) rather than the legacy Commit Status API wherever possible. Check runs provide rich Markdown formatting, status summaries, duration metrics, and file-level annotations, which are critical for auditability.
 4. **Fast Invalidation Path**:
@@ -119,7 +119,7 @@ When GitHub Copilot is available and enabled, combining the required `merge-verd
 1. The publisher subsystem will prioritize `src/publisher/checks-api.ts` with structured Markdown reporting, retaining `src/publisher/commit-status.ts` as a fallback.
 2. The policy evaluator will emit structured evidence containing exact `head_sha`, `review_state_digest`, and commit-pinned permalinks.
 3. Documentation and setup guides will instruct administrators to require the `merge-verdict` check run in repository branch protection settings.
-4. Formal PR approval reviews will remain an optional, configurable feature rather than a mandatory merge prerequisite.
+4. Formal PR approval reviews (`APPROVE`) are emitted alongside the `merge-verdict` check run when verification passes and path risk-tier eligibility is satisfied, while the required check run serves as the non-bypassable merge gate.
 
 ## Reconsideration Triggers
 

@@ -126,10 +126,10 @@ The publisher translates the engine verdict into official GitHub artifacts while
   - **Tier 1 (Commit Status Fallback)**: When running under default `GITHUB_TOKEN`, the publisher calls the Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) with context `merge-verdict`. It emits commit status states (`pending`, `success`, `failure`, `error`) and a concise description up to 140 characters.
   - **Tier 2 (Checks API Check Run)**: When authenticated with a dedicated GitHub App installation token, the publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the PR `head_sha`. It manages the full check run lifecycle (`status: in_progress`, `status: completed` with conclusions `success`, `failure`, or `action_required`), rich Markdown summaries, finding breakdowns, and commit-pinned annotations.
     As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), both tiers serve as the primary automated merge gate required by branch protection.
-- **Configurable Approval Provider Abstraction (Optional Secondary Signal)**: When verdict is `PASS` and the matched path risk tier permits automated approval, Merge Verdict delegates review endorsement to a configurable provider (`github_copilot`, `github_app`, or `none`):
+- **Configurable Approval Provider Abstraction (PR Review Endorsement)**: When verdict is `PASS` and the matched path risk tier permits automated approval, Merge Verdict submits or verifies a formal `APPROVE` review via a configurable provider (`github_copilot` or `github_app`):
   - `github_copilot`: Requests a Copilot code review on `head_sha` (with effort matched to the path risk tier) or verifies an existing active `APPROVE` review from `copilot-pull-request-reviewer[bot]`.
   - `github_app`: Submits an official review (`POST /repos/{owner}/{repo}/pulls/{number}/reviews`) with event `APPROVE` under the Merge Verdict App identity as a dedicated audit endorsement.
-  - `none`: Emits only the authoritative `merge-verdict` check run.
+  - When a high-risk path tier requires human endorsement (`require_human_review: true`), automated `APPROVE` emission is withheld until human review is satisfied.
     If a previously approved PR becomes `FAIL` or `STALE`, the publisher dismisses its prior approval review or posts an invalidating status update.
 
 ## 4. GitHub Actions vs. GitHub App Integration Models
@@ -191,7 +191,7 @@ sequenceDiagram
 
     alt Verification Passed (Verdict = PASS)
         Core->>GH: Update check run 'merge-verdict' (SUCCESS)
-        opt Optional PR Review Approval Enabled
+        opt Automated Approval Eligible for Path Risk Tier
             Core->>GH: Submit PR Review (APPROVE)
         end
     else Verification Pending

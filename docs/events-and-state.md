@@ -152,7 +152,7 @@ stateDiagram-v2
     PreFlightVerify --> Approved: Snapshot confirmed identical
 
     Approved --> PostCheckSuccess: Update check run (success)
-    PostCheckSuccess --> SubmitPRApproval: Optional PR Review (APPROVE)
+    PostCheckSuccess --> SubmitPRApproval: Submit PR Review (APPROVE) if eligible
 
     PostCheckPending --> [*]
     PostCheckFailure --> [*]
