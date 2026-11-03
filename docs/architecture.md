@@ -77,6 +77,7 @@ The data collector queries the GitHub REST and GraphQL APIs to assemble a cohere
 Responsibilities:
 - Fetch PR metadata: base branch, head branch, head SHA, mergeable status, draft state, author identity, and changed file paths.
 - Query review threads via GraphQL: thread ID, resolution status (`isResolved`), resolved by user, outdated status (`isOutdated`), and thread comment history.
+- Query top-level PR conversation comments: comment ID, author, body, update timestamp, and body digest for reviewer summaries and commands.
 - Query pull request reviews: reviewer identity, state (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), submission timestamp, commit SHA associated with the review.
 - Query check runs and commit statuses: check names, status (`queued`, `in_progress`, `completed`), conclusion (`success`, `failure`, `neutral`, `cancelled`, `timed_out`, `skipped`), and started/completed timestamps.
 - Read repository configuration file (`.github/merge-verdict.yml`) exclusively from the protected base branch revision (`pull_request.base.sha` for pull request events, or `merge_group.base_sha` / `merge_group.base_ref` for merge queue events) and record that exact commit SHA as `policyVersion`, preventing an unmerged pull request from tampering with its own verification rules or risk tiers.
@@ -105,7 +106,7 @@ Responsibilities:
 - **Blocking Decision Rule**: Asserts that no active `CHANGES_REQUESTED` review decisions remain.
 - **Freshness Rule**: Asserts that all reviewer findings and review states evaluate the current PR head SHA.
 - **Path Risk-Tier Rule**: Evaluates modified file paths against repository-defined risk tiers (`low`, `high`) using the strictest-matching-tier-wins rule to determine automated approval eligibility, mandatory human review requirements, and verification effort level (`lite`, `balanced`, `max`).
-- **Atomic Pre-Flight Guard**: Computes a state fingerprint of the PR snapshot (including `head_sha`, thread states, and mutable review/comment identifiers, update timestamps, and body digests) and re-verifies that the fingerprint has not mutated before proceeding to publication.
+- **Atomic Pre-Flight Guard**: Computes a state fingerprint of the PR snapshot (including `head_sha`, thread states, review submissions, and mutable thread or top-level comment identifiers, update timestamps, and body digests) and re-verifies that the fingerprint has not mutated before proceeding to publication.
 
 ### 3.5. Optional Semantic Verification Engine
 
@@ -123,8 +124,8 @@ Characteristics:
 
 The publisher translates the engine verdict into official GitHub artifacts while separating the verification assessment, approval emission eligibility, and branch-protection recognition:
 - **Status Check (Authoritative Gate)**:
-  - **Tier 1 (Commit Status Fallback)**: When running under default `GITHUB_TOKEN`, the publisher calls the Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) with context `merge-verdict`. It emits commit status states (`pending`, `success`, `failure`, `error`) and a concise description up to 140 characters.
-  - **Tier 2 (Checks API Check Run)**: When authenticated with a dedicated GitHub App installation token, the publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the PR `head_sha`. It manages the full check run lifecycle (`status: in_progress`, `status: completed` with conclusions `success`, `failure`, or `action_required`), rich Markdown summaries, finding breakdowns, and commit-pinned annotations.
+  - **Tier 1 (Commit Status Fallback)**: When running under default `GITHUB_TOKEN`, the publisher calls the Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) with context `merge-verdict`, targeting the event evaluation SHA: `pull_request.head_sha` for pull request events or `merge_group.head_sha` for `merge_group` events. It emits commit status states (`pending`, `success`, `failure`, `error`) and a concise description up to 140 characters.
+  - **Tier 2 (Checks API Check Run)**: When authenticated with a dedicated GitHub App installation token, the publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the event evaluation SHA: `pull_request.head_sha` for pull request events or `merge_group.head_sha` for `merge_group` events. It manages the full check run lifecycle (`status: in_progress`, `status: completed` with conclusions `success`, `failure`, or `action_required`), rich Markdown summaries, finding breakdowns, and commit-pinned annotations.
     As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), both tiers serve as the primary automated merge gate required by branch protection.
 - **Configurable Approval Provider Abstraction (PR Review Endorsement)**: When verdict is `PASS` and the matched path risk tier permits automated approval, Merge Verdict submits or verifies a formal `APPROVE` review via a configurable provider (`github_copilot` or `github_app`):
   - `github_copilot`: Requests a Copilot code review on `head_sha` (with effort matched to the path risk tier) or verifies an existing active `APPROVE` review from `copilot-pull-request-reviewer[bot]`.

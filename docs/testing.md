@@ -72,8 +72,8 @@ The test suite must explicitly cover the following edge cases:
 
 ### 3.5. Late-Arriving Comment During Run
 
-- **Scenario**: Evaluation starts for commit `SHA-1`. A reviewer posts an unresolved blocking comment while policies are being computed.
-- **Expected Outcome**: State fingerprint check detects comment count mismatch. Execution aborts, allowing the newly triggered workflow run to evaluate the updated comment set.
+- **Scenario**: Evaluation starts for commit `SHA-1`. A reviewer posts an unresolved blocking thread comment or top-level summary comment while policies are being computed.
+- **Expected Outcome**: State fingerprint check detects a mismatch. Execution aborts, allowing the newly triggered workflow run to evaluate the updated comment set.
 
 ### 3.6. Partial Publication Failure
 
