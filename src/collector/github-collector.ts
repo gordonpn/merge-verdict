@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { GraphqlResponseError, graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
+import type { CheckRunConclusion, CheckRunStatus } from "../models/check-run.js";
 
 type GraphqlClient = typeof graphql;
 
@@ -198,10 +199,24 @@ export interface GitHubConversationComment {
   readonly updatedAt: string | null;
 }
 
+export type GitHubReviewState =
+  | "APPROVED"
+  | "CHANGES_REQUESTED"
+  | "COMMENTED"
+  | "DISMISSED"
+  | "PENDING"
+  | (string & {});
+
+export type GitHubCommitStatusState = "error" | "failure" | "pending" | "success" | (string & {});
+
+export type GitHubCheckRunStatus = CheckRunStatus | (string & {});
+
+export type GitHubCheckRunConclusion = CheckRunConclusion | (string & {});
+
 export interface GitHubReviewSubmission {
   readonly id: number;
   readonly reviewerLogin: string | null;
-  readonly state: string;
+  readonly state: GitHubReviewState;
   readonly commitSha: string | null;
   readonly submittedAt: string | null;
   readonly body: string | null;
@@ -211,8 +226,8 @@ export interface GitHubReviewSubmission {
 export interface GitHubCheckRun {
   readonly id: number;
   readonly name: string;
-  readonly status: string;
-  readonly conclusion: string | null;
+  readonly status: GitHubCheckRunStatus;
+  readonly conclusion: GitHubCheckRunConclusion | null;
   readonly commitSha: string;
   readonly detailsUrl: string | null;
   readonly output: {
@@ -226,7 +241,7 @@ export interface GitHubCheckRun {
 
 export interface GitHubCommitStatus {
   readonly context: string;
-  readonly state: string;
+  readonly state: GitHubCommitStatusState;
   readonly commitSha: string;
   readonly targetUrl: string | null;
   readonly description: string | null;
@@ -265,7 +280,56 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function getStatus(error: unknown): number | null {
   const record = asRecord(error);
-  return typeof record?.status === "number" ? record.status : null;
+  if (typeof record?.status === "number") {
+    return record.status;
+  }
+  const response = asRecord(record?.response);
+  if (typeof response?.status === "number") {
+    return response.status;
+  }
+  return null;
+}
+
+function sanitizeHeaders(headers: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    sanitized[key] = /authorization/i.test(key) ? "[REDACTED]" : value;
+  }
+  return sanitized;
+}
+
+function sanitizeErrorCause(error: unknown): unknown {
+  if (typeof error !== "object" || error === null) {
+    return error;
+  }
+
+  const record = error as Record<string, unknown>;
+  const req = asRecord(record.request);
+  const reqHeaders = asRecord(req?.headers);
+  const directHeaders = asRecord(record.headers);
+
+  let updatedReq = req;
+  if (reqHeaders !== null) {
+    updatedReq = { ...req, headers: sanitizeHeaders(reqHeaders) };
+  }
+
+  let updatedDirectHeaders = directHeaders;
+  if (directHeaders !== null) {
+    updatedDirectHeaders = sanitizeHeaders(directHeaders);
+  }
+
+  if (updatedReq !== req || updatedDirectHeaders !== directHeaders) {
+    const clone = Object.assign(Object.create(Object.getPrototypeOf(error)), error);
+    if (updatedReq !== req) {
+      clone.request = updatedReq;
+    }
+    if (updatedDirectHeaders !== directHeaders) {
+      clone.headers = updatedDirectHeaders;
+    }
+    return clone;
+  }
+
+  return error;
 }
 
 function toCollectorError(error: unknown): GitHubCollectorError {
@@ -290,7 +354,7 @@ function toCollectorError(error: unknown): GitHubCollectorError {
     kind = "network";
   }
 
-  return new GitHubCollectorError(kind, message, error, status);
+  return new GitHubCollectorError(kind, message, sanitizeErrorCause(error), status);
 }
 
 function digestBody(body: string): string;
@@ -461,14 +525,12 @@ async function getPolicyContent(
     return Buffer.from(data.content, "base64").toString("utf8");
   } catch (error) {
     const collectorError = toCollectorError(error);
-    const kind =
-      error instanceof GitHubCollectorError || collectorError.status === 404
-        ? "policy"
-        : collectorError.kind;
+    const kind: GitHubCollectorErrorKind =
+      collectorError.kind === "rate_limit" ? "rate_limit" : "policy";
     throw new GitHubCollectorError(
       kind,
       `Failed to read ${POLICY_FILE_PATH} at ${policySha}: ${collectorError.message}`,
-      error,
+      collectorError.cause,
       collectorError.status,
     );
   }

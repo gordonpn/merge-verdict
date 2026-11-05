@@ -7,6 +7,7 @@ import { createGitHubCollector, GitHubCollector, GitHubCollectorError } from "..
 const repository = { owner: "octocat", repo: "hello-world" };
 const pullRequestNumber = 123;
 const EXPECTED_THREAD_COMMENT_CONCURRENCY = 5;
+const PAGINATED_THREAD_COUNT = 8;
 
 function jsonResponse(
   data: unknown,
@@ -248,9 +249,9 @@ function createStandardFetch(
     if (pathname.endsWith("/statuses")) {
       const statuses =
         page === 1
-          ? [createCommitStatus("tests", "success", "2026-10-01T12:00:00Z")]
+          ? [createCommitStatus("tests", "pending", "2026-10-01T11:00:00Z")]
           : [
-              createCommitStatus("tests", "pending", "2026-10-01T11:00:00Z"),
+              createCommitStatus("tests", "success", "2026-10-01T12:00:00Z"),
               createCommitStatus("lint", "success", "2026-10-01T11:30:00Z"),
             ];
       return jsonResponse(
@@ -433,7 +434,7 @@ describe("GitHubCollector", () => {
               createThread(
                 `thread-${index + 1}`,
                 index === 0 ? [createReviewComment("comment-1", "first comment")] : [],
-                index < EXPECTED_THREAD_COMMENT_CONCURRENCY
+                index < PAGINATED_THREAD_COUNT
                   ? { hasNextPage: true, endCursor: `comment-cursor-${index + 1}` }
                   : { hasNextPage: false, endCursor: null },
               ),
@@ -482,17 +483,14 @@ describe("GitHubCollector", () => {
     const commentQueries = requests.filter(({ query }) => query.includes("node(id:"));
     const fileQueries = requests.filter(({ query }) => query.includes("ChangedFiles"));
     expect(threadQueries).toHaveLength(2);
-    expect(commentQueries).toHaveLength(EXPECTED_THREAD_COMMENT_CONCURRENCY);
+    expect(commentQueries).toHaveLength(PAGINATED_THREAD_COUNT);
     expect(fileQueries).toHaveLength(2);
     expect(requests.every(({ query }) => query.includes("first: 100"))).toBe(true);
     expect(threadQueries.map(({ variables }) => variables.cursor)).toContain(null);
     expect(threadQueries.map(({ variables }) => variables.cursor)).toContain("thread-cursor-100");
     expect(new Set(commentQueries.map(({ variables }) => variables.cursor))).toEqual(
       new Set(
-        Array.from(
-          { length: EXPECTED_THREAD_COMMENT_CONCURRENCY },
-          (_, index) => `comment-cursor-${index + 1}`,
-        ),
+        Array.from({ length: PAGINATED_THREAD_COUNT }, (_, index) => `comment-cursor-${index + 1}`),
       ),
     );
     expect(fileQueries.map(({ variables }) => variables.cursor)).toContain("files-cursor-100");
@@ -742,5 +740,79 @@ describe("GitHubCollector", () => {
 
     expect(error).toBeInstanceOf(GitHubCollectorError);
     expect(error).toMatchObject({ kind: "network" });
+  });
+
+  it("redacts authorization headers in wrapped error causes", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const pathname = decodeURIComponent(url.pathname);
+      if (pathname.endsWith("/pulls/123")) {
+        return jsonResponse({ message: "Bad credentials" }, { status: 401 }, url.href);
+      }
+      return jsonResponse({}, {}, url.href);
+    });
+    const rest = new Octokit({
+      auth: "sensitive-token-12345",
+      request: { fetch: fetcher },
+    });
+    const graph = graphql.defaults({
+      headers: { authorization: "token sensitive-token-12345" },
+      request: { fetch: fetcher },
+    });
+    const collector = new GitHubCollector(rest, graph);
+
+    const error = await collector
+      .collectPullRequest({ ...repository, pullRequestNumber })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitHubCollectorError);
+    const collectorError = error as GitHubCollectorError;
+    const cause = collectorError.cause as {
+      readonly request?: { readonly headers?: Record<string, string> };
+    };
+    expect(cause?.request?.headers?.authorization).toBe("[REDACTED]");
+    expect(JSON.stringify(collectorError)).not.toContain("sensitive-token-12345");
+  });
+
+  it("extracts HTTP status code from GraphqlResponseError response", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const pathname = decodeURIComponent(url.pathname);
+      if (pathname.endsWith("/pulls/123")) {
+        return jsonResponse(createPullRequestPayload(), {}, url.href);
+      }
+      if (pathname === "/graphql") {
+        return jsonResponse(
+          { data: null, errors: [{ message: "Field is forbidden" }] },
+          { status: 403 },
+          url.href,
+        );
+      }
+      return jsonResponse({}, {}, url.href);
+    });
+    const collector = createCollector(fetcher);
+
+    const error = await collector
+      .collectPullRequest({ ...repository, pullRequestNumber })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitHubCollectorError);
+    expect(error).toMatchObject({ kind: "api", status: 403 });
+  });
+
+  it("classifies forbidden base policy file error as policy kind", async () => {
+    const { fetcher } = createStandardFetch(403);
+    const collector = createCollector(fetcher);
+
+    const error = await collector
+      .collectPullRequest({ ...repository, pullRequestNumber })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitHubCollectorError);
+    expect(error).toMatchObject({
+      kind: "policy",
+      status: 403,
+      message: expect.stringContaining(".github/merge-verdict.yml at base-sha"),
+    });
   });
 });
