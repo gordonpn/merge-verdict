@@ -768,9 +768,13 @@ describe("GitHubCollector", () => {
     expect(error).toBeInstanceOf(GitHubCollectorError);
     const collectorError = error as GitHubCollectorError;
     const cause = collectorError.cause as {
+      readonly message?: string;
+      readonly stack?: string;
       readonly request?: { readonly headers?: Record<string, string> };
     };
     expect(cause?.request?.headers?.authorization).toBe("[REDACTED]");
+    expect(cause?.message).toContain("Bad credentials");
+    expect(typeof cause?.stack).toBe("string");
     expect(JSON.stringify(collectorError)).not.toContain("sensitive-token-12345");
   });
 

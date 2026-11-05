@@ -319,7 +319,25 @@ function sanitizeErrorCause(error: unknown): unknown {
   }
 
   if (updatedReq !== req || updatedDirectHeaders !== directHeaders) {
-    const clone = Object.assign(Object.create(Object.getPrototypeOf(error)), error);
+    const descriptors = Object.getOwnPropertyDescriptors(error);
+    if (error instanceof Error) {
+      descriptors.message = {
+        value: error.message,
+        writable: true,
+        configurable: true,
+        enumerable: false,
+      };
+      descriptors.stack = {
+        value: error.stack,
+        writable: true,
+        configurable: true,
+        enumerable: false,
+      };
+    }
+    const clone = Object.create(Object.getPrototypeOf(error), descriptors) as Record<
+      string,
+      unknown
+    >;
     if (updatedReq !== req) {
       clone.request = updatedReq;
     }
