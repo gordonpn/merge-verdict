@@ -1,6 +1,6 @@
 # Project Execution Queue
 
-Last Refined: 2026-10-30T18:23:00-04:00
+Last Refined: 2026-11-03
 Repository: gordonpn/merge-verdict
 GitHub Backlog: https://github.com/gordonpn/merge-verdict/issues
 
@@ -10,10 +10,10 @@ GitHub Backlog: https://github.com/gordonpn/merge-verdict/issues
 
 - **Priority:** P1
 - **Estimate:** M
-- **Readiness:** READY
-- **Why this task is next:** With strongly typed domain models in place (#8), the next step is fetching live PR data from GitHub APIs (review threads, comments, check runs) into uniform domain structures.
-- **First implementation action:** Add `@octokit/rest` and `@octokit/graphql` (or native Octokit client) and implement query batching in `src/collector/`.
-- **Definition of Done:** Collector queries GitHub REST and GraphQL endpoints for target PR, handles pagination up to 100 items per page, transforms raw API responses into raw collector models, and passes unit and integration tests with mocked Octokit fixtures.
+- **Readiness:** IN PROGRESS (implementation and local verification complete; draft PR #37 awaits review and remote verification).
+- **Why this task is next:** The Octokit collector is implemented; the review and CI feedback must be cleared before the story can be considered complete.
+- **First implementation action:** Inspect PR #37 for review and check updates, then address actionable feedback. The latest query found no workflow runs, commit statuses, or inline review threads.
+- **Definition of Done:** Collector captures PR data, paginates REST and GraphQL responses, uses the protected base revision for policy content, and passes local and remote verification before human merge.
 - **Tasks it unblocks:** Unblocks [#11](https://github.com/gordonpn/merge-verdict/issues/11) (Policy Engine) and [#12](https://github.com/gordonpn/merge-verdict/issues/12) (Fixtures). Can proceed in parallel with [#10](https://github.com/gordonpn/merge-verdict/issues/10).
 
 ## NEXT: Upcoming Work
