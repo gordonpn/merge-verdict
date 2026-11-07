@@ -290,23 +290,30 @@ function getStatus(error: unknown): number | null {
   return null;
 }
 
+const MAX_ERROR_CAUSE_DEPTH = 8;
+
 function sanitizeHeaders(headers: Record<string, unknown>): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(headers)) {
-    sanitized[key] = /authorization/i.test(key) ? "[REDACTED]" : value;
+    sanitized[key] = /authorization|cookie|token|secret/i.test(key) ? "[REDACTED]" : value;
   }
   return sanitized;
 }
 
-function sanitizeErrorCause(error: unknown): unknown {
+function sanitizeErrorCause(error: unknown, seen: Set<object> = new Set(), depth = 0): unknown {
   if (typeof error !== "object" || error === null) {
     return error;
   }
+  if (seen.has(error) || depth >= MAX_ERROR_CAUSE_DEPTH) {
+    return undefined;
+  }
 
+  seen.add(error);
   const record = error as Record<string, unknown>;
   const req = asRecord(record.request);
   const reqHeaders = asRecord(req?.headers);
   const directHeaders = asRecord(record.headers);
+  const nestedCause = record.cause;
 
   let updatedReq = req;
   if (reqHeaders !== null) {
@@ -318,7 +325,14 @@ function sanitizeErrorCause(error: unknown): unknown {
     updatedDirectHeaders = sanitizeHeaders(directHeaders);
   }
 
-  if (updatedReq !== req || updatedDirectHeaders !== directHeaders) {
+  const updatedCause =
+    nestedCause === undefined ? undefined : sanitizeErrorCause(nestedCause, seen, depth + 1);
+
+  if (
+    updatedReq !== req ||
+    updatedDirectHeaders !== directHeaders ||
+    updatedCause !== nestedCause
+  ) {
     const descriptors = Object.getOwnPropertyDescriptors(error);
     if (error instanceof Error) {
       descriptors.message = {
@@ -332,6 +346,16 @@ function sanitizeErrorCause(error: unknown): unknown {
         writable: true,
         configurable: true,
         enumerable: false,
+      };
+    }
+    if (updatedCause === undefined) {
+      delete descriptors.cause;
+    } else {
+      descriptors.cause = {
+        value: updatedCause,
+        writable: true,
+        configurable: true,
+        enumerable: descriptors.cause?.enumerable ?? false,
       };
     }
     const clone = Object.create(Object.getPrototypeOf(error), descriptors) as Record<

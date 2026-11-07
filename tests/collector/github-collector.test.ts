@@ -747,7 +747,16 @@ describe("GitHubCollector", () => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       const pathname = decodeURIComponent(url.pathname);
       if (pathname.endsWith("/pulls/123")) {
-        return jsonResponse({ message: "Bad credentials" }, { status: 401 }, url.href);
+        const nested = Object.assign(new Error("Transport failed"), {
+          headers: {
+            authorization: "token sensitive-token-12345",
+            cookie: "session=sensitive-cookie-12345",
+            "x-github-token": "sensitive-token-12345",
+          },
+          cause: undefined as unknown,
+        });
+        nested.cause = nested;
+        throw nested;
       }
       return jsonResponse({}, {}, url.href);
     });
@@ -771,11 +780,22 @@ describe("GitHubCollector", () => {
       readonly message?: string;
       readonly stack?: string;
       readonly request?: { readonly headers?: Record<string, string> };
+      readonly cause?: {
+        readonly headers?: Record<string, string>;
+        readonly cause?: unknown;
+      };
     };
     expect(cause?.request?.headers?.authorization).toBe("[REDACTED]");
-    expect(cause?.message).toContain("Bad credentials");
+    expect(cause?.cause?.headers).toEqual({
+      authorization: "[REDACTED]",
+      cookie: "[REDACTED]",
+      "x-github-token": "[REDACTED]",
+    });
+    expect(cause?.cause?.cause).toBeUndefined();
+    expect(cause?.message).toContain("Transport failed");
     expect(typeof cause?.stack).toBe("string");
     expect(JSON.stringify(collectorError.cause)).not.toContain("sensitive-token-12345");
+    expect(JSON.stringify(collectorError.cause)).not.toContain("sensitive-cookie-12345");
   });
 
   it("extracts HTTP status code from GraphqlResponseError response", async () => {
