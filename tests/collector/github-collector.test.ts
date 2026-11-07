@@ -775,7 +775,7 @@ describe("GitHubCollector", () => {
     expect(cause?.request?.headers?.authorization).toBe("[REDACTED]");
     expect(cause?.message).toContain("Bad credentials");
     expect(typeof cause?.stack).toBe("string");
-    expect(JSON.stringify(collectorError)).not.toContain("sensitive-token-12345");
+    expect(JSON.stringify(collectorError.cause)).not.toContain("sensitive-token-12345");
   });
 
   it("extracts HTTP status code from GraphqlResponseError response", async () => {
