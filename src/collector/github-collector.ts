@@ -1,76 +1,21 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { GraphqlResponseError, graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 import type { CheckRunConclusion, CheckRunStatus } from "../models/check-run.js";
 
 type GraphqlClient = typeof graphql;
 
+function loadQuery(filename: string): string {
+  return readFileSync(new URL(`./queries/${filename}`, import.meta.url), "utf8");
+}
+
 const PAGE_SIZE = 100;
-const REVIEW_THREAD_COMMENT_FIELDS = `
-  id
-  body
-  author { login }
-  path
-  line
-  originalLine
-  createdAt
-  updatedAt
-  commit { oid }
-`;
-
-const REVIEW_THREADS_QUERY = `
-  query ReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $number) {
-        reviewThreads(first: ${PAGE_SIZE}, after: $cursor) {
-          nodes {
-            id
-            isResolved
-            isOutdated
-            resolvedBy { login }
-            path
-            line
-            originalLine
-            comments(first: ${PAGE_SIZE}) {
-              nodes { ${REVIEW_THREAD_COMMENT_FIELDS} }
-              pageInfo { hasNextPage endCursor }
-            }
-          }
-          pageInfo { hasNextPage endCursor }
-        }
-      }
-    }
-  }
-`;
-
-const CHANGED_FILES_QUERY = `
-  query ChangedFiles($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $number) {
-        files(first: ${PAGE_SIZE}, after: $cursor) {
-          nodes { path }
-          pageInfo { hasNextPage endCursor }
-        }
-      }
-    }
-  }
-`;
-
 const POLICY_FILE_PATH = ".github/merge-verdict.yml";
 const REVIEW_THREAD_COMMENT_CONCURRENCY = 5;
-
-const THREAD_COMMENTS_QUERY = `
-  query ReviewThreadComments($threadId: ID!, $cursor: String) {
-    node(id: $threadId) {
-      ... on PullRequestReviewThread {
-        comments(first: ${PAGE_SIZE}, after: $cursor) {
-          nodes { ${REVIEW_THREAD_COMMENT_FIELDS} }
-          pageInfo { hasNextPage endCursor }
-        }
-      }
-    }
-  }
-`;
+const REVIEW_THREADS_QUERY = loadQuery("review-threads.graphql");
+const CHANGED_FILES_QUERY = loadQuery("changed-files.graphql");
+const THREAD_COMMENTS_QUERY = loadQuery("review-thread-comments.graphql");
 
 interface PageInfo {
   readonly hasNextPage: boolean;

@@ -1,0 +1,44 @@
+query ReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          resolvedBy {
+            login
+          }
+          path
+          line
+          originalLine
+          comments(first: 100) {
+            nodes {
+              id
+              body
+              author {
+                login
+              }
+              path
+              line
+              originalLine
+              createdAt
+              updatedAt
+              commit {
+                oid
+              }
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}
