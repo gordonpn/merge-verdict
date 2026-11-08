@@ -348,9 +348,7 @@ function sanitizeErrorCause(error: unknown, seen: Set<object> = new Set(), depth
         enumerable: false,
       };
     }
-    if (updatedCause === undefined) {
-      delete descriptors.cause;
-    } else {
+    if (nestedCause !== undefined || descriptors.cause !== undefined) {
       descriptors.cause = {
         value: updatedCause,
         writable: true,
