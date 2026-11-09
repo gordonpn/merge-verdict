@@ -53,16 +53,22 @@ function snakeToCamel(str: string): string {
 }
 
 /**
- * Recursively converts object keys from snake_case to camelCase.
+ * Recursively converts object property keys from snake_case to camelCase,
+ * while preserving user-defined record keys under risk tiers.
  */
-export function normalizeConfigKeys(value: unknown): unknown {
+export function normalizeConfigKeys(value: unknown, parentKey?: string): unknown {
   if (Array.isArray(value)) {
-    return value.map(normalizeConfigKeys);
+    return value.map((item) => normalizeConfigKeys(item));
   }
   if (value !== null && typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
-      result[snakeToCamel(key)] = normalizeConfigKeys(val);
+      if (parentKey === "risk") {
+        result[key] = normalizeConfigKeys(val);
+      } else {
+        const camelKey = snakeToCamel(key);
+        result[camelKey] = normalizeConfigKeys(val, camelKey);
+      }
     }
     return result;
   }
@@ -235,3 +241,12 @@ export const DEFAULT_CONFIG: MergeVerdictConfig = {
     risk: {},
   },
 };
+
+/**
+ * Returns an independent, deep-cloned copy of the default repository configuration.
+ *
+ * @returns Fresh MergeVerdictConfig object.
+ */
+export function createDefaultConfig(): MergeVerdictConfig {
+  return structuredClone(DEFAULT_CONFIG);
+}

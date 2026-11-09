@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import {
-  DEFAULT_CONFIG,
+  createDefaultConfig,
   type MergeVerdictConfig,
   MergeVerdictConfigSchema,
 } from "../models/config.js";
@@ -72,7 +72,7 @@ export const DEFAULT_CONFIG_FILE_PATH = ".github/merge-verdict.yml";
  */
 export function parseConfig(content?: string | null): MergeVerdictConfig {
   if (content === null || content === undefined || content.trim() === "") {
-    return DEFAULT_CONFIG;
+    return createDefaultConfig();
   }
 
   let parsed: unknown;
@@ -86,7 +86,7 @@ export function parseConfig(content?: string | null): MergeVerdictConfig {
   }
 
   if (parsed === null || parsed === undefined) {
-    return DEFAULT_CONFIG;
+    return createDefaultConfig();
   }
 
   if (typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -154,7 +154,7 @@ export async function loadConfigFile(
     return parseConfig(content);
   } catch (error) {
     if (isEnoent(error)) {
-      return DEFAULT_CONFIG;
+      return createDefaultConfig();
     }
     throw error;
   }
@@ -175,7 +175,7 @@ export function loadConfigFileSync(
     return parseConfig(content);
   } catch (error) {
     if (isEnoent(error)) {
-      return DEFAULT_CONFIG;
+      return createDefaultConfig();
     }
     throw error;
   }

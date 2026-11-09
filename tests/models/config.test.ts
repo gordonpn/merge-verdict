@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   ConfigValidationError,
+  createDefaultConfig,
   DEFAULT_CONFIG,
   loadConfigFile,
   loadConfigFileSync,
@@ -230,6 +231,31 @@ describe("MergeVerdictConfigSchema", () => {
 });
 
 describe("normalizeConfigKeys helper", () => {
+  it("preserves custom risk-tier names while normalizing their inner properties", () => {
+    const input = {
+      approval: {
+        risk: {
+          security_sensitive: {
+            paths: ["src/security/**"],
+            automated_approval: "additional_review",
+            require_human_review: true,
+          },
+          securitySensitive: {
+            paths: ["src/auth/**"],
+            effort: "max",
+          },
+        },
+      },
+    };
+
+    const config = MergeVerdictConfigSchema.parse(input);
+    expect(config.approval.risk.security_sensitive).toBeDefined();
+    expect(config.approval.risk.securitySensitive).toBeDefined();
+    expect(config.approval.risk.security_sensitive?.automatedApproval).toBe("additional_review");
+    expect(config.approval.risk.security_sensitive?.requireHumanReview).toBe(true);
+    expect(config.approval.risk.securitySensitive?.effort).toBe("max");
+  });
+
   it("normalizes nested arrays and objects while preserving primitives", () => {
     const input = {
       foo_bar: 1,
@@ -285,6 +311,25 @@ rate_limit_timeout_minutes: 40
     expect(parseConfig(null)).toEqual(DEFAULT_CONFIG);
     expect(parseConfig(undefined)).toEqual(DEFAULT_CONFIG);
     expect(parseConfig("# comment only\n")).toEqual(DEFAULT_CONFIG);
+  });
+
+  it("returns independent configuration objects on default loads to prevent mutation leakage", () => {
+    const config1 = parseConfig("");
+    const config2 = parseConfig(null);
+
+    // Mutate config1
+    (config1.requiredReviewers as string[]).push("mutated-reviewer");
+    config1.rateLimitTimeoutMinutes = 999;
+
+    // Verify config2 and DEFAULT_CONFIG remain unaffected
+    expect(config2.requiredReviewers).toEqual([]);
+    expect(config2.rateLimitTimeoutMinutes).toBe(30);
+    expect(DEFAULT_CONFIG.requiredReviewers).toEqual([]);
+    expect(DEFAULT_CONFIG.rateLimitTimeoutMinutes).toBe(30);
+
+    const freshDefault = createDefaultConfig();
+    expect(freshDefault.requiredReviewers).toEqual([]);
+    expect(freshDefault.rateLimitTimeoutMinutes).toBe(30);
   });
 
   it("throws ConfigValidationError on YAML syntax error", () => {
