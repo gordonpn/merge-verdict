@@ -32,8 +32,9 @@ function isCodexAuthor(login: string | null): boolean {
 function parseCodexState(input: NormalizerInput): CodexReviewStateJson | null {
   const comments = [...(input.conversationComments ?? []), ...(input.reviews ?? [])];
   const marker = "codex-review-state:v1";
-  for (const c of comments) {
-    const body = "body" in c ? c.body : null;
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const c = comments[i];
+    const body = c && "body" in c ? c.body : null;
     if (!body) {
       continue;
     }

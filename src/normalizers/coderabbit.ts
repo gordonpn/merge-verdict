@@ -23,6 +23,14 @@ function isCodeRabbitAuthor(login: string | null): boolean {
 }
 
 function isRateLimited(checkRun: GitHubCheckRun | undefined, input: NormalizerInput): boolean {
+  if (
+    checkRun?.status === "completed" &&
+    checkRun.conclusion === "success" &&
+    checkRun.commitSha === input.headSha
+  ) {
+    return false;
+  }
+
   if (checkRun?.conclusion === "neutral") {
     const textToCheck = `${checkRun.output.title ?? ""} ${checkRun.output.summary ?? ""} ${
       checkRun.output.text ?? ""
@@ -155,6 +163,11 @@ export function normalizeCodeRabbitReviewer(input: NormalizerInput): ReviewerExe
   let status: ReviewerStatus = "PENDING";
   let verdict: ReviewerVerdict = "NONE";
 
+  const latestReview = reviews[reviews.length - 1];
+  const hasUnresolvedBlockingFindings = findings.some((f) => f.isBlocking && !f.isResolved);
+  const isChangesRequested =
+    latestReview?.state === "CHANGES_REQUESTED" || hasUnresolvedBlockingFindings;
+
   if (!checkRun && reviews.length === 0 && threads.length === 0) {
     status = "PENDING";
     verdict = "NONE";
@@ -164,13 +177,13 @@ export function normalizeCodeRabbitReviewer(input: NormalizerInput): ReviewerExe
   } else if (checkRun?.status === "in_progress" || checkRun?.status === "queued") {
     status = "PENDING";
     verdict = "NONE";
-  } else if (checkRun?.conclusion === "failure") {
+  } else if (checkRun && checkRun.conclusion !== "success") {
     status = "FAILED";
-    verdict = "CHANGES_REQUESTED";
+    verdict =
+      checkRun.conclusion === "failure" || isChangesRequested ? "CHANGES_REQUESTED" : "NONE";
   } else {
     status = "COMPLETED";
-    const hasUnresolvedBlockingFindings = findings.some((f) => f.isBlocking && !f.isResolved);
-    if (hasUnresolvedBlockingFindings) {
+    if (isChangesRequested) {
       verdict = "CHANGES_REQUESTED";
     } else {
       verdict = "APPROVE";

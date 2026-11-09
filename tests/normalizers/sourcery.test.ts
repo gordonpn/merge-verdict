@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { GitHubCheckRun, GitHubReviewThread } from "../../src/collector/github-collector.js";
+import type {
+  GitHubCheckRun,
+  GitHubReviewSubmission,
+  GitHubReviewThread,
+} from "../../src/collector/github-collector.js";
 import { ReviewerExecutionRecordSchema } from "../../src/models/reviewer.js";
 import { normalizeSourceryReviewer, sourceryNormalizer } from "../../src/normalizers/sourcery.js";
 
@@ -79,6 +83,72 @@ describe("normalizeSourceryReviewer", () => {
     });
 
     expect(result.status).toBe("FAILED");
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+  });
+
+  it("rejects neutral check run as FAILED rather than APPROVE", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 111,
+        name: "Sourcery review",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+        startedAt: null,
+        completedAt: null,
+      },
+    ];
+
+    const result = normalizeSourceryReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.verdict).toBe("NONE");
+  });
+
+  it("preserves active CHANGES_REQUESTED review submission even with zero inline threads", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 112,
+        name: "Sourcery review",
+        status: "completed",
+        conclusion: "success",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+        startedAt: null,
+        completedAt: null,
+      },
+    ];
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 301,
+        reviewerLogin: "sourcery-ai[bot]",
+        state: "CHANGES_REQUESTED",
+        commitSha: headSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: "Changes needed.",
+        bodyDigest: "d1",
+      },
+    ];
+
+    const result = normalizeSourceryReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.isFresh).toBe(true);
     expect(result.verdict).toBe("CHANGES_REQUESTED");
   });
 

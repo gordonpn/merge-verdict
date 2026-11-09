@@ -32,6 +32,40 @@ describe("normalizeCodexReviewer", () => {
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
 
+  it("selects the latest state comment when multiple state comments exist", () => {
+    const olderSha = "0000000000000000000000000000000000000000";
+    const conversationComments: GitHubConversationComment[] = [
+      {
+        id: 1,
+        authorLogin: "chatgpt-codex-connector[bot]",
+        body: `<!-- codex-review-state:v1 {"code_review":{"commit_sha":"${olderSha}","has_any_findings":false,"has_unresolved_findings":false,"status":"completed"}} -->`,
+        bodyDigest: "d1",
+        createdAt: "2026-10-01T10:00:00Z",
+        updatedAt: null,
+      },
+      {
+        id: 2,
+        authorLogin: "chatgpt-codex-connector[bot]",
+        body: `<!-- codex-review-state:v1 {"code_review":{"commit_sha":"${headSha}","has_any_findings":false,"has_unresolved_findings":false,"status":"completed"}} -->`,
+        bodyDigest: "d2",
+        createdAt: "2026-10-01T11:00:00Z",
+        updatedAt: null,
+      },
+    ];
+
+    const result = normalizeCodexReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews: [],
+      conversationComments,
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.isFresh).toBe(true);
+    expect(result.evaluatedCommitSha).toBe(headSha);
+  });
+
   it("handles malformed JSON in state comment gracefully as PENDING", () => {
     const conversationComments: GitHubConversationComment[] = [
       {

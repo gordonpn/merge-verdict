@@ -123,7 +123,9 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
  */
 export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecutionRecord {
   const { headSha } = input;
-  const review = input.reviews?.find((r) => r.body && /##\s*Verdict:/i.test(r.body));
+  const matchingReviews =
+    input.reviews?.filter((r) => r.body && /##\s*Verdict:/i.test(r.body)) ?? [];
+  const review = matchingReviews[matchingReviews.length - 1];
 
   if (!review?.body) {
     return {

@@ -113,6 +113,11 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
   let status: ReviewerStatus = "PENDING";
   let verdict: ReviewerVerdict = "NONE";
 
+  const latestReview = reviews[reviews.length - 1];
+  const hasUnresolvedBlockingFindings = findings.some((f) => f.isBlocking && !f.isResolved);
+  const isChangesRequested =
+    latestReview?.state === "CHANGES_REQUESTED" || hasUnresolvedBlockingFindings;
+
   if (!checkRun && reviews.length === 0 && threads.length === 0) {
     status = "PENDING";
     verdict = "NONE";
@@ -122,13 +127,13 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
   } else if (checkRun?.status === "in_progress" || checkRun?.status === "queued") {
     status = "PENDING";
     verdict = "NONE";
-  } else if (checkRun?.conclusion === "failure") {
+  } else if (checkRun && checkRun.conclusion !== "success") {
     status = "FAILED";
-    verdict = "CHANGES_REQUESTED";
+    verdict =
+      checkRun.conclusion === "failure" || isChangesRequested ? "CHANGES_REQUESTED" : "NONE";
   } else {
     status = "COMPLETED";
-    const hasUnresolvedBlockingFindings = findings.some((f) => f.isBlocking && !f.isResolved);
-    if (hasUnresolvedBlockingFindings) {
+    if (isChangesRequested) {
       verdict = "CHANGES_REQUESTED";
     } else {
       verdict = "APPROVE";

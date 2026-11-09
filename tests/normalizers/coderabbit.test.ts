@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   GitHubCheckRun,
   GitHubConversationComment,
+  GitHubReviewSubmission,
   GitHubReviewThread,
 } from "../../src/collector/github-collector.js";
 import { ReviewerExecutionRecordSchema } from "../../src/models/reviewer.js";
@@ -108,6 +109,110 @@ describe("normalizeCodeRabbitReviewer", () => {
 
     expect(result.status).toBe("RATE_LIMITED");
     expect(result.isFresh).toBe(false);
+  });
+
+  it("allows newer successful check run to supersede historical rate limit comment", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 2,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "success",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: { title: null, summary: "Review completed.", text: null },
+        startedAt: null,
+        completedAt: null,
+      },
+    ];
+    const conversationComments: GitHubConversationComment[] = [
+      {
+        id: 99,
+        authorLogin: "coderabbitai[bot]",
+        body: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\nFree review limit exceeded.",
+        bodyDigest: "digest",
+        createdAt: "2026-10-01T10:00:00Z",
+        updatedAt: null,
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews: [],
+      conversationComments,
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.isFresh).toBe(true);
+    expect(result.verdict).toBe("APPROVE");
+  });
+
+  it("rejects neutral check run without rate limit as FAILED rather than APPROVE", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 15,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: { title: null, summary: "Completed with neutral status", text: null },
+        startedAt: null,
+        completedAt: null,
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.verdict).toBe("NONE");
+  });
+
+  it("preserves active CHANGES_REQUESTED review submission even with zero inline threads", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 16,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "success",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: { title: null, summary: "Checks passed", text: null },
+        startedAt: null,
+        completedAt: null,
+      },
+    ];
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 201,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "CHANGES_REQUESTED",
+        commitSha: headSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: "Architecture changes required.",
+        bodyDigest: "d1",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.isFresh).toBe(true);
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
   });
 
   it("returns PENDING when check run is in_progress or queued", () => {

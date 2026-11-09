@@ -29,6 +29,49 @@ describe("normalizeDeepSeekReviewer", () => {
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
 
+  it("selects the latest review submission when multiple reviews exist", () => {
+    const olderSha = "1111111111111111111111111111111111111111";
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 501,
+        reviewerLogin: "github-actions[bot]",
+        state: "COMMENTED",
+        commitSha: olderSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: `## Verdict: APPROVE
+
+### Material Findings
+None.`,
+        bodyDigest: "d1",
+      },
+      {
+        id: 502,
+        reviewerLogin: "github-actions[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-10-01T11:00:00Z",
+        body: `## Verdict: BLOCK
+
+### Material Findings
+* Critical issue.`,
+        bodyDigest: "d2",
+      },
+    ];
+
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.isFresh).toBe(true);
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+    expect(result.findings[0]?.severity).toBe("BLOCKER");
+  });
+
   it("marks reviewer as STALE when review was generated against older commit", () => {
     const olderSha = "1111111111111111111111111111111111111111";
     const reviews: GitHubReviewSubmission[] = [
