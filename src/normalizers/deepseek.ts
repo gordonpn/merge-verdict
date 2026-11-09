@@ -26,12 +26,50 @@ function extractRawVerdict(body: string): RawVerdict | null {
   return null;
 }
 
+function extractMaterialFindingsSection(body: string): string | null {
+  const marker = "Material Findings";
+  const markerIndex = body.toLowerCase().indexOf(marker.toLowerCase());
+  if (markerIndex === -1) {
+    return null;
+  }
+  const afterMarker = body.slice(markerIndex + marker.length);
+  const lines = afterMarker.split("\n");
+  const sectionLines: string[] = [];
+  let isFirstLine = true;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (isFirstLine) {
+      isFirstLine = false;
+      if (trimmed.length > 0) {
+        sectionLines.push(trimmed);
+      }
+      continue;
+    }
+    if (trimmed.startsWith("##") || trimmed.startsWith("###")) {
+      break;
+    }
+    sectionLines.push(trimmed);
+  }
+  return sectionLines.join("\n").trim();
+}
+
+function parseBulletLine(line: string): string | null {
+  const trimmed = line.trim();
+  if (trimmed.startsWith("* ") || trimmed.startsWith("- ") || trimmed.startsWith("• ")) {
+    return trimmed.slice(2).trim();
+  }
+  const dotIndex = trimmed.indexOf(". ");
+  if (dotIndex > 0 && dotIndex <= 3 && /^\d+$/.test(trimmed.slice(0, dotIndex))) {
+    return trimmed.slice(dotIndex + 2).trim();
+  }
+  return null;
+}
+
 function parseMaterialFindings(body: string, rawVerdict: RawVerdict): NormalizedFinding[] {
-  const sectionMatch = body.match(/###?\s*Material Findings([\s\S]*?)(?=###?|$)/i);
-  if (!sectionMatch?.[1]) {
+  const sectionText = extractMaterialFindingsSection(body);
+  if (!sectionText) {
     return [];
   }
-  const sectionText = sectionMatch[1].trim();
   if (sectionText.toLowerCase() === "none." || sectionText.toLowerCase() === "none") {
     return [];
   }
@@ -41,12 +79,10 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
   let index = 1;
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    const bulletMatch = trimmed.match(/^[-*•\d.]+\s*(.+)$/);
-    if (!bulletMatch?.[1]) {
+    const findingText = parseBulletLine(line);
+    if (!findingText) {
       continue;
     }
-    const findingText = bulletMatch[1].trim();
     if (findingText.toLowerCase() === "none." || findingText.toLowerCase() === "none") {
       continue;
     }

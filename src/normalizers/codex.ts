@@ -6,6 +6,7 @@ import type {
 } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
+import { stripMarkdownPunctuation } from "./utils.js";
 
 const CODEX_LOGINS = new Set(["chatgpt-codex-connector", "chatgpt-codex-connector[bot]"]);
 
@@ -30,18 +31,29 @@ function isCodexAuthor(login: string | null): boolean {
 
 function parseCodexState(input: NormalizerInput): CodexReviewStateJson | null {
   const comments = [...(input.conversationComments ?? []), ...(input.reviews ?? [])];
+  const marker = "codex-review-state:v1";
   for (const c of comments) {
     const body = "body" in c ? c.body : null;
     if (!body) {
       continue;
     }
-    const match = body.match(/<!--\s*codex-review-state:v1\s*(\{.*?\})\s*-->/);
-    if (match?.[1]) {
-      try {
-        return JSON.parse(match[1]) as CodexReviewStateJson;
-      } catch {
-        // Fall through on malformed state
-      }
+    const markerIndex = body.indexOf(marker);
+    if (markerIndex === -1) {
+      continue;
+    }
+    const openBrace = body.indexOf("{", markerIndex + marker.length);
+    if (openBrace === -1) {
+      continue;
+    }
+    const commentClose = body.indexOf("-->", openBrace);
+    if (commentClose === -1) {
+      continue;
+    }
+    const jsonStr = body.slice(openBrace, commentClose).trim();
+    try {
+      return JSON.parse(jsonStr) as CodexReviewStateJson;
+    } catch {
+      // Fall through on malformed state
     }
   }
   return null;
@@ -72,7 +84,7 @@ function extractCodexTitle(body: string, path: string | null, line: number | nul
     if (lineText.startsWith("<!--") || lineText.startsWith(">")) {
       continue;
     }
-    const clean = lineText.replace(/^[_*~`#]+|[_*~`#]+$/g, "").trim();
+    const clean = stripMarkdownPunctuation(lineText);
     if (clean.length > 0) {
       return clean.length > 120 ? `${clean.slice(0, 117)}...` : clean;
     }

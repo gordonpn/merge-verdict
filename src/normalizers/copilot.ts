@@ -6,6 +6,7 @@ import type {
 } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
+import { stripMarkdownPunctuation } from "./utils.js";
 
 const COPILOT_LOGINS = new Set([
   "copilot-pull-request-reviewer[bot]",
@@ -25,7 +26,7 @@ function extractCopilotTitle(body: string, path: string | null, line: number | n
     if (lineText.startsWith("<!--") || lineText.startsWith(">")) {
       continue;
     }
-    const clean = lineText.replace(/^[_*~`#]+|[_*~`#]+$/g, "").trim();
+    const clean = stripMarkdownPunctuation(lineText);
     if (clean.length > 0) {
       return clean.length > 120 ? `${clean.slice(0, 117)}...` : clean;
     }

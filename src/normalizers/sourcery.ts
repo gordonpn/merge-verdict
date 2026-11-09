@@ -6,6 +6,7 @@ import type {
 } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
+import { stripMarkdownPunctuation } from "./utils.js";
 
 const SOURCERY_LOGINS = new Set(["sourcery-ai", "sourcery-ai[bot]"]);
 
@@ -44,7 +45,7 @@ function extractTitle(body: string, path: string | null, line: number | null): s
     if (lineText.startsWith("<!--") || lineText.startsWith("#") || lineText.startsWith(">")) {
       continue;
     }
-    const clean = lineText.replace(/^[_*~`#]+|[_*~`#]+$/g, "").trim();
+    const clean = stripMarkdownPunctuation(lineText);
     if (clean.length > 0) {
       return clean.length > 120 ? `${clean.slice(0, 117)}...` : clean;
     }
