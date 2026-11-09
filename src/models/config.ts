@@ -54,21 +54,36 @@ function snakeToCamel(str: string): string {
 
 /**
  * Recursively converts object property keys from snake_case to camelCase,
- * while preserving user-defined record keys under risk tiers.
+ * while preserving user-defined record keys under approval.risk.
  */
-export function normalizeConfigKeys(value: unknown, parentKey?: string): unknown {
+export function normalizeConfigKeys(
+  value: unknown,
+  path: readonly string[] = [],
+  seen: WeakSet<object> = new WeakSet(),
+): unknown {
+  if (value !== null && typeof value === "object") {
+    if (seen.has(value)) {
+      throw new Error("Cyclic reference detected in configuration payload.");
+    }
+    seen.add(value);
+  }
   if (Array.isArray(value)) {
-    return value.map((item) => normalizeConfigKeys(item));
+    return value.map((item) => normalizeConfigKeys(item, path, seen));
   }
   if (value !== null && typeof value === "object") {
+    const preserveKeys = path.length === 2 && path[0] === "approval" && path[1] === "risk";
     const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
-      if (parentKey === "risk") {
-        result[key] = normalizeConfigKeys(val);
-      } else {
-        const camelKey = snakeToCamel(key);
-        result[camelKey] = normalizeConfigKeys(val, camelKey);
+      const outKey = preserveKeys ? key : snakeToCamel(key);
+      if (!preserveKeys && key !== outKey && outKey in (value as Record<string, unknown>)) {
+        const existingVal = (value as Record<string, unknown>)[outKey];
+        if (JSON.stringify(existingVal) !== JSON.stringify(val)) {
+          throw new Error(
+            `Conflicting configuration keys specified: "${key}" and "${outKey}" have different values.`,
+          );
+        }
       }
+      result[outKey] = normalizeConfigKeys(val, [...path, outKey], seen);
     }
     return result;
   }
@@ -78,11 +93,11 @@ export function normalizeConfigKeys(value: unknown, parentKey?: string): unknown
 /**
  * Zod schema validating semantic LLM escalation settings.
  */
-export const SemanticVerificationConfigSchema = z.object({
+export const SemanticVerificationConfigSchema = z.strictObject({
   enabled: z.boolean().default(false),
-  model: z.string().min(1).optional(),
+  model: z.string().trim().min(1).optional(),
   maxTokensPerRun: z.number().int().positive().default(4000),
-  endpoint: z.string().min(1).optional(),
+  endpoint: z.string().trim().min(1).optional(),
 });
 
 /**
@@ -93,29 +108,25 @@ export type SemanticVerificationConfig = z.infer<typeof SemanticVerificationConf
 /**
  * Base Zod schema validating verification rule flags.
  */
-const BaseVerificationRulesConfigSchema = z.object({
-  requireCurrentHeadSha: z.boolean().default(true),
-  requireResolvedThreads: z.boolean().default(true),
-  requireSuccessfulCi: z.boolean().default(true),
+const BaseVerificationRulesConfigSchema = z.strictObject({
+  requireCurrentHeadSha: z.literal(true).default(true),
+  requireResolvedThreads: z.literal(true).default(true),
+  requireSuccessfulCi: z.literal(true).default(true),
   requireCodeEvidence: z.boolean().default(true),
 });
 
 /**
  * Zod schema validating verification rules with boolean shorthand support.
  */
-export const VerificationRulesConfigSchema = z
-  .union([z.boolean(), BaseVerificationRulesConfigSchema])
-  .transform((val) => {
-    if (typeof val === "boolean") {
-      return {
-        requireCurrentHeadSha: val,
-        requireResolvedThreads: val,
-        requireSuccessfulCi: val,
-        requireCodeEvidence: val,
-      };
-    }
-    return val;
-  });
+export const VerificationRulesConfigSchema = z.union([
+  z.literal(true).transform(() => ({
+    requireCurrentHeadSha: true as const,
+    requireResolvedThreads: true as const,
+    requireSuccessfulCi: true as const,
+    requireCodeEvidence: true,
+  })),
+  BaseVerificationRulesConfigSchema,
+]);
 
 /**
  * Verification rule flags.
@@ -123,15 +134,16 @@ export const VerificationRulesConfigSchema = z
 export type VerificationRulesConfig = z.infer<typeof BaseVerificationRulesConfigSchema>;
 
 /**
- * Helper schema accepting either a single string or array of strings.
+ * Helper schema accepting either a single string or array of non-empty strings.
  */
 const StringListSchema = z
   .union([
     z
       .string()
+      .trim()
       .min(1)
       .transform((item) => [item]),
-    z.array(z.string().min(1)),
+    z.array(z.string().trim().min(1)),
   ])
   .default([]);
 
@@ -148,8 +160,17 @@ const ProvidersListSchema = z
 /**
  * Zod schema validating path-scoped risk tier definitions.
  */
-export const RiskTierConfigSchema = z.object({
-  paths: z.union([z.string().transform((path) => [path]), z.array(z.string())]).default([]),
+export const RiskTierConfigSchema = z.strictObject({
+  paths: z
+    .union([
+      z
+        .string()
+        .trim()
+        .min(1)
+        .transform((path) => [path]),
+      z.array(z.string().trim().min(1)),
+    ])
+    .default([]),
   automatedApproval: AutomatedApprovalPolicySchema.default("allowed"),
   requireHumanReview: z.boolean().default(false),
   effort: VerificationEffortSchema.default("balanced"),
@@ -163,10 +184,10 @@ export type RiskTierConfig = z.infer<typeof RiskTierConfigSchema>;
 /**
  * Zod schema validating the approval section of the policy configuration.
  */
-export const ApprovalConfigSchema = z.object({
-  requiredCheck: z.string().min(1).default("merge-verdict"),
+export const ApprovalConfigSchema = z.strictObject({
+  requiredCheck: z.string().trim().min(1).default("merge-verdict"),
   providers: ProvidersListSchema,
-  requireVerifiedCommit: z.boolean().default(true),
+  requireVerifiedCommit: z.literal(true).default(true),
   risk: z.record(z.string(), RiskTierConfigSchema).default({}),
 });
 
@@ -178,7 +199,7 @@ export type ApprovalConfig = z.infer<typeof ApprovalConfigSchema>;
 /**
  * Internal object schema defining the canonical shape of repository configuration.
  */
-const CanonicalMergeVerdictConfigSchema = z.object({
+const CanonicalMergeVerdictConfigSchema = z.strictObject({
   requiredReviewers: StringListSchema,
   requiredChecks: StringListSchema,
   allowAdvisoryExemptions: z.boolean().default(false),

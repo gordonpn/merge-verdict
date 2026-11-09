@@ -99,7 +99,14 @@ export function parseConfig(content?: string | null): MergeVerdictConfig {
     ]);
   }
 
-  const result = MergeVerdictConfigSchema.safeParse(parsed);
+  let result: ReturnType<typeof MergeVerdictConfigSchema.safeParse>;
+  try {
+    result = MergeVerdictConfigSchema.safeParse(parsed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ConfigValidationError(message, [{ path: "", message, code: "validation_error" }]);
+  }
+
   if (!result.success) {
     const issues: ConfigValidationIssue[] = result.error.issues.map((issue) => ({
       path: issue.path.join("."),
@@ -140,10 +147,15 @@ function isEnoent(error: unknown): boolean {
 }
 
 /**
- * Asynchronously loads and parses configuration from a file on disk.
+ * Asynchronously loads and parses configuration from a local file on disk.
+ *
+ * NOTE: For pull request evaluation in production CI workflows, repository
+ * configuration must always be fetched from the protected base revision
+ * via GitHubCollector, never loaded from an untrusted local pull request checkout.
+ * This local loader is intended for offline testing, tooling, and local CLI usage.
  *
  * @param filePath Path to configuration file. Defaults to .github/merge-verdict.yml.
- * @returns Parsed MergeVerdictConfig, or DEFAULT_CONFIG if the file does not exist.
+ * @returns Parsed MergeVerdictConfig, or default configuration if the file does not exist.
  * @throws ConfigValidationError if the file exists but contains invalid configuration.
  */
 export async function loadConfigFile(
@@ -161,10 +173,15 @@ export async function loadConfigFile(
 }
 
 /**
- * Synchronously loads and parses configuration from a file on disk.
+ * Synchronously loads and parses configuration from a local file on disk.
+ *
+ * NOTE: For pull request evaluation in production CI workflows, repository
+ * configuration must always be fetched from the protected base revision
+ * via GitHubCollector, never loaded from an untrusted local pull request checkout.
+ * This local loader is intended for offline testing, tooling, and local CLI usage.
  *
  * @param filePath Path to configuration file. Defaults to .github/merge-verdict.yml.
- * @returns Parsed MergeVerdictConfig, or DEFAULT_CONFIG if the file does not exist.
+ * @returns Parsed MergeVerdictConfig, or default configuration if the file does not exist.
  * @throws ConfigValidationError if the file exists but contains invalid configuration.
  */
 export function loadConfigFileSync(

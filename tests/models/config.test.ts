@@ -38,26 +38,26 @@ describe("MergeVerdictConfigSchema", () => {
         endpoint: "https://api.deepseek.com/v1",
       },
       verification: {
-        requireCurrentHeadSha: true,
-        requireResolvedThreads: true,
-        requireSuccessfulCi: true,
+        requireCurrentHeadSha: true as const,
+        requireResolvedThreads: true as const,
+        requireSuccessfulCi: true as const,
         requireCodeEvidence: false,
       },
       approval: {
         requiredCheck: "merge-verdict",
-        providers: ["github_copilot", "github_app"],
-        requireVerifiedCommit: true,
+        providers: ["github_copilot", "github_app"] as const,
+        requireVerifiedCommit: true as const,
         risk: {
           low: {
             paths: ["docs/**", "**/*.md"],
-            automatedApproval: "allowed",
-            effort: "lite",
+            automatedApproval: "allowed" as const,
+            effort: "lite" as const,
           },
           high: {
             paths: [".github/workflows/**", "src/security/**"],
-            automatedApproval: "additional_review",
+            automatedApproval: "additional_review" as const,
             requireHumanReview: true,
-            effort: "max",
+            effort: "max" as const,
           },
         },
       },
@@ -113,8 +113,7 @@ describe("MergeVerdictConfigSchema", () => {
         max_tokens_per_run: 2500,
       },
       verification: {
-        require_current_head_sha: true,
-        require_resolved_threads: false,
+        require_code_evidence: false,
       },
       approval: {
         required_check: "merge-verdict-custom",
@@ -142,14 +141,14 @@ describe("MergeVerdictConfigSchema", () => {
     expect(config.rateLimitTimeoutMinutes).toBe(60);
     expect(config.semanticVerification.maxTokensPerRun).toBe(2500);
     expect(config.verification.requireCurrentHeadSha).toBe(true);
-    expect(config.verification.requireResolvedThreads).toBe(false);
+    expect(config.verification.requireCodeEvidence).toBe(false);
     expect(config.approval.requiredCheck).toBe("merge-verdict-custom");
     expect(config.approval.providers).toEqual(["github_copilot"]);
     expect(config.approval.risk.low?.automatedApproval).toBe("allowed");
     expect(config.approval.risk.high?.requireHumanReview).toBe(true);
   });
 
-  it("supports boolean shorthand for verification rules", () => {
+  it("supports boolean shorthand verification: true but rejects verification: false", () => {
     const trueConfig = MergeVerdictConfigSchema.parse({ verification: true });
     expect(trueConfig.verification).toEqual({
       requireCurrentHeadSha: true,
@@ -158,13 +157,25 @@ describe("MergeVerdictConfigSchema", () => {
       requireCodeEvidence: true,
     });
 
-    const falseConfig = MergeVerdictConfigSchema.parse({ verification: false });
-    expect(falseConfig.verification).toEqual({
-      requireCurrentHeadSha: false,
-      requireResolvedThreads: false,
-      requireSuccessfulCi: false,
-      requireCodeEvidence: false,
-    });
+    expect(() => MergeVerdictConfigSchema.parse({ verification: false })).toThrow();
+  });
+
+  it("rejects disabling mandatory core verification gates", () => {
+    expect(() =>
+      MergeVerdictConfigSchema.parse({
+        verification: { requireCurrentHeadSha: false },
+      }),
+    ).toThrow();
+    expect(() =>
+      MergeVerdictConfigSchema.parse({
+        verification: { requireResolvedThreads: false },
+      }),
+    ).toThrow();
+    expect(() =>
+      MergeVerdictConfigSchema.parse({
+        verification: { requireSuccessfulCi: false },
+      }),
+    ).toThrow();
   });
 
   it("accepts single string values for list fields and wraps them in arrays", () => {
@@ -225,8 +236,28 @@ describe("MergeVerdictConfigSchema", () => {
     ).toThrow();
   });
 
-  it("rejects empty string items in requiredReviewers", () => {
+  it("rejects empty or whitespace-only items in string lists", () => {
     expect(() => MergeVerdictConfigSchema.parse({ requiredReviewers: [""] })).toThrow();
+    expect(() => MergeVerdictConfigSchema.parse({ requiredReviewers: ["   "] })).toThrow();
+    expect(() => MergeVerdictConfigSchema.parse({ requiredChecks: ["   "] })).toThrow();
+  });
+
+  it("rejects unknown and misspelled properties due to strict object schemas", () => {
+    expect(() => MergeVerdictConfigSchema.parse({ unknown_root_property: 123 })).toThrow();
+    expect(() =>
+      MergeVerdictConfigSchema.parse({
+        approval: { unknownApprovalField: true },
+      }),
+    ).toThrow();
+    expect(() =>
+      MergeVerdictConfigSchema.parse({
+        approval: {
+          risk: {
+            low: { typoProperty: "bad" },
+          },
+        },
+      }),
+    ).toThrow();
   });
 });
 
@@ -276,6 +307,28 @@ describe("normalizeConfigKeys helper", () => {
     expect(normalizeConfigKeys("hello")).toBe("hello");
     expect(normalizeConfigKeys(123)).toBe(123);
     expect(normalizeConfigKeys(null)).toBe(null);
+  });
+
+  it("throws when conflicting snake_case and camelCase keys have different values", () => {
+    const conflicting = {
+      rate_limit_timeout_minutes: 30,
+      rateLimitTimeoutMinutes: 60,
+    };
+    expect(() => normalizeConfigKeys(conflicting)).toThrow(/Conflicting configuration keys/);
+  });
+
+  it("allows matching snake_case and camelCase keys when values are identical", () => {
+    const matching = {
+      rate_limit_timeout_minutes: 30,
+      rateLimitTimeoutMinutes: 30,
+    };
+    expect(() => normalizeConfigKeys(matching)).not.toThrow();
+  });
+
+  it("throws when cyclic references are encountered", () => {
+    const cyclicObj: Record<string, unknown> = { name: "cycle" };
+    cyclicObj.self = cyclicObj;
+    expect(() => normalizeConfigKeys(cyclicObj)).toThrow(/Cyclic reference detected/);
   });
 });
 
