@@ -1,3 +1,4 @@
+# Retained for advanced CodeQL customization. Disable when repository default setup is active.
 name: codeql
 
 on:
