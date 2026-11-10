@@ -44,10 +44,19 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
   const { headSha } = input;
   const reviews = input.reviews?.filter((r) => isCopilotAuthor(r.reviewerLogin)) ?? [];
   const threads =
-    input.reviewThreads?.filter((t) => {
-      const firstComment = t.comments[0];
-      return firstComment ? isCopilotAuthor(firstComment.authorLogin) : false;
-    }) ?? [];
+    input.reviewThreads?.filter(
+      (
+        t,
+      ): t is typeof t & {
+        comments: readonly [
+          (typeof t.comments)[number],
+          ...(readonly (typeof t.comments)[number][]),
+        ];
+      } => {
+        const firstComment = t.comments[0];
+        return firstComment ? isCopilotAuthor(firstComment.authorLogin) : false;
+      },
+    ) ?? [];
 
   const latestReview = reviews[reviews.length - 1];
   const evaluatedCommitSha = latestReview?.commitSha ?? null;
@@ -56,9 +65,6 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
   const findings: NormalizedFinding[] = [];
   for (const thread of threads) {
     const firstComment = thread.comments[0];
-    if (!firstComment) {
-      continue;
-    }
 
     const severity: Severity = thread.isResolved ? "LOW" : "HIGH";
     const isBlocking = !thread.isResolved;
@@ -86,6 +92,10 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
     }
     if (thread.resolvedByLogin) {
       finding.resolvedBy = thread.resolvedByLogin;
+    }
+    if (input.repository && firstComment.commitSha && thread.path) {
+      const linePart = typeof lineNum === "number" && lineNum > 0 ? `#L${lineNum}` : "";
+      finding.rawCommentUrl = `https://github.com/${input.repository}/blob/${firstComment.commitSha}/${thread.path}${linePart}`;
     }
     findings.push(finding);
   }

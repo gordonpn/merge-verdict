@@ -12,6 +12,8 @@ import type { ReviewerExecutionRecord } from "../models/reviewer.js";
  */
 export interface NormalizerInput {
   readonly headSha: string;
+  readonly repository?: string;
+  readonly ancestorCommitShas?: readonly string[];
   readonly reviewThreads?: readonly GitHubReviewThread[];
   readonly reviews?: readonly GitHubReviewSubmission[];
   readonly checkRuns?: readonly GitHubCheckRun[];

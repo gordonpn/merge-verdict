@@ -353,4 +353,60 @@ describe("normalizeSourceryReviewer", () => {
     expect(result.findings[0]?.isResolved).toBe(true);
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
+
+  it("treats acknowledged finding as unresolved when acknowledged SHA is not in ancestry", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 15,
+        name: "Sourcery review",
+        status: "completed",
+        conclusion: "success",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+        startedAt: null,
+        completedAt: null,
+      },
+    ];
+
+    const reviewThreads: GitHubReviewThread[] = [
+      {
+        id: "thread_sourcery_bad_sha",
+        isResolved: true,
+        resolvedByLogin: "sourcery-ai[bot]",
+        isOutdated: false,
+        path: "src/utils.ts",
+        line: 10,
+        originalLine: 10,
+        comments: [
+          {
+            id: "c5",
+            authorLogin: "sourcery-ai[bot]",
+            body: "Addressed in [badc0ffee123]: High · Fixed bug",
+            bodyDigest: "d5",
+            path: "src/utils.ts",
+            line: 10,
+            originalLine: 10,
+            commitSha: headSha,
+            createdAt: "2026-10-01T10:00:00Z",
+            updatedAt: "2026-10-01T10:00:00Z",
+          },
+        ],
+      },
+    ];
+
+    const result = normalizeSourceryReviewer({
+      headSha,
+      ancestorCommitShas: ["baseSha123", headSha],
+      checkRuns,
+      reviewThreads,
+      reviews: [],
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+    expect(result.findings[0]?.isResolved).toBe(false);
+    expect(result.findings[0]?.isBlocking).toBe(true);
+  });
 });

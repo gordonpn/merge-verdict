@@ -53,6 +53,8 @@ export function buildReviewSnapshotFromPullRequest(
 ): ReviewSnapshot {
   const input: NormalizerInput = {
     headSha: prData.headSha,
+    repository: prData.repository,
+    ancestorCommitShas: [prData.baseSha, prData.headSha],
     reviewThreads: prData.reviewThreads,
     reviews: prData.reviews,
     checkRuns: prData.checkRuns,

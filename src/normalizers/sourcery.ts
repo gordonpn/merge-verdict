@@ -81,8 +81,15 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
     }
 
     const severity = parseSeverity(firstComment.body);
-    const isBlocking = !thread.isResolved && (severity === "HIGH" || severity === "MEDIUM");
     const acknowledgedSha = parseAcknowledgedCommitSha(firstComment.body);
+    const isAcknowledgedInAncestry =
+      !acknowledgedSha ||
+      !input.ancestorCommitShas ||
+      input.ancestorCommitShas.includes(acknowledgedSha) ||
+      acknowledgedSha === input.headSha;
+
+    const isResolved = thread.isResolved && isAcknowledgedInAncestry;
+    const isBlocking = !isResolved && (severity === "HIGH" || severity === "MEDIUM");
 
     const finding: NormalizedFinding = {
       id: thread.id,
@@ -92,7 +99,7 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
       description: firstComment.body,
       severity,
       isBlocking,
-      isResolved: thread.isResolved,
+      isResolved,
     };
     if (thread.path) {
       finding.filePath = thread.path;

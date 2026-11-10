@@ -256,4 +256,166 @@ describe("normalizeCopilotReviewer", () => {
     expect(result.isFresh).toBe(true);
     expect(result.verdict).toBe("CHANGES_REQUESTED");
   });
+
+  it("populates commit permalinks and handles thread title fallbacks and null authors", () => {
+    const reviewThreads: GitHubReviewThread[] = [
+      {
+        id: "thread_permalink",
+        isResolved: false,
+        resolvedByLogin: null,
+        isOutdated: false,
+        path: "src/server.ts",
+        line: 42,
+        originalLine: 42,
+        comments: [
+          {
+            id: "cp1",
+            authorLogin: "copilot-pull-request-reviewer",
+            body: "<!-- comment marker -->\n> quote line\nActual issue title here.",
+            bodyDigest: "d_p",
+            path: "src/server.ts",
+            line: 42,
+            originalLine: 42,
+            commitSha: headSha,
+            createdAt: "2026-10-01T10:00:00Z",
+            updatedAt: "2026-10-01T10:00:00Z",
+          },
+        ],
+      },
+      {
+        id: "thread_fallback_title",
+        isResolved: true,
+        resolvedByLogin: "copilot-pull-request-reviewer[bot]",
+        isOutdated: false,
+        path: "src/db.ts",
+        line: 10,
+        originalLine: 10,
+        comments: [
+          {
+            id: "cp2",
+            authorLogin: "copilot-pull-request-reviewer[bot]",
+            body: "###\n<!-- only hidden comment -->",
+            bodyDigest: "d_f",
+            path: "src/db.ts",
+            line: 10,
+            originalLine: 10,
+            commitSha: headSha,
+            createdAt: "2026-10-01T10:00:00Z",
+            updatedAt: "2026-10-01T10:00:00Z",
+          },
+        ],
+      },
+      {
+        id: "thread_no_path_fallback",
+        isResolved: true,
+        resolvedByLogin: null,
+        isOutdated: false,
+        path: null,
+        line: null,
+        originalLine: null,
+        comments: [
+          {
+            id: "cp3",
+            authorLogin: "copilot-pull-request-reviewer[bot]",
+            body: "> only quote",
+            bodyDigest: "d_f2",
+            path: null,
+            line: null,
+            originalLine: null,
+            commitSha: null,
+            createdAt: "2026-10-01T10:00:00Z",
+            updatedAt: "2026-10-01T10:00:00Z",
+          },
+        ],
+      },
+      {
+        id: "thread_long_title",
+        isResolved: true,
+        resolvedByLogin: null,
+        isOutdated: false,
+        path: "src/long.ts",
+        line: null,
+        originalLine: null,
+        comments: [
+          {
+            id: "cp3b",
+            authorLogin: "copilot-pull-request-reviewer[bot]",
+            body: "A".repeat(150),
+            bodyDigest: "d_long",
+            path: "src/long.ts",
+            line: null,
+            originalLine: null,
+            commitSha: headSha,
+            createdAt: "2026-10-01T10:00:00Z",
+            updatedAt: "2026-10-01T10:00:00Z",
+          },
+        ],
+      },
+      {
+        id: "thread_empty_comments",
+        isResolved: true,
+        resolvedByLogin: null,
+        isOutdated: false,
+        path: "src/empty.ts",
+        line: 1,
+        originalLine: 1,
+        comments: [],
+      },
+      {
+        id: "thread_null_author",
+        isResolved: true,
+        resolvedByLogin: null,
+        isOutdated: false,
+        path: "src/null.ts",
+        line: 1,
+        originalLine: 1,
+        comments: [
+          {
+            id: "cp4",
+            authorLogin: null,
+            body: "Anonymous comment",
+            bodyDigest: "d_null",
+            path: "src/null.ts",
+            line: 1,
+            originalLine: 1,
+            commitSha: headSha,
+            createdAt: "2026-10-01T10:00:00Z",
+            updatedAt: "2026-10-01T10:00:00Z",
+          },
+        ],
+      },
+    ];
+
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 305,
+        reviewerLogin: null,
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: "Anonymous review",
+        bodyDigest: "d_anon",
+      },
+    ];
+
+    const result = normalizeCopilotReviewer({
+      headSha,
+      repository: "gordonpn/merge-verdict",
+      checkRuns: [],
+      reviewThreads,
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.findings).toHaveLength(4);
+    const [f1, f2, f3, f4] = result.findings;
+    expect(f1?.title).toBe("Actual issue title here.");
+    expect(f1?.rawCommentUrl).toBe(
+      `https://github.com/gordonpn/merge-verdict/blob/${headSha}/src/server.ts#L42`,
+    );
+    expect(f2?.title).toBe("Copilot finding on src/db.ts:10");
+    expect(f3?.title).toBe("Copilot finding");
+    expect(f4?.title.endsWith("...")).toBe(true);
+    expect(f4?.title).toHaveLength(120);
+  });
 });
