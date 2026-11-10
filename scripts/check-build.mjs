@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { verifyBundleExports } from "./verify-bundle.mjs";
 
 // Copy only distribution artifacts outside the checkout so source files and
 // installed dependencies cannot hide missing bundled packages or query assets.
@@ -21,25 +24,11 @@ try {
     assert.equal(map.sources.length, map.sourcesContent.length);
     execFileSync(process.execPath, [filename], { cwd: isolatedDirectory, stdio: "inherit" });
   }
-  execFileSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "--eval",
-      `import assert from 'node:assert/strict';
-       import { createRequire } from 'node:module';
-       import * as esm from './index.js';
-       const cjs = createRequire(import.meta.url)('./index.cjs');
-       assert.deepEqual(Object.keys(esm).sort(), Object.keys(cjs).sort());
-       for (const bundle of [esm, cjs]) {
-         const config = bundle.createDefaultConfig();
-         assert.equal(config.approval.requiredCheck, 'merge-verdict');
-         assert.equal(bundle.MergeVerdictConfigSchema.parse({}).approval.requiredCheck, 'merge-verdict');
-         assert.ok(bundle.createGitHubCollector('standalone-smoke-test') instanceof bundle.GitHubCollector);
-       }`,
-    ],
-    { cwd: isolatedDirectory, stdio: "inherit" },
-  );
+
+  const esm = await import(pathToFileURL(join(isolatedDirectory, "index.js")).href);
+  const cjs = createRequire(import.meta.url)(join(isolatedDirectory, "index.cjs"));
+  verifyBundleExports(esm, cjs);
+
   console.log("Standalone ESM and CommonJS bundles passed without node_modules or query files.");
 } finally {
   rmSync(isolatedDirectory, { recursive: true, force: true });
