@@ -1,21 +1,16 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { GraphqlResponseError, graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 import type { CheckRunConclusion, CheckRunStatus } from "../models/check-run.js";
+import CHANGED_FILES_QUERY from "./queries/changed-files.graphql?raw";
+import THREAD_COMMENTS_QUERY from "./queries/review-thread-comments.graphql?raw";
+import REVIEW_THREADS_QUERY from "./queries/review-threads.graphql?raw";
 
 type GraphqlClient = typeof graphql;
-
-function loadQuery(filename: string): string {
-  return readFileSync(new URL(`./queries/${filename}`, import.meta.url), "utf8");
-}
 
 const PAGE_SIZE = 100;
 const POLICY_FILE_PATH = ".github/merge-verdict.yml";
 const REVIEW_THREAD_COMMENT_CONCURRENCY = 5;
-const REVIEW_THREADS_QUERY = loadQuery("review-threads.graphql");
-const CHANGED_FILES_QUERY = loadQuery("changed-files.graphql");
-const THREAD_COMMENTS_QUERY = loadQuery("review-thread-comments.graphql");
 
 interface PageInfo {
   readonly hasNextPage: boolean;
