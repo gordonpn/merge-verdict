@@ -3,6 +3,7 @@
  */
 export const VERSION = "0.1.0";
 
+export type { CollectorRetryEvent, CollectorRetryOptions } from "./collector/client.js";
 export type {
   CollectPullRequestInput,
   GitHubCheckRun,
