@@ -14,6 +14,7 @@ permissions:
 jobs:
   actionlint:
     name: runner / actionlint
+    # GITHUB_TOKEN has read-only access on fork pull_request events, preventing review comments.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -35,6 +36,7 @@ jobs:
 
   biome:
     name: runner / biome
+    # GITHUB_TOKEN has read-only access on fork pull_request events, preventing review comments.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
