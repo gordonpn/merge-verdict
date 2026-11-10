@@ -26,7 +26,9 @@ try {
   }
 
   const esm = await import(pathToFileURL(join(isolatedDirectory, "index.js")).href);
-  const cjs = createRequire(import.meta.url)(join(isolatedDirectory, "index.cjs"));
+  const cjs = createRequire(pathToFileURL(join(isolatedDirectory, "index.cjs")))(
+    join(isolatedDirectory, "index.cjs"),
+  );
   verifyBundleExports(esm, cjs);
 
   console.log("Standalone ESM and CommonJS bundles passed without node_modules or query files.");

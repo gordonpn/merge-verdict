@@ -66,7 +66,7 @@ built-ins are supplied by the runtime.
 Run `pnpm run test:build` to rebuild and verify both distributions in a temporary
 directory without `node_modules` or separate query files. The current entry
 point exports the core library. GitHub Action event handling and `action.yml`
-are separate work in issue #13. Generated `dist/` artifacts remain ignored.
+packaging are implemented separately. Generated `dist/` artifacts remain ignored.
 
 ## Documentation Index
 

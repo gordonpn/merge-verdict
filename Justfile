@@ -7,6 +7,10 @@ default:
 build:
     pnpm run build
 
+# Verify standalone distribution bundle integrity in an isolated directory
+test-build:
+    pnpm run test:build
+
 # Run unit tests
 test:
     pnpm test
