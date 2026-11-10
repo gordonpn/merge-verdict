@@ -62,6 +62,7 @@ Merge Verdict is currently in the **foundation and architecture phase**. The arc
 - [Verification Policy](docs/verification-policy.md): Verification conditions, severity handling, staleness rules, and decision matrix.
 - [Reviewer Integrations](docs/reviewer-integrations.md): Observed behavior from SnapTally reference PRs and normalized schemas.
 - [Events and State](docs/events-and-state.md): Event coverage, thread-resolution limitations, concurrency, and state transitions.
+- [Commit-Scoped Approval Proposal](docs/commit-scoped-approval.md): Proposed lifecycle, evidence contract, invalidation behavior, and acceptance tests for issue #40.
 - [Security Architecture](docs/security.md): Threat model, token permissions, fork isolation, and prompt injection defense.
 - [Implementation Plan](docs/implementation-plan.md): Five-milestone roadmap with explicit tasks and acceptance criteria.
 - [Testing Strategy](docs/testing.md): Unit tests, reference PR replay fixtures, and simulated edge-case testing.
