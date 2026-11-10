@@ -7,6 +7,14 @@ default:
 test:
     pnpm test
 
+# Run unit tests with code coverage report
+test-coverage:
+    pnpm run test:coverage
+
+# Lint GitHub Actions workflow definitions
+lint-workflows:
+    actionlint
+
 # Run linter checks
 lint:
     pnpm run lint
