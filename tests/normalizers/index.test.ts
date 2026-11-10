@@ -138,6 +138,35 @@ describe("buildReviewSnapshotFromPullRequest", () => {
     expect(snapshot.blockingDecisionCount).toBe(1);
   });
 
+  it("sorts review submissions chronologically so later reviews supersede earlier ones", () => {
+    const prWithSuccessiveReviews: GitHubPullRequestData = {
+      ...samplePrData,
+      reviews: [
+        {
+          id: 61,
+          reviewerLogin: "human-maintainer",
+          state: "APPROVED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T12:00:00Z",
+          body: "Looks good now.",
+          bodyDigest: "d61",
+        },
+        {
+          id: 60,
+          reviewerLogin: "human-maintainer",
+          state: "CHANGES_REQUESTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:00:00Z",
+          body: "Initial blockers.",
+          bodyDigest: "d60",
+        },
+      ],
+    };
+
+    const snapshot = buildReviewSnapshotFromPullRequest(prWithSuccessiveReviews);
+    expect(snapshot.blockingDecisionCount).toBe(0);
+  });
+
   it("exports default normalizers list", () => {
     expect(DEFAULT_REVIEWER_NORMALIZERS).toHaveLength(5);
   });

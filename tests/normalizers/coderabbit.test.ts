@@ -561,4 +561,44 @@ describe("normalizeCodeRabbitReviewer", () => {
     expect(result.findings[1]?.severity).toBe("LOW");
     expect(result.findings[1]?.isBlocking).toBe(false);
   });
+
+  it("handles nested details tags and blockquoted findings in review body", () => {
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 802,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: `<details>
+<summary>Actionable comments outside diff</summary>
+<details>
+<summary>Sub-group</summary>
+> Critical security finding: Plaintext secret exposed in handler.
+</details>
+- [ ] Checklist item ignored
+> Non-bullet actionable warning: Missing rate limit on public endpoint.
+</details>`,
+        bodyDigest: "d802",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings[0]?.severity).toBe("BLOCKER");
+    expect(result.findings[0]?.isBlocking).toBe(true);
+    expect(result.findings[0]?.title).toBe(
+      "Critical security finding: Plaintext secret exposed in handler.",
+    );
+    expect(result.findings[1]?.severity).toBe("MEDIUM");
+    expect(result.findings[1]?.isBlocking).toBe(true);
+  });
 });

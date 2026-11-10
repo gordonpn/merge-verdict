@@ -318,4 +318,33 @@ None.`,
     expect(result.status).toBe("COMPLETED");
     expect(result.verdict).toBe("CHANGES_REQUESTED");
   });
+
+  it("does not treat 'APPROVE (no blocking issues)' as a BLOCK verdict", () => {
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 509,
+        reviewerLogin: "github-actions[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: `## Verdict: APPROVE (no blocking issues)
+
+### Material Findings
+None.`,
+        bodyDigest: "d9",
+      },
+    ];
+
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("APPROVE");
+    expect(result.findings).toHaveLength(0);
+  });
 });

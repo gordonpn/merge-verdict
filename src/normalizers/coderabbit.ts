@@ -124,11 +124,16 @@ function parseReviewBodyFindings(review: GitHubReviewSubmission): NormalizedFind
   const lines = body.split("\n");
   const findings: NormalizedFinding[] = [];
   let activeSection: "nitpick" | "outside_diff" | null = null;
+  let detailsDepth = 0;
   let itemIndex = 1;
 
   for (const rawLine of lines) {
     const trimmed = rawLine.trim();
     const lower = trimmed.toLowerCase();
+
+    if (lower.includes("<details")) {
+      detailsDepth++;
+    }
 
     if (lower.includes("<summary") || trimmed.startsWith("#")) {
       if (lower.includes("nitpick")) {
@@ -147,8 +152,11 @@ function parseReviewBodyFindings(review: GitHubReviewSubmission): NormalizedFind
       continue;
     }
 
-    if (lower.startsWith("</details>")) {
-      activeSection = null;
+    if (lower.includes("</details>")) {
+      detailsDepth = Math.max(0, detailsDepth - 1);
+      if (detailsDepth === 0) {
+        activeSection = null;
+      }
       continue;
     }
 
@@ -156,15 +164,23 @@ function parseReviewBodyFindings(review: GitHubReviewSubmission): NormalizedFind
       continue;
     }
 
+    let itemText = trimmed;
+    if (itemText.startsWith(">")) {
+      itemText = itemText.slice(1).trim();
+    }
+    if (itemText.startsWith("- [ ]") || itemText.startsWith("- [x]")) {
+      continue;
+    }
+    if (itemText.startsWith("- ") || itemText.startsWith("* ")) {
+      itemText = itemText.slice(2).trim();
+    }
+
     if (
-      (trimmed.startsWith("- ") || trimmed.startsWith("* ")) &&
-      !trimmed.startsWith("- [ ]") &&
-      !trimmed.startsWith("- [x]")
+      itemText.length > 0 &&
+      !itemText.startsWith("<") &&
+      !itemText.startsWith("```") &&
+      !itemText.startsWith("`")
     ) {
-      const itemText = trimmed.slice(2).trim();
-      if (!itemText) {
-        continue;
-      }
       const severity: Severity = activeSection === "nitpick" ? "LOW" : parseSeverity(itemText);
       const isBlocking = severity === "BLOCKER" || severity === "HIGH" || severity === "MEDIUM";
       findings.push({

@@ -51,12 +51,27 @@ export function buildReviewSnapshotFromPullRequest(
   prData: GitHubPullRequestData,
   options: NormalizeSnapshotOptions = {},
 ): ReviewSnapshot {
+  const sortedReviews = [...prData.reviews].sort((a, b) => {
+    const timeA = a.submittedAt ? Date.parse(a.submittedAt) : 0;
+    const timeB = b.submittedAt ? Date.parse(b.submittedAt) : 0;
+    if (timeA !== timeB) {
+      return timeA - timeB;
+    }
+    if (a.state === "CHANGES_REQUESTED" && b.state !== "CHANGES_REQUESTED") {
+      return 1;
+    }
+    if (b.state === "CHANGES_REQUESTED" && a.state !== "CHANGES_REQUESTED") {
+      return -1;
+    }
+    return a.id - b.id;
+  });
+
   const input: NormalizerInput = {
     headSha: prData.headSha,
     repository: prData.repository,
     ancestorCommitShas: [prData.baseSha, prData.headSha],
     reviewThreads: prData.reviewThreads,
-    reviews: prData.reviews,
+    reviews: sortedReviews,
     checkRuns: prData.checkRuns,
     conversationComments: prData.conversationComments,
     commitStatuses: prData.commitStatuses,
@@ -72,7 +87,7 @@ export function buildReviewSnapshotFromPullRequest(
   const unresolvedThreadCount = prData.reviewThreads.filter((t) => !t.isResolved).length;
 
   const latestReviewStateByUser = new Map<string, string>();
-  for (const review of prData.reviews) {
+  for (const review of sortedReviews) {
     if (
       !review.reviewerLogin ||
       review.state === "DISMISSED" ||

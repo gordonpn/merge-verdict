@@ -17,10 +17,10 @@ function extractRawVerdict(body: string): RawVerdict | null {
     return null;
   }
   const clean = match[1].trim().toUpperCase();
-  if (clean.includes("BLOCK")) {
+  if (/\bBLOCK\b/.test(clean)) {
     return "BLOCK";
   }
-  if (clean.includes("REQUEST CHANGES")) {
+  if (/\bREQUEST CHANGES\b/.test(clean)) {
     return "REQUEST CHANGES";
   }
   if (clean.includes("APPROVE WITH MINOR FINDINGS")) {
