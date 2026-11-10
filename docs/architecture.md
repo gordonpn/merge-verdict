@@ -124,9 +124,10 @@ Characteristics:
 
 The publisher translates the engine verdict into official GitHub artifacts while separating the verification assessment, approval emission eligibility, and branch-protection recognition:
 - **Status Check (Authoritative Gate)**:
-  - **Tier 1 (Commit Status Fallback)**: When running under default `GITHUB_TOKEN`, the publisher calls the Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) with context `merge-verdict`, targeting the event evaluation SHA: `pull_request.head_sha` for pull request events or `merge_group.head_sha` for `merge_group` events. It emits commit status states (`pending`, `success`, `failure`, `error`) and a concise description up to 140 characters.
-  - **Tier 2 (Checks API Check Run)**: When authenticated with a dedicated GitHub App installation token, the publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the event evaluation SHA: `pull_request.head_sha` for pull request events or `merge_group.head_sha` for `merge_group` events. It manages the full check run lifecycle (`status: in_progress`, `status: completed` with conclusions `success`, `failure`, or `action_required`), rich Markdown summaries, finding breakdowns, and commit-pinned annotations.
-    As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), both tiers serve as the primary automated merge gate required by branch protection.
+  - The publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the event evaluation SHA: `pull_request.head.sha` for pull request events or `merge_group.head_sha` for merge queue events. Both supported credential models use this API.
+  - `PASS` completes the check with `success`; `PENDING` keeps it `in_progress` with conclusion `null`; terminal `FAIL`, `STALE`, and `ERROR` use a blocking `failure` or `action_required` conclusion. Never emit `neutral` or `skipped` for non-passing outcomes.
+  - For `STALE`, skip writing only if a newer evaluation already owns an in-progress or blocking check. Otherwise publish a blocking result so an earlier success cannot remain mergeable.
+  - As established in [ADR 0002](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), there is no supported legacy Commit Status API publishing fallback. External commit statuses remain collector inputs.
 - **Configurable Approval Provider Abstraction (PR Review Endorsement)**: When verdict is `PASS` and the matched path risk tier permits automated approval, Merge Verdict submits or verifies a formal `APPROVE` review via a configurable provider (`github_copilot` or `github_app`):
   - `github_copilot`: Requests a Copilot code review on `head_sha` (with effort matched to the path risk tier) or verifies an existing active `APPROVE` review from `copilot-pull-request-reviewer[bot]`.
   - `github_app`: Submits an official review (`POST /repos/{owner}/{repo}/pulls/{number}/reviews`) with event `APPROVE` under the Merge Verdict App identity as a dedicated audit endorsement.
@@ -135,18 +136,18 @@ The publisher translates the engine verdict into official GitHub artifacts while
 
 ## 4. GitHub Actions vs. GitHub App Integration Models
 
-Merge Verdict supports two deployment models to accommodate different repository requirements.
+Merge Verdict supports two credential models with the same Checks API publication contract. Effective permissions and the expected source App must be validated for the selected workflow event.
 
-| Feature / Dimension             | Actions-Only (Tier 1)                                      | Actions + GitHub App Identity (Tier 2)                      |
-| :------------------------------ | :--------------------------------------------------------- | :---------------------------------------------------------- |
-| Infrastructure required         | None                                                       | GitHub App registration (free, self-hosted)                 |
-| Authentication credential       | Runner `${{ secrets.GITHUB_TOKEN }}`                       | Dynamic token via `${{ secrets.APP_PRIVATE_KEY }}`          |
-| Status Check API                | GitHub Commit Status API (`POST /statuses/{sha}`)          | GitHub Checks API (`POST /check-runs`)                      |
-| Check annotations & markdown    | Basic status description (up to 140 chars)                 | Full Markdown body, summary tables, inline annotations      |
-| PR Approval Review              | Supported if repo allows Actions PR approval               | Fully supported under dedicated bot identity                |
-| Repo settings requirement       | "Allow GitHub Actions to create and approve pull requests" | Standard repository settings; no special workflow overrides |
-| Security boundary               | Bounded by workflow token permissions                      | Bounded by scoped GitHub App installation permissions       |
-| Workflow dispatch compatibility | Dispatch jobs may not register as required PR checks       | App-created check runs reliably satisfy branch protection   |
+| Feature / Dimension             | Authorized Workflow Token                                  | Dedicated GitHub App Identity                            |
+| :------------------------------ | :--------------------------------------------------------- | :------------------------------------------------------- |
+| Infrastructure required         | None                                                       | GitHub App registration (free, self-hosted)              |
+| Authentication credential       | Runner `${{ secrets.GITHUB_TOKEN }}`                       | Dynamic token via `${{ secrets.APP_PRIVATE_KEY }}`       |
+| Status Check API                | GitHub Checks API (`POST /check-runs`)                     | GitHub Checks API (`POST /check-runs`)                   |
+| Check annotations & markdown    | Structured Markdown check output                           | Full Markdown body, summary tables, inline annotations   |
+| PR Approval Review              | Via configured provider and policy                         | Own App review, subject to GitHub review rules           |
+| Repo settings requirement       | Effective `checks: write`; provider-specific review access | App installation access; provider-specific review access |
+| Security boundary               | Bounded by workflow token permissions                      | Bounded by scoped GitHub App installation permissions    |
+| Workflow dispatch compatibility | Explicit check run on evaluation SHA; verify source        | Explicit check run on evaluation SHA; verify source      |
 
 ### Relationship Between Actions and GitHub App
 
@@ -154,11 +155,11 @@ It is critical to recognize that GitHub Actions and GitHub Apps are complementar
 - GitHub Actions provides the **execution runtime** (compute, triggers, runner containers).
 - A GitHub App provides the **integration identity and authorization** (distinct bot user, fine-grained Checks API access, independent approval authority).
 
-Merge Verdict operates in GitHub Actions in both models. In Tier 2, the workflow simply mints a temporary installation access token from the GitHub App credentials before executing the engine.
+Merge Verdict operates in GitHub Actions in both models. The dedicated App model mints a temporary installation access token from App credentials. A restricted workflow token must produce a setup/publication error and withhold approval rather than switch to commit statuses. See the permission and fork boundaries in [Security Architecture](docs/security.md).
 
 ## 5. Data Flow and Event-to-Verdict Sequence
 
-The Tier 2 sequence diagram below details the GitHub App Checks API lifecycle from a code update to a published verdict, including the fast invalidation path. Tier 1 uses the equivalent Commit Status API states: `pending`, `success`, `failure`, and `error`.
+The sequence diagram below applies to both authorized credential models and shows the Checks API lifecycle, including fast invalidation.
 
 ```mermaid
 sequenceDiagram
@@ -172,7 +173,7 @@ sequenceDiagram
     Dev->>GH: Push commit or update review thread
     GH->>WF: Trigger workflow (pull_request / review)
     WF->>WF: Acquire PR concurrency lock (cancel-in-progress)
-    WF->>GH: Fast Invalidation: set Tier 2 check run in_progress / non-passing
+    WF->>GH: Fast Invalidation: set check run in_progress / non-passing
     WF->>Core: Invoke verification engine
 
     Core->>GH: Query PR metadata, reviews, threads, checks (REST & GraphQL)
@@ -213,7 +214,7 @@ Detailed design rationale and historical alternatives are recorded in:
 
 Summary of rejected approaches:
 - **Standalone 24/7 Cloud Service with Database**: Rejected to avoid split-brain review state against GitHub, operational hosting costs, database migration complexity, and customer adoption friction.
-- **Pure Actions Without GitHub App Support**: Rejected as sole design because default `GITHUB_TOKEN` cannot call the Checks API and requires enabling risky repo-wide Actions PR approval settings.
+- **Pure Actions Without GitHub App Support**: Rejected as the sole design because event permissions can restrict workflow tokens, approval providers need suitable identities, and thread resolution requires optional event bridging.
 - **Formal PR Approval as Primary Merge Gate**: Rejected because PR authors cannot approve own PRs, human review thresholds conflict with bot approvals, and approvals do not dismiss automatically on new review comments on unchanged commits.
 - **Heavy Agent Frameworks (LangChain, LangGraph, Vector DBs)**: Rejected because Merge Verdict is a deterministic policy reconciler, not a conversational agent. A lightweight OpenAI-compatible client adapter is sufficient for optional semantic evaluation.
 

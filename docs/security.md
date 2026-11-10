@@ -16,7 +16,7 @@ The following system inputs originate outside the trust boundary and must be tre
 ### 1.2. Privileged Operations
 
 The following operations cross the trust boundary into privileged state:
-- Publishing a `success` commit status or check run for `merge-verdict`.
+- Publishing a `success` Checks API check run for `merge-verdict`.
 - Submitting an official `APPROVE` review via the GitHub Pull Request API.
 - Dismissing an active `CHANGES_REQUESTED` review.
 
@@ -33,15 +33,15 @@ When running under default Actions credentials, workflow jobs must declare expli
 ```yaml
 permissions:
   contents: read # Read configuration and metadata
-  checks: read # Read check runs for verification
+  checks: write # Read evidence and publish the authoritative check run
   pull-requests: write # Submit PR reviews and comment dismissals
-  statuses: write # Publish commit status checks (merge-verdict)
+  statuses: read # Read external commit status evidence
   issues: read # Read issue comments and conversation threads
 ```
 
-Workflows must never request wildcard `write-all` permissions.
+This is a trusted publisher job example. Read-only collection jobs use read permissions; omit review write access when the selected provider does not need it. Effective permissions depend on the event and repository/organization policy. A denied check write is a publication error and must withhold approval, not trigger a Commit Status API fallback. Workflows must never request wildcard `write-all` permissions. See [GitHub workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
 
-### 2.2. GitHub App Scoped Permissions (Tier 2)
+### 2.2. Dedicated GitHub App Scoped Permissions
 
 When using a dedicated GitHub App to generate installation access tokens, the App registration must be restricted to:
 
@@ -49,7 +49,9 @@ When using a dedicated GitHub App to generate installation access tokens, the Ap
 | ----------------- | ------------ | ----------------------------------------------------------------------------------------------------------- |
 | `Checks`          | Read & Write | Required to create and update rich check runs via the Checks API (`POST /repos/{owner}/{repo}/check-runs`). |
 | `Pull Requests`   | Read & Write | Required to query review threads, submit `APPROVE` reviews, and dismiss stale reviews.                      |
-| `Commit Statuses` | Read & Write | Required if fallback to the Commit Status API is utilized.                                                  |
+| `Commit Statuses` | Read-Only    | Read external commit status evidence; no legacy status publishing fallback.                                 |
+| `Contents`        | Read-Only    | Read base-branch policy content.                                                                            |
+| `Issues`          | Read-Only    | Read top-level PR conversation comments.                                                                    |
 | `Metadata`        | Read-Only    | Default requirement for all GitHub Apps to query repository structure.                                      |
 
 Permissions such as `Administration`, `Workflows`, `Secrets`, or `Repository contents (write)` are strictly prohibited.
@@ -60,7 +62,7 @@ Handling pull requests submitted from public forks requires extreme care in GitH
 
 ### 3.1. The Vulnerability Pattern
 
-Workflows triggered by `pull_request` from a fork run with a read-only token and have no access to repository secrets. Consequently, they cannot write status checks or submit PR reviews.
+Under the default fork restrictions, workflows triggered by `pull_request` from a fork have a read-only token and no repository secrets, so they cannot publish the required check run or submit PR reviews. Merge Verdict must not enable write tokens for untrusted code as a workaround; use a separate trusted publisher context.
 
 A common but dangerous pattern is using `pull_request_target`, which grants the workflow a write token and secrets access while triggering on fork PRs. If a workflow using `pull_request_target` checks out the fork code (`ref: ${{ github.event.pull_request.head.sha }}`) and executes npm scripts (e.g. `npm test` or `pnpm build`), **arbitrary code execution occurs in a privileged context**, exposing repository secrets.
 
@@ -109,4 +111,4 @@ When the optional semantic verification module is active, untrusted review comme
 
 - **Unique Context Identification**: The status check published by Merge Verdict uses the strict context name `merge-verdict`.
 - **Branch Protection Enforcement**: In GitHub Branch Protection rules or Repository Rulesets, repository administrators must select `merge-verdict` as a required status check.
-- **GitHub App Integrity**: When using Tier 2 (GitHub App), GitHub automatically associates the check run with the authenticated App ID. Third-party actors or unauthorized workflows cannot spoof the App check run without possession of the private key.
+- **GitHub App Integrity**: GitHub associates a check run with the authenticated App. Administrators must select the intended source App for the required `merge-verdict` check and validate that source during setup. A dedicated App provides an identity separate from GitHub Actions; protect its installation tokens and private key. Check-name matching alone is insufficient to establish publisher identity.

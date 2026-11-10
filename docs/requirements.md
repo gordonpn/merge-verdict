@@ -27,7 +27,7 @@ Merge Verdict is not a general-purpose AI code reviewer. It does not replace Git
 - Checking the completion status and conclusion of required CI checks, linters, and security analyzers.
 - Detecting stale reviewer findings associated with older commits (commit SHA mismatch).
 - Detecting incomplete, skipped, failed, or rate-limited reviewer runs.
-- Publishing required status checks (`merge-verdict`) via the GitHub Commit Status API and GitHub Checks API.
+- Publishing the authoritative `merge-verdict` check run via the GitHub Checks API. Legacy commit statuses remain external evidence inputs, not an alternative publisher.
 - Submitting or verifying official GitHub `APPROVE` reviews via configurable approval providers (`github_copilot` or `github_app`) while separating the `PASS` assessment from approval emission eligibility and branch-protection recognition.
 - Invalidating or updating previous verdicts when new review comments, thread updates, or commits arrive.
 - Idempotent execution and concurrency controls to prevent event storms and self-triggering loops.
@@ -95,10 +95,7 @@ Before publishing a status check or submitting an approval review, the system mu
 
 ### FR-11: Required Status Check Publication
 
-The system must publish a status check named `merge-verdict` targeting the current PR head commit SHA. This check must support both:
-- GitHub Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) using `GITHUB_TOKEN`.
-- GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) when authenticated as a GitHub App.
-  The check must reflect the computed outcome (`pending`, `success`, `failure`, `error`).
+The system must publish a status check named `merge-verdict` targeting the current PR head commit SHA. The publisher must use the GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) with credentials having effective `checks: write` permission. `PASS` completes with `success`; `PENDING` remains `in_progress` with conclusion `null`; terminal `FAIL`, `STALE`, and `ERROR` complete with blocking `failure` or `action_required`. Never publish `neutral` or `skipped` for a non-passing outcome. No Commit Status API publishing fallback is supported. Missing permissions or publication failures are errors and must withhold approval.
 
 ### FR-12: Configurable PR Approval Provider and Eligibility Separation
 
@@ -110,7 +107,7 @@ The system must separate the verification verdict (`PASS`), approval emission el
 ### FR-13: Policy-Driven Approval Withholding and Invalidation
 
 The system must withhold approval whenever verification is incomplete, failing, stale, or ambiguous under configured rules. Furthermore, if a PR was previously approved by Merge Verdict and subsequent activity (such as a new commit or a reopened review thread) invalidates that approval:
-- The `merge-verdict` check must immediately transition to `pending` or `failure` for Tier 1 Commit Status, or to `status: in_progress` (with `conclusion: null`) or `status: completed` with a blocking conclusion (`failure` or `action_required`) for Tier 2 Checks API runs.
+- The `merge-verdict` check run must immediately transition to `status: in_progress` with `conclusion: null`, or `status: completed` with a blocking conclusion (`failure` or `action_required`).
 - The existing approval must be dismissed or superseded according to configuration.
 
 ### FR-14: Loop Prevention and Self-Event Filtering
@@ -129,13 +126,15 @@ The system must support configurable verification and review effort levels (`lit
 
 Every evaluation must resolve to exactly one of the following five core outcome states:
 
-| Internal State | Description                                                                                                                              | GitHub Commit Status | GitHub Check Run Status | GitHub Check Run Conclusion   | PR Approval Review Eligible |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ----------------------- | ----------------------------- | --------------------------- |
-| `PENDING`      | Required checks or reviewers have not yet completed; evaluation is waiting for completion signals.                                       | `pending`            | `in_progress`           | `null`                        | No                          |
-| `PASS`         | All configured verification conditions and policy rules are strictly satisfied for the current PR snapshot.                              | `success`            | `completed`             | `success`                     | Yes (If risk tier permits)  |
-| `FAIL`         | One or more mandatory verification criteria are violated (e.g. failing CI, unresolved blocking thread, unaddressed `CHANGES_REQUESTED`). | `failure`            | `completed`             | `failure`                     | No                          |
-| `ERROR`        | Verification could not complete reliably due to infrastructure failures, API rate limits, or network errors.                             | `error`              | `completed`             | `failure` / `action_required` | No                          |
-| `STALE`        | The evaluation snapshot has been superseded by a newer commit or newer review activity.                                                  | `error` or no write  | `completed` or no write | `action_required` or no write | No                          |
+| Internal State | Description                                                                                                                              | GitHub Check Run Status | GitHub Check Run Conclusion   | PR Approval Review Eligible |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ----------------------------- | --------------------------- |
+| `PENDING`      | Required checks or reviewers have not yet completed; evaluation is waiting for completion signals.                                       | `in_progress`           | `null`                        | No                          |
+| `PASS`         | All configured verification conditions and policy rules are strictly satisfied for the current PR snapshot.                              | `completed`             | `success`                     | Yes (If risk tier permits)  |
+| `FAIL`         | One or more mandatory verification criteria are violated (e.g. failing CI, unresolved blocking thread, unaddressed `CHANGES_REQUESTED`). | `completed`             | `failure`                     | No                          |
+| `ERROR`        | Verification could not complete reliably due to infrastructure failures, API rate limits, or network errors.                             | `completed`             | `failure` / `action_required` | No                          |
+| `STALE`        | The evaluation snapshot has been superseded by a newer commit or newer review activity.                                                  | `completed` or no write | `action_required` or no write | No                          |
+
+A reviewer result targeting an older SHA leaves the overall verdict `PENDING` while fresh required review is awaited. This differs from overall `STALE`, which means the evaluation snapshot changed during execution. For `STALE`, skip publication only if a newer evaluation already owns an in-progress or blocking check; otherwise publish a blocking conclusion. See the decision matrix in [Verification Policy](docs/verification-policy.md).
 
 ## 5. Non-Functional Requirements
 
@@ -159,7 +158,7 @@ Every evaluation must resolve to exactly one of the following five core outcome 
 
 ### NFR-05: Least-Privilege Security Boundaries
 
-- The engine must strictly enforce least-privilege token permissions (`pull-requests: write`, `statuses: write`, `checks: write`, `contents: read`).
+- The engine must strictly enforce least-privilege token permissions for each operation (`checks: write` for publication, `pull-requests: write` when needed for the configured approval provider, and read permissions for collected evidence and base policy). Do not request `statuses: write` for a nonexistent publishing fallback.
 - Workflows handling untrusted code from fork pull requests must execute inspection logic in unprivileged contexts. Privileged approval operations must never execute untrusted user code.
 
 ### NFR-06: Zero Data Retention and Privacy
@@ -170,5 +169,5 @@ Every evaluation must resolve to exactly one of the following five core outcome 
 
 1. **Deterministic Verification Gate**: Merge Verdict successfully prevents PR merges on protected branches when any required check fails, any thread is unresolved, or any required reviewer is missing.
 2. **Native Approval Delivery**: Upon satisfaction of all policy criteria, Merge Verdict posts a green `merge-verdict` status check and, when eligible under the matched path risk tier and configured approval provider (`github_copilot` or `github_app`), emits or verifies a formal GitHub PR review with state `APPROVE` (or withholds approval when the risk tier requires human review or the provider is `none`).
-3. **Staleness Protection**: Pushing a new commit immediately transitions the `merge-verdict` check from `success` back to `pending`, preventing merges until all criteria are re-verified on the new commit SHA.
+3. **Staleness Protection**: Pushing a new commit immediately creates or updates a non-passing `merge-verdict` check on the new SHA, preventing merges until all criteria are re-verified on the new commit SHA.
 4. **Zero-Configuration Viability**: A repository can install Merge Verdict by referencing the standard GitHub Action in a workflow file, immediately obtaining baseline verification without custom server configuration.
