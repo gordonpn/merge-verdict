@@ -196,7 +196,7 @@ verification:
 approval:
   required_check: merge-verdict
   providers:
-    - none
+    - github_copilot
   require_verified_commit: true
 
   risk:
@@ -218,7 +218,7 @@ approval:
 
 ### B. Action Workflow File (`.github/workflows/merge-verdict.yml`)
 
-Commit this workflow to trigger the local Action on pull request activity:
+Commit this workflow to trigger the local Action on pull request activity, reviewer comments, and CI completion:
 
 ```yaml
 name: merge-verdict
@@ -230,11 +230,16 @@ on:
     types: [submitted, dismissed]
   pull_request_review_comment:
     types: [created, edited, deleted]
+  issue_comment:
+    types: [created, edited, deleted]
   check_run:
+    types: [completed]
+  workflow_run:
+    workflows: ["CI", "CodeQL"]
     types: [completed]
 
 concurrency:
-  group: merge-verdict-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.sha }}
+  group: merge-verdict-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -246,11 +251,14 @@ jobs:
       checks: write
       statuses: write
     steps:
-      - name: Checkout repository
+      - name: Checkout trusted verifier
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref || github.event.repository.default_branch }}
+          path: .verifier
 
       - name: Run Merge Verdict
-        uses: ./
+        uses: ./.verifier
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           config-path: .github/merge-verdict.yml
@@ -288,11 +296,16 @@ on:
     types: [submitted, dismissed]
   pull_request_review_comment:
     types: [created, edited, deleted]
+  issue_comment:
+    types: [created, edited, deleted]
   check_run:
+    types: [completed]
+  workflow_run:
+    workflows: ["CI", "Lint"]
     types: [completed]
 
 concurrency:
-  group: merge-verdict-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.sha }}
+  group: merge-verdict-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -310,7 +323,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### C. Add Policy File (`.github/merge-verdict.yml`)
+### C. Privileged Execution Path for Fork Pull Requests
+
+For fork contributions and Dependabot PRs under default GitHub security settings, `pull_request` workflows execute with a read-only token and cannot write check runs or submit PR reviews. To support external contributors safely:
+
+- Follow the base-only `pull_request_target` pattern documented in `docs/security.md`.
+- Never check out or execute code from the untrusted fork PR branch inside a privileged runner.
+- The verifier executes purely against collected API payloads while checking out only the trusted base branch.
+
+### D. Add Policy File (`.github/merge-verdict.yml`)
 
 Configure the target repository's required reviewers and CI checks matching its tooling:
 
@@ -331,7 +352,7 @@ rate_limit_timeout_minutes: 30
 approval:
   required_check: merge-verdict
   providers:
-    - none
+    - github_copilot
 ```
 
 ---
