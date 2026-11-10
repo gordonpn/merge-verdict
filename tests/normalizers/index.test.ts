@@ -118,6 +118,26 @@ describe("buildReviewSnapshotFromPullRequest", () => {
     expect(snapshot.reviewers.copilot?.verdict).toBe("CHANGES_REQUESTED");
   });
 
+  it("counts CHANGES_REQUESTED from human reviewers without a normalizer", () => {
+    const prWithHumanReview: GitHubPullRequestData = {
+      ...samplePrData,
+      reviews: [
+        {
+          id: 51,
+          reviewerLogin: "human-maintainer",
+          state: "CHANGES_REQUESTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:00:00Z",
+          body: "Architecture changes needed.",
+          bodyDigest: "d51",
+        },
+      ],
+    };
+
+    const snapshot = buildReviewSnapshotFromPullRequest(prWithHumanReview);
+    expect(snapshot.blockingDecisionCount).toBe(1);
+  });
+
   it("exports default normalizers list", () => {
     expect(DEFAULT_REVIEWER_NORMALIZERS).toHaveLength(5);
   });

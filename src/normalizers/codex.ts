@@ -30,7 +30,11 @@ function isCodexAuthor(login: string | null): boolean {
 }
 
 function parseCodexState(input: NormalizerInput): CodexReviewStateJson | null {
-  const comments = [...(input.conversationComments ?? []), ...(input.reviews ?? [])];
+  const eligibleComments = (input.conversationComments ?? []).filter((c) =>
+    isCodexAuthor(c.authorLogin),
+  );
+  const eligibleReviews = (input.reviews ?? []).filter((r) => isCodexAuthor(r.reviewerLogin));
+  const comments = [...eligibleComments, ...eligibleReviews];
   const marker = "codex-review-state:v1";
   for (let i = comments.length - 1; i >= 0; i--) {
     const c = comments[i];

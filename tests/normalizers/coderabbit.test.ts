@@ -488,4 +488,77 @@ describe("normalizeCodeRabbitReviewer", () => {
     expect(result.findings).toHaveLength(0);
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
+
+  it("ignores rate limit comments from untrusted authors", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 99,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "success",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+        startedAt: null,
+        completedAt: null,
+      },
+    ];
+    const conversationComments: GitHubConversationComment[] = [
+      {
+        id: 991,
+        authorLogin: "untrusted-user",
+        body: "Review limit reached. You have used all free OSS reviews.",
+        bodyDigest: "d991",
+        createdAt: "2026-10-01T10:00:00Z",
+        updatedAt: null,
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews: [],
+      conversationComments,
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("APPROVE");
+  });
+
+  it("parses actionable review body sections outside diff threads", () => {
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 801,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: `<details>
+<summary>Actionable comments outside diff</summary>
+- Potential issue: Missing validation on input handler.
+</details>
+<details>
+<summary>Nitpicks</summary>
+* Typo in log message.
+</details>`,
+        bodyDigest: "d801",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings[0]?.severity).toBe("HIGH");
+    expect(result.findings[0]?.isBlocking).toBe(true);
+    expect(result.findings[1]?.severity).toBe("LOW");
+    expect(result.findings[1]?.isBlocking).toBe(false);
+  });
 });

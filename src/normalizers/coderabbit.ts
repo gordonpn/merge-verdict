@@ -1,4 +1,4 @@
-import type { GitHubCheckRun } from "../collector/github-collector.js";
+import type { GitHubCheckRun, GitHubReviewSubmission } from "../collector/github-collector.js";
 import type { NormalizedFinding } from "../models/finding.js";
 import type {
   ReviewerExecutionRecord,
@@ -10,24 +10,32 @@ import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
 import { stripMarkdownPunctuation } from "./utils.js";
 
 const CODERABBIT_LOGINS = new Set(["coderabbitai", "coderabbitai[bot]"]);
+const RATE_LIMIT_COMMENT_MARKER =
+  "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->";
 const RATE_LIMIT_PATTERNS = [
   /review limit reached/i,
   /rate limited by coderabbit\.ai/i,
   /free oss reviews/i,
   /free limit to reset/i,
-  /rate limited/i,
 ];
 
 function isCodeRabbitAuthor(login: string | null): boolean {
   return login !== null && CODERABBIT_LOGINS.has(login.toLowerCase());
 }
 
-function isRateLimited(checkRun: GitHubCheckRun | undefined, input: NormalizerInput): boolean {
-  if (
+function isRateLimited(
+  checkRun: GitHubCheckRun | undefined,
+  reviews: readonly GitHubReviewSubmission[],
+  input: NormalizerInput,
+): boolean {
+  const hasFreshSuccessCheck =
     checkRun?.status === "completed" &&
     checkRun.conclusion === "success" &&
-    checkRun.commitSha === input.headSha
-  ) {
+    checkRun.commitSha === input.headSha;
+  const latestReview = reviews[reviews.length - 1];
+  const hasFreshReview = latestReview?.commitSha === input.headSha;
+
+  if (hasFreshSuccessCheck || hasFreshReview) {
     return false;
   }
 
@@ -40,11 +48,26 @@ function isRateLimited(checkRun: GitHubCheckRun | undefined, input: NormalizerIn
     }
   }
 
-  for (const comment of input.conversationComments ?? []) {
-    if (isCodeRabbitAuthor(comment.authorLogin)) {
-      if (RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(comment.body ?? ""))) {
-        return true;
+  const checkCompletedAt = checkRun?.completedAt ? Date.parse(checkRun.completedAt) : Number.NaN;
+  const comments = (input.conversationComments ?? []).filter((c) =>
+    isCodeRabbitAuthor(c.authorLogin),
+  );
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const comment = comments[i];
+    if (!comment?.body) {
+      continue;
+    }
+    if (!Number.isNaN(checkCompletedAt) && comment.updatedAt) {
+      const commentUpdatedAt = Date.parse(comment.updatedAt);
+      if (!Number.isNaN(commentUpdatedAt) && commentUpdatedAt < checkCompletedAt) {
+        continue;
       }
+    }
+    if (
+      comment.body?.includes(RATE_LIMIT_COMMENT_MARKER) ||
+      RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(comment.body ?? ""))
+    ) {
+      return true;
     }
   }
 
@@ -92,6 +115,73 @@ function isSummaryComment(body: string): boolean {
   );
 }
 
+function parseReviewBodyFindings(review: GitHubReviewSubmission): NormalizedFinding[] {
+  const { body } = review;
+  if (!body || isSummaryComment(body)) {
+    return [];
+  }
+
+  const lines = body.split("\n");
+  const findings: NormalizedFinding[] = [];
+  let activeSection: "nitpick" | "outside_diff" | null = null;
+  let itemIndex = 1;
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    const lower = trimmed.toLowerCase();
+
+    if (lower.includes("<summary") || trimmed.startsWith("#")) {
+      if (lower.includes("nitpick")) {
+        activeSection = "nitpick";
+      } else if (lower.includes("outside diff") || lower.includes("actionable comment")) {
+        activeSection = "outside_diff";
+      } else if (
+        lower.includes("review info") ||
+        lower.includes("prompt to fix") ||
+        lower.includes("commits") ||
+        lower.includes("files ignored") ||
+        lower.includes("files selected")
+      ) {
+        activeSection = null;
+      }
+      continue;
+    }
+
+    if (lower.startsWith("</details>")) {
+      activeSection = null;
+      continue;
+    }
+
+    if (!activeSection) {
+      continue;
+    }
+
+    if (
+      (trimmed.startsWith("- ") || trimmed.startsWith("* ")) &&
+      !trimmed.startsWith("- [ ]") &&
+      !trimmed.startsWith("- [x]")
+    ) {
+      const itemText = trimmed.slice(2).trim();
+      if (!itemText) {
+        continue;
+      }
+      const severity: Severity = activeSection === "nitpick" ? "LOW" : parseSeverity(itemText);
+      const isBlocking = severity === "BLOCKER" || severity === "HIGH" || severity === "MEDIUM";
+      findings.push({
+        id: `coderabbit_review_${review.id}_${itemIndex++}`,
+        reviewerId: "coderabbitai",
+        title: extractTitle(itemText, null, null),
+        description: itemText,
+        severity,
+        isBlocking,
+        isResolved: !isBlocking,
+      });
+    }
+  }
+
+  return findings;
+}
+
 /**
  * Normalizes CodeRabbit review signals, check runs, and inline findings.
  *
@@ -112,7 +202,7 @@ export function normalizeCodeRabbitReviewer(input: NormalizerInput): ReviewerExe
 
   const isFresh = evaluatedCommitSha === headSha;
 
-  if (isRateLimited(checkRun, input)) {
+  if (isRateLimited(checkRun, reviews, input)) {
     return {
       reviewerId: "coderabbitai",
       reviewerName: "CodeRabbit",
@@ -160,6 +250,12 @@ export function normalizeCodeRabbitReviewer(input: NormalizerInput): ReviewerExe
     findings.push(finding);
   }
 
+  for (const review of reviews) {
+    if (review.commitSha === evaluatedCommitSha) {
+      findings.push(...parseReviewBodyFindings(review));
+    }
+  }
+
   let status: ReviewerStatus = "PENDING";
   let verdict: ReviewerVerdict = "NONE";
 
@@ -174,7 +270,7 @@ export function normalizeCodeRabbitReviewer(input: NormalizerInput): ReviewerExe
   } else if (!isFresh) {
     status = "STALE";
     verdict = "NONE";
-  } else if (checkRun?.status === "in_progress" || checkRun?.status === "queued") {
+  } else if (checkRun && checkRun.status !== "completed") {
     status = "PENDING";
     verdict = "NONE";
   } else if (checkRun && checkRun.conclusion !== "success") {

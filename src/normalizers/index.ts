@@ -69,9 +69,22 @@ export function buildReviewSnapshotFromPullRequest(
   const checkRuns = normalizeCheckRuns(prData.checkRuns, prData.commitStatuses);
   const unresolvedThreadCount = prData.reviewThreads.filter((t) => !t.isResolved).length;
 
+  const latestReviewStateByUser = new Map<string, string>();
+  for (const review of prData.reviews) {
+    if (
+      !review.reviewerLogin ||
+      review.state === "DISMISSED" ||
+      review.state === "COMMENTED" ||
+      review.state === "PENDING"
+    ) {
+      continue;
+    }
+    latestReviewStateByUser.set(review.reviewerLogin.toLowerCase(), review.state);
+  }
+
   let blockingDecisionCount = 0;
-  for (const reviewer of Object.values(reviewers)) {
-    if (reviewer.verdict === "CHANGES_REQUESTED") {
+  for (const state of latestReviewStateByUser.values()) {
+    if (state === "CHANGES_REQUESTED") {
       blockingDecisionCount++;
     }
   }

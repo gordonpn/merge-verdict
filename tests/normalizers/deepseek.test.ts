@@ -261,4 +261,61 @@ None.`,
     expect(result.verdict).toBe("APPROVE");
     expect(result.findings).toHaveLength(0);
   });
+
+  it("ignores review submissions from untrusted authors", () => {
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 507,
+        reviewerLogin: "untrusted-contributor",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: `## Verdict: APPROVE
+
+### Material Findings
+None.`,
+        bodyDigest: "d7",
+      },
+    ];
+
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("PENDING");
+    expect(result.verdict).toBe("NONE");
+    expect(result.isFresh).toBe(false);
+  });
+
+  it("prioritizes BLOCK over APPROVE when heading contains both words", () => {
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 508,
+        reviewerLogin: "github-actions[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: `## Verdict: BLOCK (do not approve)
+
+### Material Findings
+* Blocking issue found.`,
+        bodyDigest: "d8",
+      },
+    ];
+
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+  });
 });

@@ -1,5 +1,22 @@
 import type { GitHubCheckRun, GitHubCommitStatus } from "../collector/github-collector.js";
-import type { CheckRunConclusion, CheckRunRecord, CheckRunStatus } from "../models/check-run.js";
+import {
+  CHECK_RUN_CONCLUSIONS,
+  type CheckRunConclusion,
+  type CheckRunRecord,
+  type CheckRunStatus,
+} from "../models/check-run.js";
+
+const SUPPORTED_CONCLUSIONS = new Set<string>(CHECK_RUN_CONCLUSIONS);
+
+function toCheckRunConclusion(conclusion: string | null): CheckRunConclusion | null {
+  if (conclusion === null) {
+    return null;
+  }
+  if (SUPPORTED_CONCLUSIONS.has(conclusion)) {
+    return conclusion as CheckRunConclusion;
+  }
+  return "failure";
+}
 
 function isValidUrl(value: string | null | undefined): value is string {
   if (!value) {
@@ -14,7 +31,7 @@ function isValidUrl(value: string | null | undefined): value is string {
 }
 
 function toCheckRunStatus(status: string): CheckRunStatus {
-  if (status === "completed" || status === "in_progress" || status === "queued") {
+  if (status === "completed" || status === "queued") {
     return status;
   }
   return "in_progress";
@@ -50,7 +67,7 @@ export function normalizeCheckRuns(
     const record: CheckRunRecord = {
       name: check.name,
       status: toCheckRunStatus(check.status),
-      conclusion: check.conclusion as CheckRunConclusion | null,
+      conclusion: toCheckRunConclusion(check.conclusion),
       commitSha: check.commitSha,
     };
     if (isValidUrl(check.detailsUrl)) {

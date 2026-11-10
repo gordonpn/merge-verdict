@@ -154,4 +154,39 @@ describe("normalizeCheckRuns", () => {
     expect(result.test?.status).toBe("completed");
     expect(result.test?.conclusion).toBe("success");
   });
+
+  it("maps unsupported check conclusions to failure and waiting status to in_progress", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 202,
+        name: "stale-check",
+        status: "completed",
+        conclusion: "stale" as unknown as GitHubCheckRun["conclusion"],
+        commitSha: "head123",
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+        startedAt: null,
+        completedAt: null,
+      },
+      {
+        id: 203,
+        name: "waiting-check",
+        status: "waiting",
+        conclusion: null,
+        commitSha: "head123",
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+        startedAt: null,
+        completedAt: null,
+      },
+    ];
+
+    const result = normalizeCheckRuns(checkRuns);
+    expect(result["stale-check"]?.status).toBe("completed");
+    expect(result["stale-check"]?.conclusion).toBe("failure");
+    expect(result["waiting-check"]?.status).toBe("in_progress");
+    expect(result["waiting-check"]?.conclusion).toBeNull();
+    expect(CheckRunRecordSchema.safeParse(result["stale-check"]).success).toBe(true);
+    expect(CheckRunRecordSchema.safeParse(result["waiting-check"]).success).toBe(true);
+  });
 });

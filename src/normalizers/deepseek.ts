@@ -5,23 +5,29 @@ import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
 
 type RawVerdict = "APPROVE" | "APPROVE WITH MINOR FINDINGS" | "REQUEST CHANGES" | "BLOCK";
 
+const DEEPSEEK_LOGINS = new Set(["github-actions", "github-actions[bot]"]);
+
+function isDeepSeekAuthor(login: string | null): boolean {
+  return login !== null && DEEPSEEK_LOGINS.has(login.toLowerCase());
+}
+
 function extractRawVerdict(body: string): RawVerdict | null {
   const match = body.match(/##\s*Verdict:\s*([^\n\r]+)/i);
   if (!match?.[1]) {
     return null;
   }
   const clean = match[1].trim().toUpperCase();
+  if (clean.includes("BLOCK")) {
+    return "BLOCK";
+  }
+  if (clean.includes("REQUEST CHANGES")) {
+    return "REQUEST CHANGES";
+  }
   if (clean.includes("APPROVE WITH MINOR FINDINGS")) {
     return "APPROVE WITH MINOR FINDINGS";
   }
   if (clean.includes("APPROVE")) {
     return "APPROVE";
-  }
-  if (clean.includes("REQUEST CHANGES")) {
-    return "REQUEST CHANGES";
-  }
-  if (clean.includes("BLOCK")) {
-    return "BLOCK";
   }
   return null;
 }
@@ -124,7 +130,9 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
 export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecutionRecord {
   const { headSha } = input;
   const matchingReviews =
-    input.reviews?.filter((r) => r.body && /##\s*Verdict:/i.test(r.body)) ?? [];
+    input.reviews?.filter(
+      (r) => isDeepSeekAuthor(r.reviewerLogin) && r.body && /##\s*Verdict:/i.test(r.body),
+    ) ?? [];
   const review = matchingReviews[matchingReviews.length - 1];
 
   if (!review?.body) {

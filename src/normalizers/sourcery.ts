@@ -124,7 +124,7 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
   } else if (!isFresh) {
     status = "STALE";
     verdict = "NONE";
-  } else if (checkRun?.status === "in_progress" || checkRun?.status === "queued") {
+  } else if (checkRun && checkRun.status !== "completed") {
     status = "PENDING";
     verdict = "NONE";
   } else if (checkRun && checkRun.conclusion !== "success") {
