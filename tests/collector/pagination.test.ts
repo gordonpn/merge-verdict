@@ -111,7 +111,10 @@ function fixture(target: Operation, itemsPerPage: number, totalPages: number) {
     }
     if (url.pathname.endsWith("/pulls/123")) {
       return response(
-        { head: { sha: "head", ref: "feature" }, base: { sha: "base", ref: "main" } },
+        {
+          head: { sha: "head", ref: "feature", repo: { full_name: "octocat/hello-world" } },
+          base: { sha: "base", ref: "main", repo: { full_name: "octocat/hello-world" } },
+        },
         url.href,
       );
     }
