@@ -36,6 +36,7 @@ function input(): Fixture {
     },
   };
   return {
+    codeEvidenceSatisfied: true,
     config,
     snapshot,
     finalSnapshot: { headSha: "head", stateFingerprint: "fingerprint" },
@@ -234,5 +235,48 @@ describe("policy edge cases", () => {
     const before = structuredClone(value);
     expect(evaluatePolicy(value)).toEqual(evaluatePolicy(value));
     expect(value).toEqual(before);
+  });
+});
+
+describe("required code evidence", () => {
+  it("waits when required code evidence is missing", () => {
+    const value = input();
+    delete value.codeEvidenceSatisfied;
+    expect(evaluatePolicy(value)).toMatchObject({
+      verdict: "PENDING",
+      reasons: [expect.objectContaining({ condition: 8, code: "CODE_EVIDENCE_MISSING" })],
+    });
+  });
+  it("fails when required code evidence is unsatisfied", () => {
+    const value = input();
+    value.codeEvidenceSatisfied = false;
+    expect(evaluatePolicy(value).verdict).toBe("FAIL");
+  });
+  it("permits absent code evidence only when protected policy disables the requirement", () => {
+    const value = input();
+    delete value.codeEvidenceSatisfied;
+    value.config.verification.requireCodeEvidence = false;
+    expect(evaluatePolicy(value).verdict).toBe("PASS");
+  });
+  it("supports explicit MEDIUM exemption without exempting HIGH or BLOCKER", () => {
+    const value = input();
+    value.blockingSeverityThreshold = "HIGH";
+    value.config.allowAdvisoryExemptions = true;
+    reviewer(value).findings = [
+      {
+        id: "finding",
+        reviewerId: "reviewer",
+        title: "Concern",
+        description: "Concern",
+        severity: "MEDIUM",
+        isBlocking: false,
+        isResolved: false,
+      },
+    ];
+    expect(evaluatePolicy(value).verdict).toBe("PASS");
+    for (const finding of reviewer(value).findings) finding.severity = "HIGH";
+    expect(evaluatePolicy(value).verdict).toBe("FAIL");
+    for (const finding of reviewer(value).findings) finding.severity = "BLOCKER";
+    expect(evaluatePolicy(value).verdict).toBe("FAIL");
   });
 });

@@ -14,7 +14,8 @@ export interface PolicyEvaluationInput {
   readonly finalSnapshot: { headSha: string; stateFingerprint: string };
   readonly executionErrors: readonly string[];
   readonly repositoryRules: readonly { id: string; satisfied: boolean }[];
-  readonly blockingSeverityThreshold?: "MEDIUM" | "LOW";
+  readonly codeEvidenceSatisfied?: boolean;
+  readonly blockingSeverityThreshold?: "HIGH" | "MEDIUM" | "LOW";
   readonly permittedCheckConclusions?: Readonly<
     Record<string, readonly ("neutral" | "skipped" | "cancelled")[]>
   >;
@@ -81,7 +82,7 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
       const severityBlocks =
         finding.severity === "BLOCKER" ||
         finding.severity === "HIGH" ||
-        finding.severity === "MEDIUM" ||
+        (finding.severity === "MEDIUM" && input.blockingSeverityThreshold !== "HIGH") ||
         (input.blockingSeverityThreshold === "LOW" && finding.severity === "LOW");
       if (finding.isBlocking || severityBlocks || !config.allowAdvisoryExemptions) {
         add(3, "FAIL", "UNRESOLVED_FINDING", finding.id);
@@ -120,6 +121,14 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
     add(6, "STALE", "SNAPSHOT_CHANGED", snapshot.headSha);
   }
   for (const error of [...input.executionErrors].sort()) add(7, "ERROR", "EXECUTION_ERROR", error);
+  if (config.verification.requireCodeEvidence && input.codeEvidenceSatisfied !== true) {
+    add(
+      8,
+      input.codeEvidenceSatisfied === false ? "FAIL" : "PENDING",
+      input.codeEvidenceSatisfied === false ? "CODE_EVIDENCE_UNSATISFIED" : "CODE_EVIDENCE_MISSING",
+      "code-evidence",
+    );
+  }
   for (const rule of [...input.repositoryRules].sort((a, b) =>
     a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
   )) {
