@@ -82,6 +82,28 @@ When the optional serverless webhook bridge (e.g. Cloudflare Worker) is deployed
 2. **Secret Management**: The webhook secret must be stored as an encrypted environment variable or secret binding, never hardcoded.
 3. **Timing-Safe Comparison**: Signature validation must use constant-time comparison algorithms (e.g. `crypto.timingSafeEqual`) to prevent timing side-channel attacks.
 
+### 4.1. Reusable Signature Guard
+
+`src/bridge/verify-signature.ts` provides `verifyWebhookSignature` for exact raw
+`ArrayBuffer` bytes and `guardWebhookSignature` for a standard `Request`. The
+module uses Web Crypto HMAC SHA-256 verification (`crypto.subtle.verify`),
+delegating cryptographic comparison to the platform rather than JavaScript
+string equality or a hand-written timing loop. Headers must contain exactly
+`sha256=` followed by 64 hexadecimal digits. Missing secrets, malformed or
+mismatched signatures, unreadable bodies, and cryptographic failures fail closed.
+
+A future bridge handler must call `guardWebhookSignature(request, secret)` before
+parsing or processing a payload, returning its non-null response immediately.
+Rejections return HTTP 401 with an empty body. A null result permits processing;
+the request body remains unread because the guard verifies a clone. The secret
+must come from the deployed secret binding.
+
+The implementation and tests live in `src/bridge` and `tests/bridge` so the current
+TypeScript and Vitest configurations cover them, adapting the standalone
+`bridge/src` and `bridge/tests` paths proposed in issue 29. Bridge deployment,
+handler wiring, and workflow dispatch are separate work; adding this module alone
+does not authenticate any deployed endpoint.
+
 ## 5. Defense Against Prompt Injection in Semantic Verification
 
 When the optional semantic verification module is active, untrusted review comments and diff contents are passed to an external LLM.
