@@ -45,7 +45,8 @@ function visibleMarkdown(body: string): string {
   let comment = false;
   let inline = "";
   const lines: string[] = [];
-  for (const line of body.split(/\r?\n/)) {
+  const sourceLines = body.split(/\r?\n/);
+  for (const [lineIndex, line] of sourceLines.entries()) {
     const marker = /^\s*(?:(?:[-+*]|[0-9]+[.)])\s+|>\s*)*(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
       if (
@@ -79,7 +80,20 @@ function visibleMarkdown(body: string): string {
       if (line[index] === "`") {
         const run = /^`+/.exec(line.slice(index))?.[0] ?? "`";
         if (inline === run) inline = "";
-        else if (!inline) inline = run;
+        else if (!inline) {
+          // Unmatched delimiters are literal prose. A code span may cross lines,
+          // but not a paragraph boundary or a fenced block.
+          const paragraph = [line.slice(index + run.length)];
+          for (const next of sourceLines.slice(lineIndex + 1)) {
+            if (!next.trim() || /^\s*(?:`{3,}|~{3,})/.test(next)) break;
+            paragraph.push(next);
+          }
+          if ([...paragraph.join("\n").matchAll(/`+/g)].some((match) => match[0] === run)) {
+            inline = run;
+          } else {
+            visible += run;
+          }
+        }
         visible += " ";
         index += run.length;
         continue;

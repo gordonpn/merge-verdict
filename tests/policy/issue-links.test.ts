@@ -51,6 +51,18 @@ describe("checkIssueLinks", () => {
     expect(result.failureMessage).toContain("Closes #123");
   });
 
+  it("keeps prose after an unmatched inline delimiter", () => {
+    expect(checkIssueLinks("An unmatched ` in prose.\n\nFixes #123").references).toEqual([
+      { repository: null, number: 123 },
+    ]);
+    expect(checkIssueLinks("An unmatched ` and #123").references).toEqual([
+      { repository: null, number: 123 },
+    ]);
+    expect(checkIssueLinks("`code\n#123`\n\n#456").references).toEqual([
+      { repository: null, number: 456 },
+    ]);
+  });
+
   it("ignores comment syntax inside fences", () => {
     expect(checkIssueLinks("```\n<!--\n```\n#123").references).toEqual([
       { repository: null, number: 123 },
