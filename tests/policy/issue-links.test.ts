@@ -4,6 +4,7 @@ import { checkIssueLinks } from "../../src/policy/issue-links.js";
 describe("checkIssueLinks", () => {
   it.each([
     "Closes #123",
+    "Fixes #123.",
     "[Issue](https://github.com/org/repo/issues/123)",
     "<https://github.com/org/repo/issues/123>",
     "Fixes #123",
@@ -22,6 +23,8 @@ describe("checkIssueLinks", () => {
     null,
     "",
     "No issue",
+    "- ```\n#123\n  ```",
+    '[label](https://example.com "title ) #123")',
     "#<!-- template -->123",
     "[#123][external]\n\n[external]: https://example.com",
     "````\n#123\n```\n#456",
@@ -46,6 +49,12 @@ describe("checkIssueLinks", () => {
     expect(result.references).toEqual([]);
     expect(result.failureMessage).toContain("Add an issue reference");
     expect(result.failureMessage).toContain("Closes #123");
+  });
+
+  it("ignores comment syntax inside fences", () => {
+    expect(checkIssueLinks("```\n<!--\n```\n#123").references).toEqual([
+      { repository: null, number: 123 },
+    ]);
   });
 
   it("keeps visible references after ignored content and deduplicates targets", () => {
