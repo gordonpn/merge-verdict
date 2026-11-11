@@ -1,0 +1,11 @@
+# Optional semantic verifier
+
+Import `createSemanticVerifier` directly from `llm-verifier.ts`. Construct one instance per pull request run with trusted base-branch `semanticVerification` configuration and an injected `SemanticProvider`. There is no network adapter, API credential lookup, evaluator integration, or thread-resolution promotion. Disabled verification never invokes the provider, including token accounting.
+
+Results are advisory and cannot establish that unresolved review threads are resolved. Confidence below 0.9, uncertainty, invalid JSON/schema, provider errors, timeout, and budget exhaustion return `UNRESOLVED`. Explanations returned by a model remain untrusted text. The strict schema requires a nonempty explanation, confidence between zero and one, and no additional fields.
+
+All untrusted fields are XML escaped within fixed delimiters. This prevents data from closing the structural delimiters; it does not prove resistance to semantic prompt injection. No tools or executable capabilities are supplied by this module.
+
+Each instance permits five provider calls at most. Each call reserves at most 4000 total input plus output tokens, constrained by `maxTokensPerRun`. Reservations happen before dispatch and are never refunded, including timeout and error. The default 4000-token run cap permits one full-size call. A call requires room for at least 512 output tokens. Large inputs are rejected, never silently truncated. The timeout defaults to 30 seconds and aborts the adapter's signal; an adapter that ignores cancellation may continue working externally.
+
+The provider is a trusted boundary: its input accounting must include full wire framing, model-specific tokenization, and any hidden overhead. Its output accounting must include hidden output tokens, and its completion implementation must enforce the requested output cap remotely, disable retries and tools, and honor cancellation. The verifier checks reported output usage but cannot independently police provider billing, hidden token use, or an adapter that violates this contract. Do not supply adapters lacking these guarantees. No tokenizer-independent character heuristic is represented as a token guarantee.
