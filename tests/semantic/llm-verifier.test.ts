@@ -17,6 +17,24 @@ function provider(output = resolved): SemanticProvider {
 const config = { enabled: true, maxTokensPerRun: 20000 };
 
 describe("semantic verifier", () => {
+  it.each([
+    null,
+    undefined,
+    Object.create(finding),
+    JSON.parse('{"finding":"x","developerComments":"x","diff":"x","__proto__":{}}'),
+    {},
+    { finding: "x" },
+    { ...finding, diff: 1 },
+    { ...finding, extra: "pollution" },
+    { ...finding, developerComments: null },
+  ])("fails closed for malformed runtime input %s", async (input) => {
+    const p = provider();
+    p.complete = vi.fn(p.complete);
+    const v = createSemanticVerifier(config, p);
+    expect((await v.verify(input)).resolution).toBe("UNRESOLVED");
+    expect(p.complete).not.toHaveBeenCalled();
+  });
+
   it("makes zero provider calls when disabled", async () => {
     const p = provider();
     p.complete = vi.fn(p.complete);

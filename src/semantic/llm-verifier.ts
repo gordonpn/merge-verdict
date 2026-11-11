@@ -12,6 +12,11 @@ export interface SemanticFinding {
   developerComments: string;
   diff: string;
 }
+const SemanticFindingSchema = z.strictObject({
+  finding: z.string().max(16000),
+  developerComments: z.string().max(16000),
+  diff: z.string().max(16000),
+});
 export interface SemanticRequest {
   system: string;
   user: string;
@@ -52,7 +57,7 @@ export function createSemanticVerifier(
   config: SemanticVerificationConfig,
   provider: SemanticProvider,
   options: { timeoutMs?: number } = {},
-): { verify(input: SemanticFinding): Promise<SemanticResult> } {
+): { verify(input: unknown): Promise<SemanticResult> } {
   let calls = 0;
   let reserved = 0;
   const timeoutMs = options.timeoutMs ?? 30000;
@@ -68,10 +73,22 @@ export function createSemanticVerifier(
         return closed("Invalid semantic limits.");
       const budget = Math.min(4000, config.maxTokensPerRun - reserved);
       if (calls >= 5 || budget <= 512) return closed("Semantic run budget exhausted.");
-      // Bound local prompt allocation before escaping; token accounting below is authoritative.
-      if (Object.values(input).some((value) => typeof value !== "string" || value.length > 16000))
-        return closed("Semantic input too large.");
-      const user = `<untrusted_finding_context>\n<finding>${escapeXml(input.finding)}</finding>\n<developer_comments>${escapeXml(input.developerComments)}</developer_comments>\n<diff>${escapeXml(input.diff)}</diff>\n</untrusted_finding_context>`;
+      // Validate runtime callers as well as typed ones before reading/escaping fields.
+      let data: SemanticFinding;
+      try {
+        if (
+          typeof input !== "object" ||
+          input === null ||
+          Object.getPrototypeOf(input) !== Object.prototype
+        )
+          return closed("Invalid semantic input.");
+        const parsed = SemanticFindingSchema.safeParse(input);
+        if (!parsed.success) return closed("Invalid semantic input.");
+        data = parsed.data;
+      } catch {
+        return closed("Invalid semantic input.");
+      }
+      const user = `<untrusted_finding_context>\n<finding>${escapeXml(data.finding)}</finding>\n<developer_comments>${escapeXml(data.developerComments)}</developer_comments>\n<diff>${escapeXml(data.diff)}</diff>\n</untrusted_finding_context>`;
       const prompt = {
         system: SYSTEM,
         user,
