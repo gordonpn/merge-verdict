@@ -280,3 +280,29 @@ describe("required code evidence", () => {
     expect(evaluatePolicy(value).verdict).toBe("FAIL");
   });
 });
+
+it("treats prototype names as ordinary own check and exception keys", () => {
+  const value = input();
+  value.config.requiredChecks = ["toString"];
+  value.snapshot.checkRuns = Object.fromEntries([
+    [
+      "toString",
+      {
+        name: "toString",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: "head",
+      },
+    ],
+  ]);
+  value.permittedCheckConclusions = {};
+  expect(evaluatePolicy(value).verdict).toBe("FAIL");
+});
+it("does not satisfy required evidence from inherited records", () => {
+  const value = input();
+  value.snapshot.checkRuns = Object.create(value.snapshot.checkRuns);
+  expect(evaluatePolicy(value).verdict).toBe("PENDING");
+  value.snapshot.checkRuns = input().snapshot.checkRuns;
+  value.snapshot.reviewers = Object.create(value.snapshot.reviewers);
+  expect(evaluatePolicy(value).verdict).toBe("PENDING");
+});

@@ -27,6 +27,10 @@ export interface PolicyEvaluation {
   readonly reasons: readonly PolicyReason[];
   readonly approvalEligibility: "undetermined";
 }
+function ownValue<T>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
+  return record && Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 /**
  * Evaluates already normalized evidence without I/O or publication.
  * Config must come from the protected base revision. Callers must supply all
@@ -46,7 +50,7 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
     reasons.push({ condition, outcome, code, subject });
   };
   for (const name of [...new Set(config.requiredChecks)].sort()) {
-    const run = snapshot.checkRuns[name];
+    const run = ownValue(snapshot.checkRuns, name);
     if (!run || run.commitSha !== snapshot.headSha) {
       add(1, "PENDING", "CHECK_MISSING_OR_STALE", name);
     } else if (run.status !== "completed") {
@@ -57,13 +61,13 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
       const conclusion = run.conclusion;
       const permitted =
         (conclusion === "neutral" || conclusion === "skipped" || conclusion === "cancelled") &&
-        input.permittedCheckConclusions?.[name]?.includes(conclusion);
+        ownValue(input.permittedCheckConclusions, name)?.includes(conclusion);
       if (!permitted) add(1, "FAIL", "CHECK_FAILED", name);
     }
   }
   const requiredReviewers = [...new Set(config.requiredReviewers)].sort();
   for (const id of requiredReviewers) {
-    const reviewer = snapshot.reviewers[id];
+    const reviewer = ownValue(snapshot.reviewers, id);
     if (reviewer?.status === "FAILED") {
       add(2, "ERROR", "REVIEWER_EXECUTION_FAILED", id);
     } else if (reviewer?.status !== "COMPLETED") {
@@ -72,7 +76,7 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
   }
   const coveredThreads = new Set<string>();
   for (const id of Object.keys(snapshot.reviewers).sort()) {
-    const reviewer = snapshot.reviewers[id];
+    const reviewer = ownValue(snapshot.reviewers, id);
     if (!reviewer) continue;
     for (const finding of [...reviewer.findings].sort((a, b) =>
       a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
@@ -100,11 +104,11 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
   if (snapshot.blockingDecisionCount > 0)
     add(4, "FAIL", "ACTIVE_BLOCKING_DECISIONS", String(snapshot.blockingDecisionCount));
   for (const id of requiredReviewers) {
-    if (snapshot.reviewers[id]?.verdict === "CHANGES_REQUESTED")
+    if (ownValue(snapshot.reviewers, id)?.verdict === "CHANGES_REQUESTED")
       add(4, "FAIL", "CHANGES_REQUESTED", id);
   }
   for (const id of requiredReviewers) {
-    const reviewer = snapshot.reviewers[id];
+    const reviewer = ownValue(snapshot.reviewers, id);
     if (
       reviewer &&
       (!reviewer.isFresh ||
