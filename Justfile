@@ -7,6 +7,10 @@ default:
 test:
     pnpm test
 
+# Audit production dependencies; set audit-level=low to also fail on lower severities
+audit audit-level="high":
+    pnpm audit --prod --audit-level={{quote(audit-level)}}
+
 # Run linter checks
 lint:
     pnpm run lint
