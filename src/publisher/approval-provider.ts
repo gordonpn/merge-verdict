@@ -117,7 +117,6 @@ export function createApprovalProvider(
 ): ApprovalProvider {
   return {
     async publish(input) {
-      if (name === "none") return publishNoApproval(input);
       if (input.verdict !== "PASS" || input.pathEligible !== true) {
         // Invalidation is limited to authenticated installation-owned approvals.
         const reviews = await client.listReviews(target(input));
@@ -128,6 +127,7 @@ export function createApprovalProvider(
         }
         return result("skipped_by_policy", name, input.headSha);
       }
+      if (name === "none") return publishNoApproval(input);
       if ((await client.getHeadSha(target(input))) !== input.headSha)
         return result("failed", name, input.headSha);
       try {

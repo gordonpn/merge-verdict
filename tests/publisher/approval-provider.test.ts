@@ -89,14 +89,50 @@ describe("approval provider safety boundary", () => {
     );
   });
 
-  it("none performs no network operations", async () => {
+  it("eligible PASS with none performs no network operations", async () => {
     const api = client();
     expect(await createApprovalProvider("none", api).publish(input)).toMatchObject({
       approvalStatus: "skipped_provider_none",
       countsTowardBranchProtection: "unknown",
     });
     expect(api.getHeadSha).not.toHaveBeenCalled();
+    expect(api.listReviews).not.toHaveBeenCalled();
+    expect(api.dismissReview).not.toHaveBeenCalled();
+    expect(api.submitApproval).not.toHaveBeenCalled();
   });
+  it.each([
+    { verdict: "FAIL" as const, pathEligible: true },
+    { verdict: "PENDING" as const, pathEligible: true },
+    { verdict: "STALE" as const, pathEligible: true },
+    { verdict: "ERROR" as const, pathEligible: true },
+    { verdict: "PASS" as const, pathEligible: false },
+  ])(
+    "none dismisses only owned approvals for $verdict with eligibility $pathEligible",
+    async (overrides) => {
+      const api = client([
+        approval,
+        { ...approval, id: 2, author: "human" },
+        { ...approval, id: 3, author: "merge-verdict[bot]" },
+      ]);
+      api.requestCopilotReview = vi.fn(async () => {});
+      expect(
+        await createApprovalProvider("none", api).publish({ ...input, ...overrides }),
+      ).toMatchObject({
+        provider: "none",
+        approvalStatus: "skipped_by_policy",
+        countsTowardBranchProtection: "unknown",
+      });
+      expect(api.dismissReview).toHaveBeenCalledExactlyOnceWith({
+        owner: "o",
+        repo: "r",
+        pullNumber: 1,
+        reviewId: 3,
+      });
+      expect(api.getHeadSha).not.toHaveBeenCalled();
+      expect(api.submitApproval).not.toHaveBeenCalled();
+      expect(api.requestCopilotReview).not.toHaveBeenCalled();
+    },
+  );
   it.each(["FAIL", "PENDING", "STALE", "ERROR"] as const)(
     "never requests or emits on %s and dismisses only owned approvals",
     async (verdict) => {
