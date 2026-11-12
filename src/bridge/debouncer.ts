@@ -29,6 +29,8 @@ export function createDebouncer(options: DebouncerOptions): {
   return {
     enqueue(input) {
       if (
+        typeof input.repository !== "string" ||
+        typeof input.headSha !== "string" ||
         !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository) ||
         !Number.isSafeInteger(input.prNumber) ||
         input.prNumber < 1 ||

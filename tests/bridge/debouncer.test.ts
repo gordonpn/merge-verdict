@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDebouncer } from "../../src/bridge/debouncer.js";
+import { createDebouncer, type DispatchInput } from "../../src/bridge/debouncer.js";
 
 const event = (prNumber = 1, headSha = "abc", repository = "owner/repo") => ({
   repository,
@@ -131,5 +131,25 @@ describe("bridge debouncer", () => {
     const debounce = createDebouncer({ dispatch: () => {} });
     expect(() => debounce.enqueue(input)).toThrow();
     expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([
+    { headSha: [] },
+    { headSha: {} },
+    { headSha: 123 },
+    { repository: { toString: () => "owner/repo" } },
+  ])("rejects malformed runtime strings without replacing pending work %#", async (malformed) => {
+    const calls: DispatchInput[] = [];
+    const debounce = createDebouncer({
+      dispatch: (input) => {
+        calls.push(input);
+      },
+    });
+    const pending = debounce.enqueue(event());
+    expect(() =>
+      debounce.enqueue({ ...event(), ...malformed } as unknown as DispatchInput),
+    ).toThrow(TypeError);
+    await vi.advanceTimersByTimeAsync(5000);
+    await pending;
+    expect(calls).toEqual([event()]);
   });
 });

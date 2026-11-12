@@ -40,7 +40,7 @@ synchronous throws and rejected dispatcher promises reject the window completion
 there are no automatic retries. A failed dispatch does not block later windows.
 The promise confirms only that the injected dispatch function completed, not that
 verification succeeded. Verification still requires current-head checks and the
-authoritative Checks API gate described in [events and state](docs/events-and-state.md).
+authoritative Checks API gate described in [events and state](https://github.com/gordonpn/merge-verdict/blob/758195ef94e4b7bb74a02339223c708c323e4ad0/docs/events-and-state.md).
 Fast invalidation must occur independently before delayed evaluation dispatch.
 
 All timers and queues live in one JavaScript process. Restarts lose pending work;
