@@ -57,8 +57,34 @@ function cell(value: string): string {
     .replace(/\r\n|\r|\n/g, "<br>");
 }
 
-function row(values: readonly string[]): string {
-  return `| ${values.map(cell).join(" | ")} |\n`;
+type ReportCell = string | { readonly sourceUrl: string };
+
+function source(value: string | undefined): ReportCell {
+  if (
+    value === undefined ||
+    Buffer.byteLength(value, "utf8") > 1000 ||
+    [...value].some((point) => point.charCodeAt(0) <= 32 || point.charCodeAt(0) === 127)
+  )
+    return "unavailable";
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
+      return "unavailable";
+    return {
+      sourceUrl: url.href
+        .replace(
+          /[()[\]|<>\\`"'*]/g,
+          (point) => `%${point.charCodeAt(0).toString(16).toUpperCase()}`,
+        )
+        .replaceAll("&", "&amp;"),
+    };
+  } catch {
+    return "unavailable";
+  }
+}
+
+function row(values: readonly ReportCell[]): string {
+  return `| ${values.map((value) => (typeof value === "string" ? cell(value) : `[Source](<${value.sourceUrl}>)`)).join(" | ")} |\n`;
 }
 
 function annotation(finding: NormalizedFinding): CheckAnnotation | undefined {
@@ -110,7 +136,7 @@ export function formatChecksReport(
   function section(
     title: string,
     headers: readonly string[],
-    rows: readonly string[][],
+    rows: readonly ReportCell[][],
     empty: string,
     label: string,
   ): void {
@@ -161,7 +187,7 @@ export function formatChecksReport(
   );
   section(
     "Unresolved findings",
-    ["Reviewer", "Severity", "Finding", "Location"],
+    ["Reviewer", "Severity", "Finding", "Location", "Description", "Source"],
     findings.map((finding) => [
       finding.reviewerId,
       finding.severity,
@@ -169,6 +195,8 @@ export function formatChecksReport(
       finding.filePath === undefined
         ? "general"
         : `${finding.filePath}${finding.lineNumber === undefined ? "" : `:${finding.lineNumber}`}`,
+      finding.description,
+      source(finding.rawCommentUrl),
     ]),
     "No unresolved findings",
     "finding",

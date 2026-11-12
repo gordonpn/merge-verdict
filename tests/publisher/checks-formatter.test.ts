@@ -124,6 +124,78 @@ describe("formatChecksReport", () => {
     expect(report.output.text).toContain("Fix this");
     expect(report.annotationBatches).toEqual([]);
   });
+  it.each([undefined, "src/file.ts"])(
+    "retains actionable details without annotations at %s",
+    (filePath) => {
+      const item = finding({
+        description: "Repair the missing guard",
+        rawCommentUrl: "https://github.com/owner/repo/pull/1#discussion_r1",
+      });
+      delete item.lineNumber;
+      if (filePath === undefined) delete item.filePath;
+      else item.filePath = filePath;
+      const report = formatChecksReport(snapshot([item]), options);
+      expect(report.output.text).toContain("Repair the missing guard");
+      expect(report.output.text).toContain(
+        "[Source](<https://github.com/owner/repo/pull/1#discussion_r1>)",
+      );
+      expect(report.annotationBatches).toEqual([]);
+    },
+  );
+  it("escapes descriptions and source-link Markdown delimiters", () => {
+    const text = formatChecksReport(
+      snapshot([
+        finding({
+          description: "<img>\n| ![injected](bad) `code`",
+          rawCommentUrl: "https://example.com/a)[injected](bad)|x",
+        }),
+      ]),
+      options,
+    ).output.text;
+    expect(text).toContain("&lt;img&gt;<br>&#124; !&#91;injected&#93;(bad) &#96;code&#96;");
+    expect(text).toContain("https://example.com/a%29%5Binjected%5D%28bad%29%7Cx");
+    expect(text).not.toContain("![injected]");
+  });
+  it.each([
+    "javascript:alert(1)",
+    "data:text/html,bad",
+    "https://user:secret@example.com/x",
+    `https://example.com/${"x".repeat(2000)}`,
+  ])("does not render unsafe or oversized source %s", (rawCommentUrl) => {
+    const text = formatChecksReport(
+      snapshot([finding({ rawCommentUrl, description: "Actionable" })]),
+      options,
+    ).output.text;
+    expect(text).toContain("Actionable");
+    expect(text).not.toContain("[Source]");
+  });
+  it("rejects malformed source URLs through snapshot validation", () => {
+    expect(() =>
+      formatChecksReport(snapshot([finding({ rawCommentUrl: "not a URL" })]), options),
+    ).toThrow();
+  });
+  it("counts omitted oversized escaped rows exactly within the report budget", () => {
+    const report = formatChecksReport(
+      snapshot(
+        Array.from({ length: 150 }, (_, i) =>
+          finding({
+            id: `f${i}`,
+            title: "Title",
+            description: "<|".repeat(70000),
+            rawCommentUrl: "https://example.com/x",
+          }),
+        ),
+      ),
+      options,
+    );
+    const rendered = report.output.text
+      .split("\n")
+      .filter((line) => line.startsWith("| reviewer | HIGH | Title |")).length;
+    expect(rendered).toBeGreaterThan(0);
+    expect(report.output.text).toContain(`${150 - rendered} finding rows omitted`);
+    expect(Buffer.byteLength(report.output.text)).toBeLessThanOrEqual(60000);
+    expect(report.annotationBatches.map((batch) => batch.length)).toEqual([50, 50, 50]);
+  });
   it("bounds multibyte report text and annotation messages while reporting omissions", () => {
     const huge = "\u4e00".repeat(70000);
     const report = formatChecksReport(
