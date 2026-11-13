@@ -55,6 +55,19 @@ For full architectural details, see [docs/architecture.md](docs/architecture.md)
 
 Merge Verdict is currently in the **foundation and architecture phase**. The architectural specifications, integration models, verification policies, and implementation roadmap have been established. Application implementation will proceed incrementally according to the milestone roadmap.
 
+## Building
+
+Run `pnpm install --frozen-lockfile`, then `just build` (or `pnpm run build`)
+with Node.js 22.12 or newer. The build produces standalone `dist/index.js`
+(ESM) and `dist/index.cjs` (CommonJS) bundles with source maps. Runtime
+dependencies and GraphQL query text are included in each bundle; Node.js
+built-ins are supplied by the runtime.
+
+Run `pnpm run test:build` to rebuild and verify both distributions in a temporary
+directory without `node_modules` or separate query files. The current entry
+point exports the core library. GitHub Action event handling and `action.yml`
+packaging are implemented separately. Generated `dist/` artifacts remain ignored.
+
 ## Documentation Index
 
 - [Requirements Specification](docs/requirements.md): Functional and non-functional requirements, outcome states, and acceptance criteria.

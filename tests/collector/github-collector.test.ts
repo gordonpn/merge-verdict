@@ -32,8 +32,8 @@ function createPullRequestPayload(): object {
     number: pullRequestNumber,
     draft: false,
     mergeable: true,
-    head: { ref: "feature", sha: "head-sha" },
-    base: { ref: "main", sha: "base-sha" },
+    head: { ref: "feature", sha: "head-sha", repo: { full_name: "octocat/hello-world" } },
+    base: { ref: "main", sha: "base-sha", repo: { full_name: "octocat/hello-world" } },
     user: { login: "octocat" },
   };
 }

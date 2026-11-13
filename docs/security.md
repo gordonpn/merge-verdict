@@ -110,3 +110,23 @@ When the optional semantic verification module is active, untrusted review comme
 - **Unique Context Identification**: The status check published by Merge Verdict uses the strict context name `merge-verdict`.
 - **Branch Protection Enforcement**: In GitHub Branch Protection rules or Repository Rulesets, repository administrators must select `merge-verdict` as a required status check.
 - **GitHub App Integrity**: When using Tier 2 (GitHub App), GitHub automatically associates the check run with the authenticated App ID. Third-party actors or unauthorized workflows cannot spoof the App check run without possession of the private key.
+
+## Collector Type Compatibility
+
+Before version 1.0, exported collector data types do not guarantee source
+compatibility when required security metadata is added. Consumers constructing
+`GitHubPullRequestData` literals must update their fixtures and adapters together
+with the collector change. `isFork` is required: omitting it must fail typechecking
+rather than silently treating an unknown repository identity as trusted.
+
+For this migration, set `isFork: false` only when the head and base repository
+identities are known to match. Use `true` for external forks and missing or deleted
+head repositories. Do not infer a same-repository PR from a branch name or an
+absent value. Policy loading remains bound to the protected policy revision
+regardless of `isFork`.
+
+Integration with PR #43 requires adding `isFork: false` to the known
+same-repository `samplePrData` fixture in `tests/normalizers/index.test.ts`.
+Its derived fixtures spread that object and inherit the value. Apply that fixture
+migration when integrating the branches; keeping `isFork` optional or defaulting
+missing metadata to `false` is not a supported compatibility strategy.
