@@ -51,6 +51,32 @@ describe("checkIssueLinks", () => {
     expect(result.failureMessage).toContain("Closes #123");
   });
 
+  it.each([
+    ["[unused]: https://github.com/org/repo/issues/123", []],
+    ['[ticket][external]\n\n[external]: https://example.com\n  "#123"', []],
+    ["> > ```\n> > #456\n> Closes #123", [{ repository: null, number: 123 }]],
+    ["_https://github.com/org/repo/issues/123_", [{ repository: "org/repo", number: 123 }]],
+    ["`code\\` #123", [{ repository: null, number: 123 }]],
+    ["[ticket][#123]\n\n[#123]: https://example.com", []],
+    [
+      '[ticket][issue]\n\n[issue]: https://github.com/org/repo/issues/123 "#456"',
+      [{ repository: "org/repo", number: 123 }],
+    ],
+    ["> ```\n> example\n\nCloses #123", [{ repository: null, number: 123 }]],
+    ["**https://github.com/org/repo/issues/123**", [{ repository: "org/repo", number: 123 }]],
+    ["\\`Closes #123\\`", [{ repository: null, number: 123 }]],
+  ])("handles reviewed Markdown regression %s", (body, references) => {
+    expect(checkIssueLinks(body as string).references).toEqual(references);
+  });
+
+  it("handles thousands of inline code spans within the test deadline", () => {
+    const start = performance.now();
+    expect(checkIssueLinks(`${"`x` ".repeat(16000)}\nCloses #123`).references).toEqual([
+      { repository: null, number: 123 },
+    ]);
+    expect(performance.now() - start).toBeLessThan(1500);
+  }, 2000);
+
   it("keeps prose after an unmatched inline delimiter", () => {
     expect(checkIssueLinks("An unmatched ` in prose.\n\nFixes #123").references).toEqual([
       { repository: null, number: 123 },
