@@ -15,10 +15,9 @@ export interface PolicyEvaluationInput {
   readonly executionErrors: readonly string[];
   readonly repositoryRules: readonly { id: string; satisfied: boolean }[];
   readonly codeEvidenceSatisfied?: boolean;
+  readonly unresolvedThreadIds?: readonly string[];
   readonly blockingSeverityThreshold?: "HIGH" | "MEDIUM" | "LOW";
-  readonly permittedCheckConclusions?: Readonly<
-    Record<string, readonly ("neutral" | "skipped" | "cancelled")[]>
-  >;
+  readonly permittedCheckConclusions?: Readonly<Record<string, readonly ("neutral" | "skipped")[]>>;
 }
 export interface PolicyEvaluation {
   readonly verdict: PolicyVerdict;
@@ -60,7 +59,7 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
     } else if (run.conclusion !== "success") {
       const conclusion = run.conclusion;
       const permitted =
-        (conclusion === "neutral" || conclusion === "skipped" || conclusion === "cancelled") &&
+        (conclusion === "neutral" || conclusion === "skipped") &&
         ownValue(input.permittedCheckConclusions, name)?.includes(conclusion);
       if (!permitted) add(1, "FAIL", "CHECK_FAILED", name);
     }
@@ -93,13 +92,16 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
       }
     }
   }
-  if (snapshot.unresolvedThreadCount > coveredThreads.size) {
-    add(
-      3,
-      "FAIL",
-      "UNCLASSIFIED_UNRESOLVED_THREADS",
-      String(snapshot.unresolvedThreadCount - coveredThreads.size),
-    );
+  const unresolvedThreadIds = input.unresolvedThreadIds ?? [];
+  const distinctThreadIds = new Set(unresolvedThreadIds);
+  if (
+    distinctThreadIds.size !== snapshot.unresolvedThreadCount ||
+    distinctThreadIds.size !== unresolvedThreadIds.length
+  ) {
+    add(3, "FAIL", "UNRESOLVED_THREAD_IDENTITIES_MISSING_OR_INCONSISTENT", "threads");
+  }
+  for (const id of [...distinctThreadIds].sort()) {
+    if (!coveredThreads.has(id)) add(3, "FAIL", "UNCLASSIFIED_UNRESOLVED_THREADS", id);
   }
   if (snapshot.blockingDecisionCount > 0)
     add(4, "FAIL", "ACTIVE_BLOCKING_DECISIONS", String(snapshot.blockingDecisionCount));

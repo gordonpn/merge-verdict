@@ -144,12 +144,15 @@ describe("policy edge cases", () => {
     value.snapshot.checkRuns = {};
     expect(evaluatePolicy(value).verdict).toBe("PENDING");
   });
-  it("allows only explicitly permitted non-success conclusions", () => {
-    const value = input();
-    check(value).conclusion = "neutral";
-    value.permittedCheckConclusions = { test: ["neutral"] };
-    expect(evaluatePolicy(value).verdict).toBe("PASS");
-  });
+  it.each(["neutral", "skipped"] as const)(
+    "allows explicitly permitted %s conclusions",
+    (conclusion) => {
+      const value = input();
+      check(value).conclusion = conclusion;
+      value.permittedCheckConclusions = { test: [conclusion] };
+      expect(evaluatePolicy(value).verdict).toBe("PASS");
+    },
+  );
   it("treats malformed completed CI and failed review execution as errors", () => {
     const value = input();
     check(value).conclusion = null;
@@ -163,6 +166,7 @@ describe("policy edge cases", () => {
     (severity) => {
       const value = input();
       value.snapshot.unresolvedThreadCount = 1;
+      value.unresolvedThreadIds = ["thread"];
       reviewer(value).findings = [
         {
           id: "finding",
@@ -182,6 +186,7 @@ describe("policy edge cases", () => {
       expect(evaluatePolicy(value).verdict).toBe("FAIL");
       for (const finding of reviewer(value).findings) finding.isResolved = true;
       value.snapshot.unresolvedThreadCount = 0;
+      value.unresolvedThreadIds = [];
       expect(evaluatePolicy(value).verdict).toBe("PASS");
     },
   );
@@ -306,3 +311,32 @@ it("does not satisfy required evidence from inherited records", () => {
   value.snapshot.reviewers = Object.create(value.snapshot.reviewers);
   expect(evaluatePolicy(value).verdict).toBe("PENDING");
 });
+
+it("rejects cancelled CI even when an untyped caller permits it", () => {
+  const value = input();
+  check(value).conclusion = "cancelled";
+  value.permittedCheckConclusions = JSON.parse('{"test":["cancelled"]}');
+  expect(evaluatePolicy(value).verdict).toBe("FAIL");
+});
+it.each([undefined, ["other"], [], ["thread", "thread"]].map((ids) => ({ ids })))(
+  "fails closed for absent, unrelated, or inconsistent thread identities: %j",
+  ({ ids }) => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.snapshot.unresolvedThreadCount = 1;
+    if (ids !== undefined) value.unresolvedThreadIds = ids;
+    reviewer(value).findings = [
+      {
+        id: "finding",
+        reviewerId: "reviewer",
+        threadId: "thread",
+        title: "Tip",
+        description: "Tip",
+        severity: "LOW",
+        isBlocking: false,
+        isResolved: false,
+      },
+    ];
+    expect(evaluatePolicy(value).verdict).toBe("FAIL");
+  },
+);
