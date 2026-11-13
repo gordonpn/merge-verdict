@@ -74,6 +74,26 @@ describe("buildReviewSnapshotFromPullRequest", () => {
     expect(seen).toEqual([[ancestor], undefined]);
   });
 
+  it("orders equal-time decisions conservatively and ignores nondecisions", () => {
+    const submittedAt = "2026-10-01T10:00:00Z";
+    const reviews = [
+      { id: 5, reviewerLogin: "bot", state: "CHANGES_REQUESTED" as const, submittedAt },
+      { id: 3, reviewerLogin: "bot", state: "APPROVED" as const, submittedAt },
+      { id: 1, reviewerLogin: "bot", state: "APPROVED" as const, submittedAt },
+      { id: 9, reviewerLogin: null, state: "CHANGES_REQUESTED" as const, submittedAt },
+      { id: 7, reviewerLogin: "dismissed", state: "DISMISSED" as const, submittedAt },
+      { id: 8, reviewerLogin: "pending", state: "PENDING" as const, submittedAt },
+    ].map((r) => ({ ...r, commitSha: headSha, body: "", bodyDigest: "digest" }));
+    const snapshot = buildReviewSnapshotFromPullRequest({ ...samplePrData, reviews });
+    expect(snapshot.blockingDecisionCount).toBe(1);
+    const reversed = buildReviewSnapshotFromPullRequest({
+      ...samplePrData,
+      reviews: [...reviews].reverse(),
+    });
+    expect(reversed.blockingDecisionCount).toBe(1);
+    expect(reversed.stateFingerprint).toBe(snapshot.stateFingerprint);
+  });
+
   it("creates a valid ReviewSnapshot using default normalizers", () => {
     const snapshot = buildReviewSnapshotFromPullRequest(samplePrData, {
       capturedAt: "2026-10-01T12:00:00.000Z",
