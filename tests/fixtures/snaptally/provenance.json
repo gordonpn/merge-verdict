@@ -1,0 +1,75 @@
+{
+  "recordedOn": "2026-11-11",
+  "recordedBefore": "2026-11-11T20:51:13Z",
+  "recordings": [
+    {
+      "number": 119,
+      "fixtureSha256": "538412e60a029f252033fcc217142071639f0176dd0612b9a8feb3e53fce62d6",
+      "captureEnvelopeSha256": "3598cf2f4f27b93fa100eb95cc1255d184321592e6ab687f5cbfa453cbcf1561",
+      "sources": {
+        "pullRequest": "https://api.github.com/repos/gordonpn/snaptally/pulls/119",
+        "comments": "https://api.github.com/repos/gordonpn/snaptally/issues/119/comments?per_page=100",
+        "reviews": "https://api.github.com/repos/gordonpn/snaptally/pulls/119/reviews?per_page=100",
+        "reviewComments": "https://api.github.com/repos/gordonpn/snaptally/pulls/119/comments?per_page=100",
+        "checks": "https://api.github.com/repos/gordonpn/snaptally/commits/db491f2d2ea7bacf2b759096b019d284d7b49a16/check-runs?per_page=100",
+        "statuses": "https://api.github.com/repos/gordonpn/snaptally/commits/db491f2d2ea7bacf2b759096b019d284d7b49a16/statuses?per_page=100",
+        "files": "https://api.github.com/repos/gordonpn/snaptally/pulls/119/files?per_page=100",
+        "commits": "https://api.github.com/repos/gordonpn/snaptally/pulls/119/commits?per_page=100"
+      },
+      "threadSource": {
+        "tool": "github_list_pull_request_review_threads",
+        "repo_full_name": "gordonpn/snaptally",
+        "pr_number": 119
+      },
+      "headSha": "db491f2d2ea7bacf2b759096b019d284d7b49a16",
+      "threadCount": 11,
+      "selectedConversationCommentIds": [6459663632, 6459674504]
+    },
+    {
+      "number": 120,
+      "fixtureSha256": "05eab7967e448bef9ce46524ae4230e8788c39beac5ebb7436320c2927985b4c",
+      "captureEnvelopeSha256": "e1eda482918299e82359f3ba763f7a4d2ea65842f5aea2ff71b777bf809aea30",
+      "sources": {
+        "pullRequest": "https://api.github.com/repos/gordonpn/snaptally/pulls/120",
+        "comments": "https://api.github.com/repos/gordonpn/snaptally/issues/120/comments?per_page=100",
+        "reviews": "https://api.github.com/repos/gordonpn/snaptally/pulls/120/reviews?per_page=100",
+        "reviewComments": "https://api.github.com/repos/gordonpn/snaptally/pulls/120/comments?per_page=100",
+        "checks": "https://api.github.com/repos/gordonpn/snaptally/commits/35c286dc84db8dc22ffd3e58b3457a1c77acb019/check-runs?per_page=100",
+        "statuses": "https://api.github.com/repos/gordonpn/snaptally/commits/35c286dc84db8dc22ffd3e58b3457a1c77acb019/statuses?per_page=100",
+        "files": "https://api.github.com/repos/gordonpn/snaptally/pulls/120/files?per_page=100",
+        "commits": "https://api.github.com/repos/gordonpn/snaptally/pulls/120/commits?per_page=100"
+      },
+      "threadSource": {
+        "tool": "github_list_pull_request_review_threads",
+        "repo_full_name": "gordonpn/snaptally",
+        "pr_number": 120
+      },
+      "headSha": "35c286dc84db8dc22ffd3e58b3457a1c77acb019",
+      "threadCount": 3,
+      "selectedConversationCommentIds": [6484557104]
+    },
+    {
+      "number": 121,
+      "fixtureSha256": "e5d4a3b3666d9a944d6186785e0ac64e3868e105ceb91531467983033e86301c",
+      "captureEnvelopeSha256": "7b101e3bcfa9a114840be6d75d1190d75ba9ddd811220770cb192cd09fae5d9e",
+      "sources": {
+        "pullRequest": "https://api.github.com/repos/gordonpn/snaptally/pulls/121",
+        "comments": "https://api.github.com/repos/gordonpn/snaptally/issues/121/comments?per_page=100",
+        "reviews": "https://api.github.com/repos/gordonpn/snaptally/pulls/121/reviews?per_page=100",
+        "reviewComments": "https://api.github.com/repos/gordonpn/snaptally/pulls/121/comments?per_page=100",
+        "checks": "https://api.github.com/repos/gordonpn/snaptally/commits/4650b21d3d1f70faa2958a4cb09c2c5a0df675ea/check-runs?per_page=100",
+        "statuses": "https://api.github.com/repos/gordonpn/snaptally/commits/4650b21d3d1f70faa2958a4cb09c2c5a0df675ea/statuses?per_page=100",
+        "files": "https://api.github.com/repos/gordonpn/snaptally/pulls/121/files?per_page=100",
+        "commits": "https://api.github.com/repos/gordonpn/snaptally/pulls/121/commits?per_page=100"
+      },
+      "threadSource": {
+        "tool": "github_list_pull_request_review_threads",
+        "repo_full_name": "gordonpn/snaptally",
+        "pr_number": 121
+      },
+      "headSha": "4650b21d3d1f70faa2958a4cb09c2c5a0df675ea",
+      "threadCount": 10,
+      "selectedConversationCommentIds": [6484971461, 6484980957]
+    }
+  ]
+}
