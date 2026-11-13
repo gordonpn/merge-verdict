@@ -201,6 +201,11 @@ export interface GitHubCommitStatus {
   readonly updatedAt: string;
 }
 
+/**
+ * Collected security metadata. Required fields may evolve before version 1.0;
+ * typed consumers and fixtures must migrate with collector changes.
+ * See docs/security.md for the isFork migration and fail-closed defaults.
+ */
 export interface GitHubPullRequestData {
   readonly repository: string;
   readonly pullRequestNumber: number;
