@@ -26,3 +26,4 @@ export {
 } from "./collector/github-collector.js";
 export * from "./config/index.js";
 export * from "./models/index.js";
+export * from "./policy/index.js";

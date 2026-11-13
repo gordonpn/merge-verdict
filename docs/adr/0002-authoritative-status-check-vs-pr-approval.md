@@ -34,7 +34,7 @@ Three specific GitHub platform behaviors directly affect this architectural deci
 1. **GitHub Branch Protection Accepts `neutral` and `skipped` as Passing**:
    GitHub branch protection considers check conclusions of `neutral` and `skipped` to satisfy required status checks. Therefore, Merge Verdict must never emit `neutral` or `skipped` for non-passing outcomes. Every terminal non-passing outcome (`FAIL`, `STALE`, `ERROR`) must be published with a blocking conclusion (`failure` or `action_required`) to prevent premature merge enablement. `PENDING` remains an in-progress check run with conclusion `null`.
 2. **Workflow-Triggered Jobs May Not Count as Required PR Checks**:
-   An ordinary GitHub Actions workflow triggered via `workflow_dispatch` or `issue_comment` does not automatically register as a required pull request check run unless created explicitly through the GitHub Checks API via a GitHub App token. Using Checks API check runs created under GitHub App identity avoids this workflow trigger limitation.
+   A workflow triggered via `workflow_dispatch` or `issue_comment` must not assume its default workflow SHA is the PR head. Merge Verdict explicitly creates or updates its check run on the event evaluation SHA using credentials authorized for the Checks API. Branch protection must require that check name and the intended source App.
 3. **GitHub Copilot's Native Approval Privilege Does Not Generalize to Third-Party Apps**:
    GitHub introduced native Copilot pull request approvals (`copilot-pull-request-reviewer[bot]`) with general availability in October 2026, allowing Copilot `APPROVE` reviews to count toward required-review branch protection rules when enabled by administrators. However, this merge-approval privilege is specific to GitHub Copilot; arbitrary third-party GitHub Apps (such as `merge-verdict[bot]`) do not automatically receive the same special treatment under human or Code Owner review requirements. Furthermore, Copilot approvals are dismissed on new commits, but are not invalidated when external reviewers post new blocking findings on an unchanged commit SHA.
 
@@ -63,7 +63,7 @@ We designate the **required status check (implemented as a GitHub Checks API che
    - Whether GitHub branch protection actually recognizes that approval as satisfying required-review thresholds.
      When policy evaluation succeeds (`PASS`) and the matched path risk tier allows automated approval, Merge Verdict delegates approval submission to a configurable provider (`github_copilot` or `github_app`). Repositories must always pair the approval review with the authoritative `merge-verdict` check run rather than relying on formal approval alone.
 3. **Checks API Over Commit Statuses**:
-   The publisher must utilize the GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) rather than the legacy Commit Status API wherever possible. Check runs provide rich Markdown formatting, status summaries, duration metrics, and file-level annotations, which are critical for auditability.
+   The publisher must utilize the GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) rather than the legacy Commit Status API. There is no supported Commit Status API publishing fallback for the authoritative gate. Check runs provide rich Markdown formatting, status summaries, duration metrics, and file-level annotations, which are critical for auditability.
 4. **Fast Invalidation Path**:
    To minimize the race window when new review feedback arrives, the trigger layer must execute a fast invalidation path: immediately setting the `merge-verdict` check run to `in_progress` or non-passing upon receiving any PR update, comment, or review event, before the full evaluation engine begins analysis.
 5. **Base-Branch Policy Authority and Defense in Depth**:
@@ -96,7 +96,7 @@ When GitHub Copilot is available and enabled, combining the required `merge-verd
 - **Description**: Rely exclusively on `POST /repos/{owner}/{repo}/statuses/{sha}` with context `merge-verdict`.
 - **Why Rejected**:
   - The Commit Status API only allows a 140-character description field and a target URL. It cannot display structured verification tables, finding breakdowns, or file annotations directly within GitHub PR views.
-  - Retained as a Tier 1 fallback when running with standard `GITHUB_TOKEN` without GitHub App credentials, but subordinated to the Checks API for Tier 2 deployments.
+  - A legacy status with the same name is not a substitute for the required check run. Missing Checks API authorization is a setup error, not permission to publish a different gate.
 
 ## Trade-Offs
 
@@ -109,14 +109,14 @@ When GitHub Copilot is available and enabled, combining the required `merge-verd
 
 ### Disadvantages and Mitigations
 
-- **Checks API Permissions**: Creating check runs requires a GitHub App with `checks: write` permissions.
-  - _Mitigation_: Tier 1 fallback supports the Commit Status API with default `GITHUB_TOKEN`, while Tier 2 provides full Checks API rich reports.
+- **Checks API Permissions**: Creating check runs requires credentials authorized for the Checks API with effective `checks: write` permission.
+  - _Mitigation_: Configure an authorized trusted workflow token or a dedicated GitHub App installation token. Verify effective event permissions and the expected source App before rollout; if publication fails, report an error and withhold approval. See [GitHub check-run authentication](https://docs.github.com/en/rest/checks/runs#create-a-check-run) and [workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
 - **Non-Atomic Race Windows**: An event occurring while an evaluation is underway requires prompt invalidation.
   - _Mitigation_: Fast invalidation path reverts check runs to non-passing states immediately, complemented by GitHub native conversation resolution rules.
 
 ## Consequences
 
-1. The publisher subsystem will prioritize `src/publisher/checks-api.ts` with structured Markdown reporting, retaining `src/publisher/commit-status.ts` as a fallback.
+1. The publisher subsystem will implement `src/publisher/checks-api.ts` with structured Markdown reporting from Milestone 2. Dedicated App token minting and richer reporting extend this publisher in Milestone 3; no legacy commit-status publisher is part of the supported gate.
 2. The policy evaluator will emit structured evidence containing exact `head_sha`, `review_state_digest`, and commit-pinned permalinks.
 3. Documentation and setup guides will instruct administrators to require the `merge-verdict` check run in repository branch protection settings.
 4. Formal PR approval reviews (`APPROVE`) are emitted alongside the `merge-verdict` check run when verification passes and path risk-tier eligibility is satisfied, while the required check run serves as the non-bypassable merge gate.

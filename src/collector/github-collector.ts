@@ -1,28 +1,22 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { GraphqlResponseError, graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 import type { CheckRunConclusion, CheckRunStatus } from "../models/check-run.js";
-
 import {
   type CollectorRetryOptions,
   createRetryRequest,
   type RetryRequest,
   withRestRetries,
 } from "./client.js";
+import CHANGED_FILES_QUERY from "./queries/changed-files.graphql?raw";
+import THREAD_COMMENTS_QUERY from "./queries/review-thread-comments.graphql?raw";
+import REVIEW_THREADS_QUERY from "./queries/review-threads.graphql?raw";
 
 type GraphqlClient = typeof graphql;
-
-function loadQuery(filename: string): string {
-  return readFileSync(new URL(`./queries/${filename}`, import.meta.url), "utf8");
-}
 
 const PAGE_SIZE = 100;
 const POLICY_FILE_PATH = ".github/merge-verdict.yml";
 const REVIEW_THREAD_COMMENT_CONCURRENCY = 5;
-const REVIEW_THREADS_QUERY = loadQuery("review-threads.graphql");
-const CHANGED_FILES_QUERY = loadQuery("changed-files.graphql");
-const THREAD_COMMENTS_QUERY = loadQuery("review-thread-comments.graphql");
 
 interface PageInfo {
   readonly hasNextPage: boolean;
@@ -201,6 +195,11 @@ export interface GitHubCommitStatus {
   readonly updatedAt: string;
 }
 
+/**
+ * Collected security metadata. Required fields may evolve before version 1.0;
+ * typed consumers and fixtures must migrate with collector changes.
+ * See docs/security.md for the isFork migration and fail-closed defaults.
+ */
 export interface GitHubPullRequestData {
   readonly repository: string;
   readonly pullRequestNumber: number;
@@ -208,6 +207,8 @@ export interface GitHubPullRequestData {
   readonly baseSha: string;
   readonly headRef: string;
   readonly baseRef: string;
+  /** Whether the head repository differs from the protected base repository. */
+  readonly isFork: boolean;
   readonly isDraft: boolean;
   readonly mergeable: boolean | null;
   readonly authorLogin: string | null;
@@ -620,6 +621,7 @@ export class GitHubCollector {
       baseSha: pullRequest.base.sha,
       headRef: pullRequest.head.ref,
       baseRef: pullRequest.base.ref,
+      isFork: pullRequest.head.repo?.full_name !== pullRequest.base.repo.full_name,
       isDraft: pullRequest.draft ?? false,
       mergeable: pullRequest.mergeable ?? null,
       authorLogin: pullRequest.user?.login ?? null,
