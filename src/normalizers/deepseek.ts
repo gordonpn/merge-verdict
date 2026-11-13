@@ -2,6 +2,7 @@ import type { NormalizedFinding } from "../models/finding.js";
 import type { ReviewerExecutionRecord, ReviewerVerdict } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
+import { stripMarkdownPunctuation } from "./utils.js";
 
 type RawVerdict = "APPROVE" | "APPROVE WITH MINOR FINDINGS" | "REQUEST CHANGES" | "BLOCK";
 
@@ -16,17 +17,17 @@ function extractRawVerdict(body: string): RawVerdict | null {
   if (!match?.[1]) {
     return null;
   }
-  const clean = match[1].replaceAll("_", " ").trim().toUpperCase();
+  const clean = stripMarkdownPunctuation(match[1].replaceAll("_", " ")).toUpperCase();
   if (/\bBLOCK\b/.test(clean)) {
     return "BLOCK";
   }
   if (/\bREQUEST CHANGES\b/.test(clean)) {
     return "REQUEST CHANGES";
   }
-  if (clean.includes("APPROVE WITH MINOR FINDINGS")) {
+  if (/^APPROVE WITH MINOR FINDINGS\b/.test(clean)) {
     return "APPROVE WITH MINOR FINDINGS";
   }
-  if (clean.includes("APPROVE")) {
+  if (/^APPROVE\b/.test(clean)) {
     return "APPROVE";
   }
   return null;

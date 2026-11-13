@@ -21,6 +21,66 @@ function review(reviewerLogin: string, body: string): GitHubReviewSubmission {
 }
 
 describe("review parser regressions", () => {
+  it.each([undefined, "success", "failure"] as const)(
+    "keeps pending CodeRabbit reviews incomplete with check conclusion %s",
+    (conclusion) => {
+      const pendingReview = {
+        ...review("coderabbitai[bot]", "Review in progress"),
+        state: "PENDING" as const,
+      };
+      const result = normalizeCodeRabbitReviewer({
+        headSha,
+        reviews: [review("coderabbitai[bot]", "Earlier completed review"), pendingReview],
+        checkRuns: conclusion
+          ? [
+              {
+                id: 1,
+                name: "CodeRabbit",
+                status: "completed",
+                conclusion,
+                commitSha: headSha,
+                detailsUrl: null,
+                output: { title: null, summary: null, text: null },
+                startedAt: null,
+                completedAt: null,
+              },
+            ]
+          : [],
+      });
+      expect(result.status).toBe(conclusion === "failure" ? "FAILED" : "PENDING");
+      expect(result.verdict).toBe(conclusion === "failure" ? "CHANGES_REQUESTED" : "NONE");
+      expect(result.isFresh).toBe(true);
+    },
+  );
+
+  it.each([
+    "NOT APPROVED",
+    "DISAPPROVE",
+    "NOT APPROVED (approval withheld)",
+    "DISAPPROVE (do not approve)",
+    "UNSUPPORTED (approve later)",
+  ])("does not infer DeepSeek approval from unsupported verdict %s", (verdict) => {
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [review("github-actions[bot]", `## Verdict: ${verdict}`)],
+    });
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("COMMENTED");
+    expect(result.findings).toEqual([]);
+  });
+
+  it.each([
+    "APPROVE (no blocking issues)",
+    "**APPROVE** (all checks passed)",
+    "__APPROVE WITH MINOR FINDINGS__ (style only)",
+  ])("retains affirmative DeepSeek verdict with explanation %s", (verdict) => {
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [review("github-actions[bot]", `## Verdict: ${verdict}`)],
+    });
+    expect(result.verdict).toBe("APPROVE");
+  });
+
   it("ends outside-diff findings at its own closing details inside a wrapper", () => {
     const result = normalizeCodeRabbitReviewer({
       headSha,

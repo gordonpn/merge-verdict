@@ -290,6 +290,9 @@ export function normalizeCodeRabbitReviewer(input: NormalizerInput): ReviewerExe
     status = "FAILED";
     verdict =
       checkRun.conclusion === "failure" || isChangesRequested ? "CHANGES_REQUESTED" : "NONE";
+  } else if (latestReview?.state === "PENDING") {
+    status = "PENDING";
+    verdict = "NONE";
   } else {
     status = "COMPLETED";
     if (isChangesRequested) {
