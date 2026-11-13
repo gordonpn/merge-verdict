@@ -10,13 +10,14 @@ describe("buildReviewSnapshotFromPullRequest", () => {
   const headSha = "1234567890abcdef1234567890abcdef12345678";
   const baseSha = "abcdef1234567890abcdef1234567890abcdef12";
 
-  const samplePrData: GitHubPullRequestData = {
+  const samplePrData: GitHubPullRequestData & { readonly isFork: boolean } = {
     repository: "gordonpn/merge-verdict",
     pullRequestNumber: 100,
     headSha,
     baseSha,
     headRef: "feat/sample",
     baseRef: "main",
+    isFork: false,
     isDraft: false,
     mergeable: true,
     authorLogin: "gordonpn",
