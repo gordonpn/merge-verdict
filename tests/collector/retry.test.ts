@@ -189,7 +189,10 @@ it("retries failing REST and GraphQL pages in place without repeating earlier pa
     calls.set(key, count);
     if (url.pathname.endsWith("/pulls/1"))
       return response(
-        { head: { sha: "head", ref: "feature" }, base: { sha: "base", ref: "main" } },
+        {
+          head: { sha: "head", ref: "feature", repo: { full_name: "octocat/hello-world" } },
+          base: { sha: "base", ref: "main", repo: { full_name: "octocat/hello-world" } },
+        },
         url,
       );
     if (url.pathname.includes("/contents/"))
