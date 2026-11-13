@@ -51,6 +51,18 @@ Merge Verdict adopts an **Actions-first hybrid architecture**:
 
 For full architectural details, see [docs/architecture.md](docs/architecture.md).
 
+## Contributor Toolchain
+
+The root `.node-version` pins Node.js 22.12.0. With fnm installed, enable
+repository selection in Bash with `eval "$(fnm env --use-on-cd --shell bash)"`,
+then run `fnm install` in the repository once to install its pinned runtime.
+Subsequent directory changes select that version automatically.
+
+Verified with fnm 1.38.1: starting outside the repository on system Node.js
+24.22.1, entering the repository selected Node.js 22.12.0 from `.node-version`.
+Both `fnm current` and `node --version` reported `v22.12.0`. The five required
+`just` gates also passed on Node.js 22.12.0.
+
 ## Project Status
 
 Merge Verdict is currently in the **foundation and architecture phase**. The architectural specifications, integration models, verification policies, and implementation roadmap have been established. Application implementation will proceed incrementally according to the milestone roadmap.
