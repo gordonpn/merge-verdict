@@ -270,6 +270,7 @@ describe("normalizeSourceryReviewer", () => {
 
     const result = normalizeSourceryReviewer({
       headSha,
+      ancestorCommitShas: [`f1e2d3c4${"0".repeat(32)}`],
       checkRuns,
       reviewThreads,
       reviews: [],
@@ -341,6 +342,7 @@ describe("normalizeSourceryReviewer", () => {
 
     const result = normalizeSourceryReviewer({
       headSha,
+      ancestorCommitShas: [`e9d8c7b6${"0".repeat(32)}`],
       checkRuns,
       reviewThreads,
       reviews: [],
@@ -352,6 +354,72 @@ describe("normalizeSourceryReviewer", () => {
     expect(result.verdict).toBe("APPROVE");
     expect(result.findings[0]?.isResolved).toBe(true);
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "short ancestor SHA",
+      acknowledgedSha: "abcdef1",
+      ancestors: [`abcdef1${"0".repeat(33)}`],
+      resolved: true,
+    },
+    {
+      name: "case-insensitive ancestor SHA",
+      acknowledgedSha: "ABCDEF1",
+      ancestors: [`abcdef1${"0".repeat(33)}`],
+      resolved: true,
+    },
+    {
+      name: "short head SHA without ancestry",
+      acknowledgedSha: "1234567",
+      ancestors: undefined,
+      resolved: true,
+    },
+    {
+      name: "unproven acknowledgement without ancestry",
+      acknowledgedSha: "abcdef1",
+      ancestors: undefined,
+      resolved: false,
+    },
+    {
+      name: "ambiguous ancestor prefix",
+      acknowledgedSha: "abcdef1",
+      ancestors: [`abcdef1${"0".repeat(33)}`, `abcdef1${"1".repeat(33)}`],
+      resolved: false,
+    },
+  ])("checks $name before accepting resolution", ({ acknowledgedSha, ancestors, resolved }) => {
+    const currentHead = `1234567${"0".repeat(33)}`;
+    const result = normalizeSourceryReviewer({
+      headSha: currentHead,
+      ...(ancestors ? { ancestorCommitShas: ancestors } : {}),
+      reviewThreads: [
+        {
+          id: "acknowledged-thread",
+          isResolved: true,
+          resolvedByLogin: "sourcery-ai[bot]",
+          isOutdated: false,
+          path: "src/utils.ts",
+          line: 1,
+          originalLine: 1,
+          comments: [
+            {
+              id: "acknowledgement",
+              authorLogin: "sourcery-ai[bot]",
+              body: `Addressed in [${acknowledgedSha}]: High · Fixed bug`,
+              bodyDigest: "digest",
+              path: "src/utils.ts",
+              line: 1,
+              originalLine: 1,
+              commitSha: currentHead,
+              createdAt: "2026-10-01T10:00:00Z",
+              updatedAt: "2026-10-01T10:00:00Z",
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.findings[0]?.isResolved).toBe(resolved);
+    expect(result.findings[0]?.isBlocking).toBe(!resolved);
   });
 
   it("treats acknowledged finding as unresolved when acknowledged SHA is not in ancestry", () => {

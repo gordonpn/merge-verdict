@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { NormalizedFinding } from "../models/finding.js";
 import type {
   ReviewerExecutionRecord,
@@ -10,20 +11,17 @@ import { stripMarkdownPunctuation } from "./utils.js";
 
 const CODEX_LOGINS = new Set(["chatgpt-codex-connector", "chatgpt-codex-connector[bot]"]);
 
-interface CodexReviewStateJson {
-  code_review?: {
-    commit_sha?: string | null;
-    has_any_findings?: boolean | null;
-    has_unresolved_findings?: boolean | null;
-    status?: string | null;
-  } | null;
-  security_review?: {
-    commit_sha?: string | null;
-    has_any_findings?: boolean | null;
-    has_unresolved_findings?: boolean | null;
-    status?: string | null;
-  } | null;
-}
+const CodexReviewSectionSchema = z.object({
+  commit_sha: z.string().nullish(),
+  has_any_findings: z.boolean().nullish(),
+  has_unresolved_findings: z.boolean().nullish(),
+  status: z.string().nullish(),
+});
+const CodexReviewStateSchema = z.object({
+  code_review: CodexReviewSectionSchema.nullish(),
+  security_review: CodexReviewSectionSchema.nullish(),
+});
+type CodexReviewStateJson = z.infer<typeof CodexReviewStateSchema>;
 
 function isCodexAuthor(login: string | null): boolean {
   return login !== null && CODEX_LOGINS.has(login.toLowerCase());
@@ -48,17 +46,18 @@ function parseCodexState(input: NormalizerInput): CodexReviewStateJson | null {
     }
     const openBrace = body.indexOf("{", markerIndex + marker.length);
     if (openBrace === -1) {
-      continue;
+      return null;
     }
     const commentClose = body.indexOf("-->", openBrace);
     if (commentClose === -1) {
-      continue;
+      return null;
     }
     const jsonStr = body.slice(openBrace, commentClose).trim();
     try {
-      return JSON.parse(jsonStr) as CodexReviewStateJson;
+      const parsed = CodexReviewStateSchema.safeParse(JSON.parse(jsonStr));
+      return parsed.success ? parsed.data : null;
     } catch {
-      // Fall through on malformed state
+      return null;
     }
   }
   return null;

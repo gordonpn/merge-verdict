@@ -66,6 +66,47 @@ describe("normalizeCodexReviewer", () => {
     expect(result.evaluatedCommitSha).toBe(headSha);
   });
 
+  it("does not reuse old approval after a newer invalid state", () => {
+    const conversationComments: GitHubConversationComment[] = [false, "true"].map(
+      (unresolved, index) => ({
+        id: index,
+        authorLogin: "chatgpt-codex-connector[bot]",
+        body: `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: headSha, status: "completed", has_unresolved_findings: unresolved } })} -->`,
+        bodyDigest: "digest",
+        createdAt: "2026-10-01T10:00:00Z",
+        updatedAt: null,
+      }),
+    );
+    const result = normalizeCodexReviewer({ headSha, conversationComments });
+    expect(result.status).toBe("PENDING");
+    expect(result.verdict).toBe("NONE");
+  });
+
+  it.each([
+    { commit_sha: 123, has_unresolved_findings: false },
+    { commit_sha: headSha, has_unresolved_findings: "true" },
+    { commit_sha: headSha, has_any_findings: "false" },
+    { commit_sha: headSha, status: 123 },
+  ])("ignores state JSON with invalid field types: %j", (fields) => {
+    const result = normalizeCodexReviewer({
+      headSha,
+      conversationComments: [
+        {
+          id: 100,
+          authorLogin: "chatgpt-codex-connector[bot]",
+          body: `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { status: "completed", ...fields } })} -->`,
+          bodyDigest: "digest",
+          createdAt: "2026-10-01T10:00:00Z",
+          updatedAt: null,
+        },
+      ],
+    });
+    expect(result.status).toBe("PENDING");
+    expect(result.verdict).toBe("NONE");
+    expect(result.evaluatedCommitSha).toBeNull();
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
   it("handles malformed JSON in state comment gracefully as PENDING", () => {
     const conversationComments: GitHubConversationComment[] = [
       {

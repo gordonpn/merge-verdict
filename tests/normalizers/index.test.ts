@@ -43,6 +43,36 @@ describe("buildReviewSnapshotFromPullRequest", () => {
     policyContent: "required_checks: []",
   };
 
+  it("passes only explicitly supplied trusted ancestry to normalizers", () => {
+    const ancestor = "fedcba0".padEnd(40, "0");
+    const seen: (readonly string[] | undefined)[] = [];
+    const options = {
+      ancestorCommitShas: [ancestor],
+      normalizers: [
+        {
+          reviewerId: "test",
+          reviewerName: "Test",
+          normalize: (input: import("../../src/normalizers/types.js").NormalizerInput) => {
+            seen.push(input.ancestorCommitShas);
+            return {
+              reviewerId: "test",
+              reviewerName: "Test",
+              status: "PENDING" as const,
+              evaluatedCommitSha: null,
+              isFresh: false,
+              verdict: "NONE" as const,
+              findings: [],
+              checkRunConclusion: null,
+            };
+          },
+        },
+      ],
+    };
+    buildReviewSnapshotFromPullRequest(samplePrData, options);
+    buildReviewSnapshotFromPullRequest(samplePrData, { normalizers: options.normalizers });
+    expect(seen).toEqual([[ancestor], undefined]);
+  });
+
   it("creates a valid ReviewSnapshot using default normalizers", () => {
     const snapshot = buildReviewSnapshotFromPullRequest(samplePrData, {
       capturedAt: "2026-10-01T12:00:00.000Z",

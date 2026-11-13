@@ -82,11 +82,13 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
 
     const severity = parseSeverity(firstComment.body);
     const acknowledgedSha = parseAcknowledgedCommitSha(firstComment.body);
-    const isAcknowledgedInAncestry =
-      !acknowledgedSha ||
-      !input.ancestorCommitShas ||
-      input.ancestorCommitShas.includes(acknowledgedSha) ||
-      acknowledgedSha === input.headSha;
+    const knownCommitShas = new Set(
+      [input.headSha, ...(input.ancestorCommitShas ?? [])].map((sha) => sha.toLowerCase()),
+    );
+    const matchingCommitShas = acknowledgedSha
+      ? [...knownCommitShas].filter((sha) => sha.startsWith(acknowledgedSha.toLowerCase()))
+      : [];
+    const isAcknowledgedInAncestry = !acknowledgedSha || matchingCommitShas.length === 1;
 
     const isResolved = thread.isResolved && isAcknowledgedInAncestry;
     const isBlocking = !isResolved && (severity === "HIGH" || severity === "MEDIUM");

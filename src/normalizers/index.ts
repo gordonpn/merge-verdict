@@ -38,6 +38,8 @@ export const DEFAULT_REVIEWER_NORMALIZERS: readonly ReviewerNormalizer[] = [
 export interface NormalizeSnapshotOptions {
   readonly normalizers?: readonly ReviewerNormalizer[];
   readonly capturedAt?: string;
+  /** Commit SHAs verified by the caller to be ancestors of the collected PR head. */
+  readonly ancestorCommitShas?: readonly string[];
 }
 
 /**
@@ -69,7 +71,7 @@ export function buildReviewSnapshotFromPullRequest(
   const input: NormalizerInput = {
     headSha: prData.headSha,
     repository: prData.repository,
-    ancestorCommitShas: [prData.baseSha, prData.headSha],
+    ...(options.ancestorCommitShas ? { ancestorCommitShas: options.ancestorCommitShas } : {}),
     reviewThreads: prData.reviewThreads,
     reviews: sortedReviews,
     checkRuns: prData.checkRuns,
