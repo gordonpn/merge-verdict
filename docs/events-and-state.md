@@ -178,7 +178,7 @@ If Merge Verdict previously submitted an `APPROVE` review on commit `SHA-A`, and
 
 ### 5.2. Partial Failure Recovery
 
-If the authoritative status check publication succeeds (via `POST /repos/{owner}/{repo}/statuses/{sha}` with Commit Status state `pending`, `success`, `failure`, or `error` in Tier 1, or via `POST /repos/{owner}/{repo}/check-runs` with Check Run `status` and `conclusion` fields in Tier 2) but the subsequent PR review approval submission fails (e.g. temporary secondary rate limit or GitHub review API error):
+If the authoritative check run publication succeeds via the Checks API (`POST /repos/{owner}/{repo}/check-runs` with `status` and `conclusion` fields) but the subsequent PR review approval submission fails (e.g. temporary secondary rate limit or GitHub review API error):
 1. The engine records a non-fatal error log.
 2. Because the required status check `merge-verdict` is the authoritative gating mechanism under branch protection, merging remains protected.
 3. The workflow exits with exit code 1, which causes GitHub Actions to flag the run as failed, allowing standard retry mechanics to re-attempt approval submission.
