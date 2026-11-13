@@ -126,7 +126,7 @@ The publisher translates the engine verdict into official GitHub artifacts while
 - **Status Check (Authoritative Gate)**:
   - **Tier 1 (Commit Status Fallback)**: When running under default `GITHUB_TOKEN`, the publisher calls the Commit Status API (`POST /repos/{owner}/{repo}/statuses/{sha}`) with context `merge-verdict`, targeting the event evaluation SHA: `pull_request.head_sha` for pull request events or `merge_group.head_sha` for `merge_group` events. It emits commit status states (`pending`, `success`, `failure`, `error`) and a concise description up to 140 characters.
   - **Tier 2 (Checks API Check Run)**: When authenticated with a dedicated GitHub App installation token, the publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the event evaluation SHA: `pull_request.head_sha` for pull request events or `merge_group.head_sha` for `merge_group` events. It manages the full check run lifecycle (`status: in_progress`, `status: completed` with conclusions `success`, `failure`, or `action_required`), rich Markdown summaries, finding breakdowns, and commit-pinned annotations.
-    As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), both tiers serve as the primary automated merge gate required by branch protection.
+    As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](adr/0002-authoritative-status-check-vs-pr-approval.md), both tiers serve as the primary automated merge gate required by branch protection.
 - **Configurable Approval Provider Abstraction (PR Review Endorsement)**: When verdict is `PASS` and the matched path risk tier permits automated approval, Merge Verdict submits or verifies a formal `APPROVE` review via a configurable provider (`github_copilot` or `github_app`):
   - `github_copilot`: Requests a Copilot code review on `head_sha` (with effort matched to the path risk tier) or verifies an existing active `APPROVE` review from `copilot-pull-request-reviewer[bot]`.
   - `github_app`: Submits an official review (`POST /repos/{owner}/{repo}/pulls/{number}/reviews`) with event `APPROVE` under the Merge Verdict App identity as a dedicated audit endorsement.
@@ -208,8 +208,8 @@ sequenceDiagram
 ## 6. Architectural Alternatives Evaluated
 
 Detailed design rationale and historical alternatives are recorded in:
-- [ADR 0001: Actions-First Hybrid Architecture](docs/adr/0001-actions-first-architecture.md)
-- [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md)
+- [ADR 0001: Actions-First Hybrid Architecture](adr/0001-actions-first-architecture.md)
+- [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](adr/0002-authoritative-status-check-vs-pr-approval.md)
 
 Summary of rejected approaches:
 - **Standalone 24/7 Cloud Service with Database**: Rejected to avoid split-brain review state against GitHub, operational hosting costs, database migration complexity, and customer adoption friction.

@@ -6,7 +6,7 @@ Merge Verdict enforces an evidence-based verification policy before granting pul
 
 The system does not claim to mathematically prove that code is bug-free. Rather, it guarantees **review reconciliation** and **verification-policy satisfaction**: confirming that all configured automated checks have succeeded, all required reviewers have completed evaluation of the current commit, and no unaddressed blocking concerns remain in the pull request review record.
 
-As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), Merge Verdict designates the **required status check (Checks API check run named `merge-verdict`) as the authoritative merge gate**, paired with the **formal GitHub PR review approval (`APPROVE`) as the review endorsement output**. A required check communicates _what_ was verified, against _which_ commit, using _what_ evidence. An approval records _who_ endorsed the changes.
+As established in [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](adr/0002-authoritative-status-check-vs-pr-approval.md), Merge Verdict designates the **required status check (Checks API check run named `merge-verdict`) as the authoritative merge gate**, paired with the **formal GitHub PR review approval (`APPROVE`) as the review endorsement output**. A required check communicates _what_ was verified, against _which_ commit, using _what_ evidence. An approval records _who_ endorsed the changes.
 
 ## 2. Critical Semantic Limitations and Semantic Staleness
 

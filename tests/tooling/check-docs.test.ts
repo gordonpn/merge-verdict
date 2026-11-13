@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -41,7 +41,7 @@ describe("portable documentation checks", () => {
       join(root, "docs", "nested", "guide.md"),
       [
         "[Document relative](../some%20file.md#details)",
-        "[Repository relative](docs/some%20file.md)",
+        "[Repository relative](/docs/some%20file.md)",
         "[Root relative](/README.md)",
         `[Local file](${localUrl}#details)`,
         "[Angle path](<../some file.md>)",
@@ -65,6 +65,79 @@ describe("portable documentation checks", () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toContain("Broken link in docs/nested/broken.md: ../missing.md");
     expect(result.stdout).toContain(missingUrl);
+  });
+
+  it("checks titled and balanced-parenthesis destinations", () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, "README.md"),
+      [
+        "[Single](missing.md 'title')",
+        "[Parenthesized](missing.md (title))",
+        "[Balanced](missing(part).md)",
+      ].join("\n"),
+    );
+    const result = check(root);
+    expect(result.status).toBe(1);
+    expect(result.stdout.match(/Broken link/g)).toHaveLength(3);
+    writeFileSync(join(root, "missing.md"), "");
+    writeFileSync(join(root, "missing(part).md"), "");
+    expect(check(root).status).toBe(0);
+  });
+
+  it("rejects outside paths, symlink escapes, ambiguous fallback and unknown schemes", () => {
+    const root = fixture();
+    const outside = fixture();
+    symlinkSync(outside, join(root, "escape"), "dir");
+    writeFileSync(
+      join(root, "docs", "nested", "guide.md"),
+      [
+        `[Outside](${pathToFileURL(join(outside, "README.md")).href})`,
+        `[Relative outside](${relative(join(root, "docs", "nested"), join(outside, "README.md"))})`,
+        "[Symlink](/escape/README.md)",
+        "[Fallback](README.md)",
+        "[Typo](htps://example.com)",
+      ].join("\n"),
+    );
+    const result = check(root);
+    expect(result.status).toBe(1);
+    expect(result.stdout.match(/Broken link/g)).toHaveLength(5);
+  });
+
+  it("decodes repository root paths", () => {
+    const root = fixture();
+    writeFileSync(join(root, "README.md"), "[Encoded](/docs/some%20file.md)");
+    expect(check(root).status).toBe(0);
+  });
+
+  it("fails closed on traversal errors and converts native file URL paths", () => {
+    const result = spawnSync(
+      "python3",
+      [
+        "-c",
+        `
+import importlib.util
+from pathlib import Path, PureWindowsPath
+from unittest.mock import patch
+import nturl2path
+spec = importlib.util.spec_from_file_location("checker", ${JSON.stringify(checker)})
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+def failed_walk(root, onerror):
+    onerror(PermissionError("unreadable directory"))
+    return []
+with patch.object(module.os, "walk", failed_walk):
+    assert not module.validate(Path("."))
+# Use the Windows stdlib converter and path class on Linux too.
+with patch.object(module, "url2pathname", nturl2path.url2pathname), patch.object(module, "Path", PureWindowsPath), patch.object(module, "contained", return_value=True) as contained:
+    assert module.link_exists("file:///C:/checkout/some%20file.md", PureWindowsPath("C:/checkout/README.md"), PureWindowsPath("C:/checkout"))
+    assert contained.call_args.args[0] == PureWindowsPath("C:/checkout/some file.md")
+`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
   it("keeps punctuation and emoji checks while excluding dependencies", () => {
