@@ -3,6 +3,7 @@
  */
 export const VERSION = "0.1.0";
 
+export type { CollectorRetryEvent, CollectorRetryOptions } from "./collector/client.js";
 export type {
   CollectPullRequestInput,
   GitHubCheckRun,
@@ -26,3 +27,4 @@ export {
 export * from "./config/index.js";
 export * from "./models/index.js";
 export * from "./normalizers/index.js";
+export * from "./policy/index.js";

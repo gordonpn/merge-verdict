@@ -4,19 +4,19 @@
 
 This document outlines the phased, incremental implementation roadmap for Merge Verdict.
 
-The plan prioritizes an **end-to-end vertical slice** first: constructing a working deterministic verification engine capable of evaluating real GitHub review data and publishing status checks, before adding GitHub App identity, edge webhook relays, or optional AI inference.
+The plan prioritizes an **end-to-end vertical slice** first: constructing a working deterministic verification engine capable of evaluating real GitHub review data and publishing status checks, before adding automated dedicated-App token minting, edge webhook relays, or optional AI inference. Checks API publishing is part of the first Action integration, not deferred to Milestone 3.
 
 Every milestone defines concrete dependencies, individual tasks, acceptance criteria, and exact verification commands.
 
 ## 2. Milestone Overview
 
-| Milestone   | Name                           | Core Deliverable                                                                       | Infrastructure Dependency       |
-| ----------- | ------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------- |
-| Milestone 1 | Deterministic Engine           | Pure TypeScript policy engine, normalization adapters, and unit test suite             | None (Local execution)          |
-| Milestone 2 | GitHub Actions Integration     | Reusable Action publishing `merge-verdict` commit status and submitting PR approval    | GitHub Actions (`GITHUB_TOKEN`) |
-| Milestone 3 | GitHub App Integration         | Dedicated bot identity, installation token authentication, and Checks API rich reports | GitHub App registration         |
-| Milestone 4 | Complete Event Coverage        | Edge webhook bridge forwarding `pull_request_review_thread` events                     | Optional Cloudflare Worker      |
-| Milestone 5 | Optional Semantic Verification | OpenAI-compatible LLM escalation for ambiguous unresolved threads                      | OpenAI / DeepSeek API key       |
+| Milestone   | Name                           | Core Deliverable                                                                       | Infrastructure Dependency                          |
+| ----------- | ------------------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Milestone 1 | Deterministic Engine           | Pure TypeScript policy engine, normalization adapters, and unit test suite             | None (Local execution)                             |
+| Milestone 2 | GitHub Actions Integration     | Reusable Action publishing the authoritative Checks API check and eligible PR approval | GitHub Actions; authorized check-write credentials |
+| Milestone 3 | GitHub App Integration         | Dedicated bot identity, automated token minting, and richer check reports              | GitHub App registration                            |
+| Milestone 4 | Complete Event Coverage        | Edge webhook bridge forwarding `pull_request_review_thread` events                     | Optional Cloudflare Worker                         |
+| Milestone 5 | Optional Semantic Verification | OpenAI-compatible LLM escalation for ambiguous unresolved threads                      | OpenAI / DeepSeek API key                          |
 
 ## 3. Milestone 1: Deterministic Engine
 
@@ -72,11 +72,13 @@ just test
 
 ### Objective
 
-Package the engine into a reusable GitHub Action that executes in workflow runs, publishes the `merge-verdict` status check via the Commit Status API, and conditionally submits or delegates PR approval reviews when eligible under the matched risk tier and configured approval provider.
+Package the engine into a reusable GitHub Action that executes in workflow runs, publishes the authoritative `merge-verdict` check run via the Checks API, and conditionally submits or delegates PR approval reviews when eligible under the matched risk tier and configured approval provider.
 
 ### Dependencies
 
 - Milestone 1 completed
+- Credentials with effective `checks: write` permission in a trusted execution context; use an authorized workflow token or a supplied GitHub App installation token. No legacy Commit Status API fallback is supported.
+- Approval-provider permissions and identity when automated approval is enabled; withhold approval if those prerequisites are not met.
 - `@actions/core`, `@actions/github`
 - Build bundler (e.g. `ncc` or `esbuild`) to produce a standalone distribution bundle (`dist/index.js`)
 
@@ -87,7 +89,7 @@ Package the engine into a reusable GitHub Action that executes in workflow runs,
 2. **Define Action Metadata**:
    - Create `action.yml` declaring inputs (`github-token`, `config-path`, `fail-fast`) and outputs (`verdict`, `summary`).
 3. **Implement Status Check Publisher**:
-   - Create `src/publisher/commit-status.ts` calling `POST /repos/{owner}/{repo}/statuses/{sha}` with context `merge-verdict` and state `pending`, `success`, `failure`, or `error`.
+   - Create `src/publisher/checks-api.ts` calling `POST /repos/{owner}/{repo}/check-runs` with name `merge-verdict` on the evaluation SHA. Map PASS to completed/success, PENDING to in_progress/null, and terminal FAIL/STALE/ERROR to a blocking failure or action_required conclusion. Apply the STALE ownership rule before writing; never emit neutral/skipped for non-passing outcomes.
 4. **Implement Conditional PR Review Approval Submitter**:
    - Create `src/publisher/pr-review.ts` calling `POST /repos/{owner}/{repo}/pulls/{number}/reviews` with event `APPROVE` and structured Markdown summary body when the matched path risk tier permits automated approval and the configured approval provider is eligible, or withholding approval when human review is required or provider is `none`.
 5. **Implement Concurrency and Self-Trigger Guard**:
@@ -99,7 +101,9 @@ Package the engine into a reusable GitHub Action that executes in workflow runs,
 
 - Workflow executes successfully on `pull_request` and `pull_request_review` events.
 - On a passing PR, the action posts a green `merge-verdict` status check on the current head commit and submits an `APPROVE` review when eligible under the matched risk tier and configured approval provider (or withholds approval when ineligible).
-- Pushing a new commit immediately reverts the check to `pending` until re-evaluated.
+- Pushing a new commit creates or updates a non-passing check on the new SHA until re-evaluated.
+- An older required reviewer SHA yields PENDING; a head/fingerprint change during evaluation yields STALE. Publication failures withhold approval and never invoke a legacy status publisher.
+- Live integration verifies the required check name, SHA, expected source App, and event permissions under branch protection.
 
 ### Verification Commands
 
@@ -113,7 +117,7 @@ pnpm vitest run tests/action/
 
 ### Objective
 
-Enable Tier 2 authentication via a dedicated GitHub App identity (`merge-verdict[bot]`), supporting rich Markdown reports via the native Checks API and approval reviews without broad repository-level workflow permission overrides.
+Automate authentication via a dedicated GitHub App identity (`merge-verdict[bot]`), supporting rich Markdown reports via the native Checks API and approval reviews without broad repository-level workflow permission overrides.
 
 ### Dependencies
 
@@ -125,8 +129,8 @@ Enable Tier 2 authentication via a dedicated GitHub App identity (`merge-verdict
 
 1. **Implement GitHub App Token Minting**:
    - Support reading GitHub App credentials (`app-id`, `private-key`) to generate installation access tokens at runtime.
-2. **Implement Checks API Publisher**:
-   - Create `src/publisher/checks-api.ts` calling `POST /repos/{owner}/{repo}/check-runs` to create rich check runs named `merge-verdict` featuring detailed Markdown tables, finding breakdowns, and duration metrics.
+2. **Extend Checks API Reports**:
+   - Extend the Milestone 2 `src/publisher/checks-api.ts` publisher with detailed Markdown tables, finding breakdowns, duration metrics, bounded payloads, and annotation batching. The authoritative Checks API gate is already required in Milestone 2.
 3. **Branch Protection Validation**:
    - Validate that check runs created by the GitHub App satisfy required status check branch protection rules.
 4. **Integration Testing**:

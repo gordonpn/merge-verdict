@@ -1,21 +1,22 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { GraphqlResponseError, graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 import type { CheckRunConclusion, CheckRunStatus } from "../models/check-run.js";
+import {
+  type CollectorRetryOptions,
+  createRetryRequest,
+  type RetryRequest,
+  withRestRetries,
+} from "./client.js";
+import CHANGED_FILES_QUERY from "./queries/changed-files.graphql?raw";
+import THREAD_COMMENTS_QUERY from "./queries/review-thread-comments.graphql?raw";
+import REVIEW_THREADS_QUERY from "./queries/review-threads.graphql?raw";
 
 type GraphqlClient = typeof graphql;
-
-function loadQuery(filename: string): string {
-  return readFileSync(new URL(`./queries/${filename}`, import.meta.url), "utf8");
-}
 
 const PAGE_SIZE = 100;
 const POLICY_FILE_PATH = ".github/merge-verdict.yml";
 const REVIEW_THREAD_COMMENT_CONCURRENCY = 5;
-const REVIEW_THREADS_QUERY = loadQuery("review-threads.graphql");
-const CHANGED_FILES_QUERY = loadQuery("changed-files.graphql");
-const THREAD_COMMENTS_QUERY = loadQuery("review-thread-comments.graphql");
 
 interface PageInfo {
   readonly hasNextPage: boolean;
@@ -194,6 +195,11 @@ export interface GitHubCommitStatus {
   readonly updatedAt: string;
 }
 
+/**
+ * Collected security metadata. Required fields may evolve before version 1.0;
+ * typed consumers and fixtures must migrate with collector changes.
+ * See docs/security.md for the isFork migration and fail-closed defaults.
+ */
 export interface GitHubPullRequestData {
   readonly repository: string;
   readonly pullRequestNumber: number;
@@ -201,6 +207,8 @@ export interface GitHubPullRequestData {
   readonly baseSha: string;
   readonly headRef: string;
   readonly baseRef: string;
+  /** Whether the head repository differs from the protected base repository. */
+  readonly isFork: boolean;
   readonly isDraft: boolean;
   readonly mergeable: boolean | null;
   readonly authorLogin: string | null;
@@ -380,6 +388,7 @@ function requireNextCursor(pageInfo: PageInfo, currentCursor: string | null): st
 async function collectThreadComments(
   client: GraphqlClient,
   thread: ReviewThreadNode,
+  retry: RetryRequest,
 ): Promise<GitHubReviewThreadComment[]> {
   const comments = thread.comments.nodes.map(mapThreadComment);
   let pageInfo = thread.comments.pageInfo;
@@ -387,10 +396,12 @@ async function collectThreadComments(
 
   while (pageInfo.hasNextPage) {
     const nextCursor = requireNextCursor(pageInfo, cursor);
-    const page = await client<ReviewThreadCommentsResponse>(THREAD_COMMENTS_QUERY, {
-      threadId: thread.id,
-      cursor: nextCursor,
-    });
+    const page = await retry("thread_comments", () =>
+      client<ReviewThreadCommentsResponse>(THREAD_COMMENTS_QUERY, {
+        threadId: thread.id,
+        cursor: nextCursor,
+      }),
+    );
     if (page.node === null || page.node.comments === undefined) {
       throw new GitHubCollectorError("api", "GitHub returned no review thread for a comment page.");
     }
@@ -407,17 +418,20 @@ async function collectReviewThreads(
   owner: string,
   repo: string,
   pullRequestNumber: number,
+  retry: RetryRequest,
 ): Promise<GitHubReviewThread[]> {
   const threads: GitHubReviewThread[] = [];
   let cursor: string | null = null;
 
   while (true) {
-    const data = await client<ReviewThreadsResponse>(REVIEW_THREADS_QUERY, {
-      owner,
-      repo,
-      number: pullRequestNumber,
-      cursor,
-    });
+    const data = await retry("review_threads", () =>
+      client<ReviewThreadsResponse>(REVIEW_THREADS_QUERY, {
+        owner,
+        repo,
+        number: pullRequestNumber,
+        cursor,
+      }),
+    );
     const pullRequest = data.repository?.pullRequest;
     if (pullRequest === null || pullRequest === undefined) {
       throw new GitHubCollectorError("api", "GitHub returned no pull request review data.");
@@ -439,7 +453,7 @@ async function collectReviewThreads(
           path: thread.path,
           line: thread.line,
           originalLine: thread.originalLine,
-          comments: await collectThreadComments(client, thread),
+          comments: await collectThreadComments(client, thread, retry),
         })),
       );
       threads.push(...mappedThreads);
@@ -457,17 +471,20 @@ async function collectChangedFilePaths(
   owner: string,
   repo: string,
   pullRequestNumber: number,
+  retry: RetryRequest,
 ): Promise<string[]> {
   const paths: string[] = [];
   let cursor: string | null = null;
 
   while (true) {
-    const data = await client<ChangedFilesResponse>(CHANGED_FILES_QUERY, {
-      owner,
-      repo,
-      number: pullRequestNumber,
-      cursor,
-    });
+    const data = await retry("changed_files", () =>
+      client<ChangedFilesResponse>(CHANGED_FILES_QUERY, {
+        owner,
+        repo,
+        number: pullRequestNumber,
+        cursor,
+      }),
+    );
     const pullRequest = data.repository?.pullRequest;
     if (pullRequest === null || pullRequest === undefined) {
       throw new GitHubCollectorError("api", "GitHub returned no pull request file data.");
@@ -523,22 +540,33 @@ async function getPolicyContent(
 
 /**
  * Collects pull request state from GitHub REST and GraphQL APIs.
+ *
+ * Each REST request (including every pagination page) and GraphQL page can retry
+ * three times. All requests within one collection share a 30 second cumulative
+ * sleep budget; server Retry-After/reset deadlines are never shortened to fit it.
+ * Retry state is isolated across concurrent collections, even on shared clients.
+ * Inject clients without additional retry/throttling plugins to preserve bounds.
  */
 export class GitHubCollector {
   constructor(
     private readonly rest: Octokit,
     private readonly graph: GraphqlClient,
+    private readonly retryOptions: CollectorRetryOptions = {},
   ) {}
 
   async collectPullRequest(input: CollectPullRequestInput): Promise<GitHubPullRequestData> {
     try {
-      return await this.collect(input);
+      const retry = createRetryRequest(this.retryOptions);
+      return await withRestRetries(this.rest, retry, () => this.collect(input, retry));
     } catch (error) {
       throw toCollectorError(error);
     }
   }
 
-  private async collect(input: CollectPullRequestInput): Promise<GitHubPullRequestData> {
+  private async collect(
+    input: CollectPullRequestInput,
+    retry: RetryRequest,
+  ): Promise<GitHubPullRequestData> {
     const { owner, repo, pullRequestNumber } = input;
     const { data: pullRequest } = await this.rest.rest.pulls.get({
       owner,
@@ -550,7 +578,7 @@ export class GitHubCollector {
 
     const [changedFilePaths, comments, reviews, checkRuns, statuses, reviewThreads, policyContent] =
       await Promise.all([
-        collectChangedFilePaths(this.graph, owner, repo, pullRequestNumber),
+        collectChangedFilePaths(this.graph, owner, repo, pullRequestNumber, retry),
         this.rest.paginate(this.rest.rest.issues.listComments, {
           owner,
           repo,
@@ -575,7 +603,7 @@ export class GitHubCollector {
           ref: evaluationSha,
           per_page: PAGE_SIZE,
         }),
-        collectReviewThreads(this.graph, owner, repo, pullRequestNumber),
+        collectReviewThreads(this.graph, owner, repo, pullRequestNumber, retry),
         getPolicyContent(this.rest, owner, repo, policyVersion),
       ]);
     const latestStatuses = new Map<string, (typeof statuses)[number]>();
@@ -593,6 +621,7 @@ export class GitHubCollector {
       baseSha: pullRequest.base.sha,
       headRef: pullRequest.head.ref,
       baseRef: pullRequest.base.ref,
+      isFork: pullRequest.head.repo?.full_name !== pullRequest.base.repo.full_name,
       isDraft: pullRequest.draft ?? false,
       mergeable: pullRequest.mergeable ?? null,
       authorLogin: pullRequest.user?.login ?? null,
@@ -649,9 +678,18 @@ export class GitHubCollector {
 /**
  * Creates a collector authenticated with a GitHub token.
  *
+ * Pass `{ debug: (event) => logger.debug(event) }` as the second argument to
+ * observe retries. Events contain only operation, status, attempt and delay
+ * metadata, never request headers, bodies, URLs or error messages. Logging
+ * failures are ignored. sleep/random/now options support deterministic tests.
+ * The factory uses plain Octokit without nested retry or throttling plugins.
+ *
  * @throws {TypeError} If the token is empty or contains only whitespace.
  */
-export function createGitHubCollector(token: string): GitHubCollector {
+export function createGitHubCollector(
+  token: string,
+  retryOptions: CollectorRetryOptions = {},
+): GitHubCollector {
   const authToken = token.trim();
   if (authToken.length === 0) {
     throw new TypeError("A non-empty GitHub token is required to create a GitHubCollector.");
@@ -661,5 +699,5 @@ export function createGitHubCollector(token: string): GitHubCollector {
   const graph = graphql.defaults({
     headers: { authorization: `token ${authToken}` },
   });
-  return new GitHubCollector(rest, graph);
+  return new GitHubCollector(rest, graph, retryOptions);
 }

@@ -32,8 +32,8 @@ function createPullRequestPayload(): object {
     number: pullRequestNumber,
     draft: false,
     mergeable: true,
-    head: { ref: "feature", sha: "head-sha" },
-    base: { ref: "main", sha: "base-sha" },
+    head: { ref: "feature", sha: "head-sha", repo: { full_name: "octocat/hello-world" } },
+    base: { ref: "main", sha: "base-sha", repo: { full_name: "octocat/hello-world" } },
     user: { login: "octocat" },
   };
 }
@@ -138,7 +138,7 @@ function createCollector(fetcher: typeof fetch): GitHubCollector {
     headers: { authorization: "token test-token" },
     request: { fetch: fetcher },
   });
-  return new GitHubCollector(rest, graph);
+  return new GitHubCollector(rest, graph, { sleep: async () => {} });
 }
 
 function nextPageHeaders(url: URL, page: number): Record<string, string> {
@@ -768,7 +768,7 @@ describe("GitHubCollector", () => {
       headers: { authorization: "token sensitive-token-12345" },
       request: { fetch: fetcher },
     });
-    const collector = new GitHubCollector(rest, graph);
+    const collector = new GitHubCollector(rest, graph, { sleep: async () => {} });
 
     const error = await collector
       .collectPullRequest({ ...repository, pullRequestNumber })
