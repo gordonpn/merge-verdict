@@ -15,6 +15,14 @@ test-build:
 test:
     pnpm test
 
+# Run unit tests with code coverage report
+test-coverage:
+    pnpm run test:coverage
+
+# Lint GitHub Actions workflow definitions
+lint-workflows:
+    actionlint
+
 # Audit production dependencies; set audit-level=low to also fail on lower severities
 audit audit-level="high":
     pnpm audit --prod --audit-level={{quote(audit-level)}}

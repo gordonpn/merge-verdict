@@ -2,16 +2,15 @@ import { createHash } from "node:crypto";
 import { GraphqlResponseError, graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 import type { CheckRunConclusion, CheckRunStatus } from "../models/check-run.js";
-import CHANGED_FILES_QUERY from "./queries/changed-files.graphql?raw";
-import THREAD_COMMENTS_QUERY from "./queries/review-thread-comments.graphql?raw";
-import REVIEW_THREADS_QUERY from "./queries/review-threads.graphql?raw";
-
 import {
   type CollectorRetryOptions,
   createRetryRequest,
   type RetryRequest,
   withRestRetries,
 } from "./client.js";
+import CHANGED_FILES_QUERY from "./queries/changed-files.graphql?raw";
+import THREAD_COMMENTS_QUERY from "./queries/review-thread-comments.graphql?raw";
+import REVIEW_THREADS_QUERY from "./queries/review-threads.graphql?raw";
 
 type GraphqlClient = typeof graphql;
 
