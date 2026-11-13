@@ -16,7 +16,7 @@ function extractRawVerdict(body: string): RawVerdict | null {
   if (!match?.[1]) {
     return null;
   }
-  const clean = match[1].trim().toUpperCase();
+  const clean = match[1].replaceAll("_", " ").trim().toUpperCase();
   if (/\bBLOCK\b/.test(clean)) {
     return "BLOCK";
   }

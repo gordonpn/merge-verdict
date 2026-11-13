@@ -124,7 +124,7 @@ function parseReviewBodyFindings(review: GitHubReviewSubmission): NormalizedFind
   const lines = body.split("\n");
   const findings: NormalizedFinding[] = [];
   let activeSection: "nitpick" | "outside_diff" | null = null;
-  let detailsDepth = 0;
+  const sectionStack: ("nitpick" | "outside_diff" | null)[] = [];
   let itemIndex = 1;
 
   for (const rawLine of lines) {
@@ -132,7 +132,7 @@ function parseReviewBodyFindings(review: GitHubReviewSubmission): NormalizedFind
     const lower = trimmed.toLowerCase();
 
     if (lower.includes("<details")) {
-      detailsDepth++;
+      sectionStack.push(activeSection);
     }
 
     if (lower.includes("<summary") || trimmed.startsWith("#")) {
@@ -153,10 +153,7 @@ function parseReviewBodyFindings(review: GitHubReviewSubmission): NormalizedFind
     }
 
     if (lower.includes("</details>")) {
-      detailsDepth = Math.max(0, detailsDepth - 1);
-      if (detailsDepth === 0) {
-        activeSection = null;
-      }
+      activeSection = sectionStack.pop() ?? null;
       continue;
     }
 

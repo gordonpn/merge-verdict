@@ -94,7 +94,7 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
       finding.resolvedBy = thread.resolvedByLogin;
     }
     if (input.repository && firstComment.commitSha && thread.path) {
-      const linePart = typeof lineNum === "number" && lineNum > 0 ? `#L${lineNum}` : "";
+      const linePart = typeof thread.line === "number" && thread.line > 0 ? `#L${thread.line}` : "";
       finding.rawCommentUrl = `https://github.com/${input.repository}/blob/${firstComment.commitSha}/${thread.path}${linePart}`;
     }
     findings.push(finding);
