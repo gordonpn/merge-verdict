@@ -46,7 +46,7 @@ The developer remains responsible for executing the merge. Automatic merging is 
 Merge Verdict adopts an **Actions-first hybrid architecture**:
 - **Runtime**: Runs directly in GitHub Actions runners using Node.js 22+.
 - **No Database**: Reconstructs authoritative state on demand from live GitHub REST and GraphQL APIs, eliminating split-brain risks.
-- **Flexible Identity**: Supports standard `GITHUB_TOKEN` credentials for zero-infrastructure setups, and seamlessly upgrades to dedicated GitHub App installation tokens for native Checks API integration and independent bot identity.
+- **Flexible Identity**: Publishes the authoritative Checks API check run using credentials with effective `checks: write` permission. A dedicated GitHub App installation token provides an independent bot identity; credential choice never substitutes a legacy commit status for the required check run.
 - **Decoupled Engine**: Core logic is implemented as a standalone TypeScript library, allowing it to run within GitHub Actions, a CLI, or an edge worker without modification.
 
 For full architectural details, see [docs/architecture.md](docs/architecture.md).
@@ -54,6 +54,19 @@ For full architectural details, see [docs/architecture.md](docs/architecture.md)
 ## Project Status
 
 Merge Verdict is currently in the **foundation and architecture phase**. The architectural specifications, integration models, verification policies, and implementation roadmap have been established. Application implementation will proceed incrementally according to the milestone roadmap.
+
+## Building
+
+Run `pnpm install --frozen-lockfile`, then `just build` (or `pnpm run build`)
+with Node.js 22.12 or newer. The build produces standalone `dist/index.js`
+(ESM) and `dist/index.cjs` (CommonJS) bundles with source maps. Runtime
+dependencies and GraphQL query text are included in each bundle; Node.js
+built-ins are supplied by the runtime.
+
+Run `pnpm run test:build` to rebuild and verify both distributions in a temporary
+directory without `node_modules` or separate query files. The current entry
+point exports the core library. GitHub Action event handling and `action.yml`
+packaging are implemented separately. Generated `dist/` artifacts remain ignored.
 
 ## Documentation Index
 

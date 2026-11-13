@@ -1,0 +1,53 @@
+name: DeepSeek Review
+
+on:
+  pull_request:
+    types: [ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: runner / deepseek-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Secrets are not available to pull_request events from forks; restrict to same-repository PRs.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    steps:
+      - name: Checkout review prompt
+        if: env.DEEPSEEK_API_KEY != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/prompts/deepseek-review.md
+          sparse-checkout-cone-mode: false
+
+      - name: Read review prompt
+        if: env.DEEPSEEK_API_KEY != ''
+        id: prompt
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          import uuid
+          from pathlib import Path
+
+          prompt = Path(".github/prompts/deepseek-review.md").read_text(encoding="utf-8")
+          delimiter = uuid.uuid4().hex
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"text<<{delimiter}\n{prompt}\n{delimiter}\n")
+          PYTHON
+
+      - name: DeepSeek Code Review
+        if: env.DEEPSEEK_API_KEY != ''
+        uses: hustcer/deepseek-review@v1
+        with:
+          chat-token: ${{ secrets.DEEPSEEK_API_KEY }}
+          sys-prompt: ${{ steps.prompt.outputs.text }}

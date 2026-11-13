@@ -93,7 +93,7 @@ Any custom repository rules configured in `.github/merge-verdict.yml` (such as m
 
 ### 4.2. What the Required Check Records
 
-Merge Verdict uses the GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) created under GitHub App identity rather than simple commit statuses. Check runs provide rich Markdown summaries, detailed finding sections, metrics, and file-level annotations directly within the GitHub PR Checks tab.
+Merge Verdict uses the GitHub Checks API (`POST /repos/{owner}/{repo}/check-runs`) using authorized workflow credentials or a dedicated GitHub App installation token, rather than simple commit statuses. Both require effective `checks: write` permission and verification of the intended source App. Check runs provide rich Markdown summaries, detailed finding sections, metrics, and file-level annotations directly within the GitHub PR Checks tab.
 
 An illustrative check report rendered in the PR Checks tab:
 
@@ -194,9 +194,9 @@ To close the race window where a previously passing check run could be used to m
 3. **Pre-Publication Revalidation**:
    The engine re-verifies that the head SHA and review state fingerprint match the initial snapshot.
 4. **Final Publication**:
-   - If verdict is `PASS`: update check run status to `completed` with conclusion `success` (or commit status state `success`), and execute the configured approval provider (`github_copilot`, `github_app`, or `none`) if the matched path risk tier permits automated approval.
-   - If verdict is `PENDING`: update or maintain check run status as `in_progress` with conclusion `null` (or commit status state `pending`), withholding approvals while awaiting in-flight CI runs or reviewer evaluations.
-   - If verdict is `FAIL` or `ERROR`: update check run status to `completed` with conclusion `failure` or `action_required` (or commit status state `failure` or `error`), and dismiss any prior approval review.
+   - If verdict is `PASS`: update check run status to `completed` with conclusion `success`, and execute the configured approval provider (`github_copilot`, `github_app`, or `none`) if the matched path risk tier permits automated approval.
+   - If verdict is `PENDING`: update or maintain check run status as `in_progress` with conclusion `null`, withholding approvals while awaiting in-flight CI runs or reviewer evaluations.
+   - If verdict is `FAIL` or `ERROR`: update check run status to `completed` with conclusion `failure` or `action_required`, and dismiss any prior approval review.
    - If verdict is `STALE`: re-read the current `merge-verdict` check ownership. Do not publish only when a newer evaluation already owns the check with status `in_progress` or a blocking conclusion. Otherwise, publish a blocking conclusion to prevent a prior success from remaining mergeable.
 5. **Defense in Depth**:
    Repositories should enable GitHub's native "Require conversation resolution before merging" branch protection setting as an independent safeguard against race conditions.
@@ -305,16 +305,18 @@ When `semantic_verification.enabled: true` is configured:
 
 ## 11. Policy Truth Table / Decision Matrix
 
-The following decision matrix defines the final verdict based on system inputs:
+The following decision matrix defines the final verdict based on system inputs. A reviewer record with status `STALE` because it targets an older SHA yields overall `PENDING` while fresh review is required (case 7). Overall `STALE` instead identifies an evaluation whose snapshot changed during execution (case 8). These states must have separate tests.
 
-| Case | Required CI Checks  | Required Reviewers Completed  | Unresolved Blocking Threads | Active CHANGES_REQUESTED | Reviewer Results Fresh? | Snapshot Unchanged? | Verdict   | Check Run Status        | Check Run Conclusion          | Commit Status State | PR Approval Review                        |
-| :--- | :------------------ | :---------------------------- | :-------------------------- | :----------------------- | :---------------------- | :------------------ | :-------- | :---------------------- | :---------------------------- | :------------------ | :---------------------------------------- |
-| 1    | All Success         | All Complete                  | None (All Resolved)         | None                     | Yes                     | Yes                 | `PASS`    | `completed`             | `success`                     | `success`           | Submit `APPROVE` if eligible; or withhold |
-| 2    | Queued / Running    | Any Incomplete                | None                        | None                     | Yes                     | Yes                 | `PENDING` | `in_progress`           | `null`                        | `pending`           | Withhold                                  |
-| 3    | Any Failed          | All Complete                  | None                        | None                     | Yes                     | Yes                 | `FAIL`    | `completed`             | `failure`                     | `failure`           | Withhold / Dismiss                        |
-| 4    | All Success         | Any Incomplete / Rate-Limited | None                        | None                     | Yes                     | Yes                 | `PENDING` | `in_progress`           | `null`                        | `pending`           | Withhold                                  |
-| 5    | All Success         | All Complete                  | >= 1 Unresolved             | None                     | Yes                     | Yes                 | `FAIL`    | `completed`             | `failure`                     | `failure`           | Withhold / Dismiss                        |
-| 6    | All Success         | All Complete                  | None                        | >= 1 Active              | Yes                     | Yes                 | `FAIL`    | `completed`             | `failure`                     | `failure`           | Withhold / Dismiss                        |
-| 7    | All Success         | All Complete                  | None                        | None                     | No (Stale SHA)          | Yes                 | `PENDING` | `in_progress`           | `null`                        | `pending`           | Withhold                                  |
-| 8    | All Success         | All Complete                  | None                        | None                     | Yes                     | No (Race)           | `STALE`   | `completed` or no write | `action_required` or no write | `error` or no write | Withhold / Abort                          |
-| 9    | API Error / Timeout | N/A                           | N/A                         | N/A                      | N/A                     | N/A                 | `ERROR`   | `completed`             | `failure`                     | `error`             | Withhold / Dismiss                        |
+All publication columns describe Checks API check runs. No legacy commit-status publishing fallback is supported. For case 8, no write is allowed only when a newer evaluation already owns an in-progress or blocking check; otherwise publish a blocking conclusion.
+
+| Case | Required CI Checks  | Required Reviewers Completed  | Unresolved Blocking Threads | Active CHANGES_REQUESTED | Reviewer Results Fresh? | Snapshot Unchanged? | Verdict   | Check Run Status        | Check Run Conclusion          | PR Approval Review                        |
+| :--- | :------------------ | :---------------------------- | :-------------------------- | :----------------------- | :---------------------- | :------------------ | :-------- | :---------------------- | :---------------------------- | :---------------------------------------- |
+| 1    | All Success         | All Complete                  | None (All Resolved)         | None                     | Yes                     | Yes                 | `PASS`    | `completed`             | `success`                     | Submit `APPROVE` if eligible; or withhold |
+| 2    | Queued / Running    | Any Incomplete                | None                        | None                     | Yes                     | Yes                 | `PENDING` | `in_progress`           | `null`                        | Withhold                                  |
+| 3    | Any Failed          | All Complete                  | None                        | None                     | Yes                     | Yes                 | `FAIL`    | `completed`             | `failure`                     | Withhold / Dismiss                        |
+| 4    | All Success         | Any Incomplete / Rate-Limited | None                        | None                     | Yes                     | Yes                 | `PENDING` | `in_progress`           | `null`                        | Withhold                                  |
+| 5    | All Success         | All Complete                  | >= 1 Unresolved             | None                     | Yes                     | Yes                 | `FAIL`    | `completed`             | `failure`                     | Withhold / Dismiss                        |
+| 6    | All Success         | All Complete                  | None                        | >= 1 Active              | Yes                     | Yes                 | `FAIL`    | `completed`             | `failure`                     | Withhold / Dismiss                        |
+| 7    | All Success         | All Complete                  | None                        | None                     | No (Stale SHA)          | Yes                 | `PENDING` | `in_progress`           | `null`                        | Withhold                                  |
+| 8    | All Success         | All Complete                  | None                        | None                     | Yes                     | No (Race)           | `STALE`   | `completed` or no write | `action_required` or no write | Withhold / Abort                          |
+| 9    | API Error / Timeout | N/A                           | N/A                         | N/A                      | N/A                     | N/A                 | `ERROR`   | `completed`             | `failure`                     | Withhold / Dismiss                        |

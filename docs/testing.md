@@ -77,10 +77,19 @@ The test suite must explicitly cover the following edge cases:
 
 ### 3.6. Partial Publication Failure
 
-- **Scenario**: Status check publication (`POST /statuses/{sha}`) succeeds, but PR review submission fails due to a network glitch.
+- **Scenario**: Check run publication (`POST /repos/{owner}/{repo}/check-runs`) succeeds, but PR review submission fails due to a network glitch.
 - **Expected Outcome**: Process exits with code 1. Branch protection remains enforced because the status check is the authoritative gate. Subsequent workflow retry succeeds in posting the review.
 
-### 3.7. Base-Branch Policy Authority and Tamper Prevention
+### 3.7. Publishing Contract and Credential Boundaries
+
+- **Scenario**: Evaluate PASS, PENDING, FAIL, ERROR, and a snapshot race using each supported credential model.
+- **Expected Outcome**: Only Checks API writes are attempted: PASS -> completed/success; PENDING -> in_progress/null; terminal non-passing -> completed/failure or action_required. No neutral/skipped conclusion or Commit Status API fallback is emitted.
+- **Restricted Credentials**: Denied check publication reports an error and withholds approval. A legacy status with the same name must not count as successful publication.
+- **STALE Ownership**: An obsolete run leaves a newer in-progress or blocking owner untouched; without that newer owner, it publishes a blocking result rather than preserving earlier success.
+- **Reviewer Staleness**: An unchanged snapshot containing an older required reviewer SHA is PENDING, not overall STALE. Cover this separately from head/fingerprint races.
+- **Live Validation**: Verify the check name, evaluation SHA, source App, effective event permissions, and branch-protection behavior for the chosen credentials. Do not infer that an approval satisfies required-review rules from a successful check write.
+
+### 3.8. Base-Branch Policy Authority and Tamper Prevention
 
 - **Scenario**: A pull request (either from a same-repository branch or an external fork) modifies `.github/merge-verdict.yml` or agent instruction files to relax approval rules or reclassify high-risk paths as low-risk.
 - **Expected Outcome**: Configuration is loaded exclusively from the protected base target branch (e.g. `main` or `pull_request.base.sha`), ignoring unmerged policy edits on the PR head branch.
@@ -117,7 +126,7 @@ For validating live platform interactions before major releases:
 1. **Repository Setup**: A dedicated test repository with branch protection requiring status check `merge-verdict` and 1 approving review.
 2. **Scenario 1 - Negative Path**: Open PR with broken CI and unresolved threads. Assert `merge-verdict` reports `failure` and GitHub blocks merging.
 3. **Scenario 2 - Positive Path**: Fix CI, resolve all threads, simulate reviewer approvals. Assert `merge-verdict` reports `success`, an official `APPROVE` review is posted when eligible under the matched risk tier and configured approval provider (or withheld when human review is required or provider is `none`), and GitHub unlocks the merge button once required reviews are satisfied.
-4. **Scenario 3 - Commit Invalidation**: Push new commit to previously approved PR. Assert `merge-verdict` reverts to `pending` and approval is invalidated.
+4. **Scenario 3 - Commit Invalidation**: Push new commit to previously approved PR. Assert `merge-verdict` becomes `in_progress` with conclusion `null` and approval is invalidated.
 5. **Scenario 4 - Disposable-PR Copilot & Check Gate Validation**:
    - Verify whether native Copilot approval (`copilot-pull-request-reviewer[bot]`) satisfies GitHub's configured required-review threshold.
    - Verify that `merge-verdict` independently blocks merging when failing or in progress, even when a native Copilot `APPROVE` review is active.
