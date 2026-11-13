@@ -15,6 +15,8 @@ import REVIEW_THREADS_QUERY from "./queries/review-threads.graphql?raw";
 type GraphqlClient = typeof graphql;
 
 const PAGE_SIZE = 100;
+const MAX_CONNECTION_ITEMS = 1000;
+const MAX_CONNECTION_PAGES = 10;
 const POLICY_FILE_PATH = ".github/merge-verdict.yml";
 const REVIEW_THREAD_COMMENT_CONCURRENCY = 5;
 
@@ -385,6 +387,42 @@ function requireNextCursor(pageInfo: PageInfo, currentCursor: string | null): st
   return pageInfo.endCursor;
 }
 
+/** Fails collection rather than returning an incomplete verification snapshot. */
+function checkPaginationBounds(
+  operation: string,
+  pages: number,
+  items: number,
+  hasNextPage: boolean,
+): void {
+  if (
+    pages > MAX_CONNECTION_PAGES ||
+    items > MAX_CONNECTION_ITEMS ||
+    (hasNextPage && (pages >= MAX_CONNECTION_PAGES || items >= MAX_CONNECTION_ITEMS))
+  ) {
+    throw new GitHubCollectorError(
+      "api",
+      `Pagination limit exceeded for ${operation}: ${pages} pages, ${items} items, ` +
+        `hasNextPage=${hasNextPage}; maximum ${MAX_CONNECTION_PAGES} pages or ${MAX_CONNECTION_ITEMS} items.`,
+    );
+  }
+}
+
+/** Octokit normalizes paginated REST payloads, including check_runs, into arrays. */
+function boundedRestPages(operation: string) {
+  let pages = 0;
+  let items = 0;
+  return <T>(response: {
+    readonly data: T[];
+    readonly headers: { readonly link?: string };
+  }): T[] => {
+    pages += 1;
+    items += response.data.length;
+    const hasNextPage = /<[^>]+>;\s*rel="next"/.test(response.headers.link ?? "");
+    checkPaginationBounds(operation, pages, items, hasNextPage);
+    return response.data;
+  };
+}
+
 async function collectThreadComments(
   client: GraphqlClient,
   thread: ReviewThreadNode,
@@ -392,6 +430,13 @@ async function collectThreadComments(
 ): Promise<GitHubReviewThreadComment[]> {
   const comments = thread.comments.nodes.map(mapThreadComment);
   let pageInfo = thread.comments.pageInfo;
+  let pages = 1;
+  checkPaginationBounds(
+    `thread_comments:${thread.id}`,
+    pages,
+    comments.length,
+    pageInfo.hasNextPage,
+  );
   let cursor: string | null = null;
 
   while (pageInfo.hasNextPage) {
@@ -408,6 +453,13 @@ async function collectThreadComments(
     cursor = nextCursor;
     comments.push(...page.node.comments.nodes.map(mapThreadComment));
     pageInfo = page.node.comments.pageInfo;
+    pages += 1;
+    checkPaginationBounds(
+      `thread_comments:${thread.id}`,
+      pages,
+      comments.length,
+      pageInfo.hasNextPage,
+    );
   }
 
   return comments;
@@ -421,6 +473,7 @@ async function collectReviewThreads(
   retry: RetryRequest,
 ): Promise<GitHubReviewThread[]> {
   const threads: GitHubReviewThread[] = [];
+  let pages = 0;
   let cursor: string | null = null;
 
   while (true) {
@@ -438,6 +491,13 @@ async function collectReviewThreads(
     }
 
     const connection = pullRequest.reviewThreads;
+    pages += 1;
+    checkPaginationBounds(
+      "review_threads",
+      pages,
+      threads.length + connection.nodes.length,
+      connection.pageInfo.hasNextPage,
+    );
     for (
       let start = 0;
       start < connection.nodes.length;
@@ -474,6 +534,7 @@ async function collectChangedFilePaths(
   retry: RetryRequest,
 ): Promise<string[]> {
   const paths: string[] = [];
+  let pages = 0;
   let cursor: string | null = null;
 
   while (true) {
@@ -491,6 +552,13 @@ async function collectChangedFilePaths(
     }
 
     const connection = pullRequest.files;
+    pages += 1;
+    checkPaginationBounds(
+      "changed_files",
+      pages,
+      paths.length + connection.nodes.length,
+      connection.pageInfo.hasNextPage,
+    );
     paths.push(...connection.nodes.map((file) => file.path));
     if (!connection.pageInfo.hasNextPage) {
       return paths;
@@ -579,30 +647,46 @@ export class GitHubCollector {
     const [changedFilePaths, comments, reviews, checkRuns, statuses, reviewThreads, policyContent] =
       await Promise.all([
         collectChangedFilePaths(this.graph, owner, repo, pullRequestNumber, retry),
-        this.rest.paginate(this.rest.rest.issues.listComments, {
-          owner,
-          repo,
-          issue_number: pullRequestNumber,
-          per_page: PAGE_SIZE,
-        }),
-        this.rest.paginate(this.rest.rest.pulls.listReviews, {
-          owner,
-          repo,
-          pull_number: pullRequestNumber,
-          per_page: PAGE_SIZE,
-        }),
-        this.rest.paginate(this.rest.rest.checks.listForRef, {
-          owner,
-          repo,
-          ref: evaluationSha,
-          per_page: PAGE_SIZE,
-        }),
-        this.rest.paginate(this.rest.rest.repos.listCommitStatusesForRef, {
-          owner,
-          repo,
-          ref: evaluationSha,
-          per_page: PAGE_SIZE,
-        }),
+        this.rest.paginate(
+          this.rest.rest.issues.listComments,
+          {
+            owner,
+            repo,
+            issue_number: pullRequestNumber,
+            per_page: PAGE_SIZE,
+          },
+          boundedRestPages("conversation_comments"),
+        ),
+        this.rest.paginate(
+          this.rest.rest.pulls.listReviews,
+          {
+            owner,
+            repo,
+            pull_number: pullRequestNumber,
+            per_page: PAGE_SIZE,
+          },
+          boundedRestPages("reviews"),
+        ),
+        this.rest.paginate(
+          this.rest.rest.checks.listForRef,
+          {
+            owner,
+            repo,
+            ref: evaluationSha,
+            per_page: PAGE_SIZE,
+          },
+          boundedRestPages("check_runs"),
+        ),
+        this.rest.paginate(
+          this.rest.rest.repos.listCommitStatusesForRef,
+          {
+            owner,
+            repo,
+            ref: evaluationSha,
+            per_page: PAGE_SIZE,
+          },
+          boundedRestPages("commit_statuses"),
+        ),
         collectReviewThreads(this.graph, owner, repo, pullRequestNumber, retry),
         getPolicyContent(this.rest, owner, repo, policyVersion),
       ]);
