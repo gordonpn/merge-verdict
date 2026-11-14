@@ -698,6 +698,9 @@ export class GitHubCollector {
       }
     }
 
+    const headRepoFullName = pullRequest.head.repo?.full_name;
+    const baseRepoFullName = pullRequest.base.repo?.full_name;
+
     return {
       repository: `${owner}/${repo}`,
       pullRequestNumber,
@@ -705,7 +708,7 @@ export class GitHubCollector {
       baseSha: pullRequest.base.sha,
       headRef: pullRequest.head.ref,
       baseRef: pullRequest.base.ref,
-      isFork: pullRequest.head.repo?.full_name !== pullRequest.base.repo.full_name,
+      isFork: !headRepoFullName || !baseRepoFullName || headRepoFullName !== baseRepoFullName,
       isDraft: pullRequest.draft ?? false,
       mergeable: pullRequest.mergeable ?? null,
       authorLogin: pullRequest.user?.login ?? null,
