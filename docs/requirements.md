@@ -134,7 +134,7 @@ Every evaluation must resolve to exactly one of the following five core outcome 
 | `ERROR`        | Verification could not complete reliably due to infrastructure failures, API rate limits, or network errors.                             | `completed`             | `failure` / `action_required` | No                          |
 | `STALE`        | The evaluation snapshot has been superseded by a newer commit or newer review activity.                                                  | `completed` or no write | `action_required` or no write | No                          |
 
-A reviewer result targeting an older SHA leaves the overall verdict `PENDING` while fresh required review is awaited. This differs from overall `STALE`, which means the evaluation snapshot changed during execution. For `STALE`, skip publication only if a newer evaluation already owns an in-progress or blocking check; otherwise publish a blocking conclusion. See the decision matrix in [Verification Policy](docs/verification-policy.md).
+A reviewer result targeting an older SHA leaves the overall verdict `PENDING` while fresh required review is awaited. This differs from overall `STALE`, which means the evaluation snapshot changed during execution. For `STALE`, skip publication only if a newer evaluation already owns an in-progress or blocking check; otherwise publish a blocking conclusion. See the decision matrix in [Verification Policy](verification-policy.md).
 
 ## 5. Non-Functional Requirements
 

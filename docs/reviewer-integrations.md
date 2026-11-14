@@ -41,6 +41,7 @@ This document details:
 - **Merge Verdict Policy Rule**:
   - Sourcery thread resolutions (`resolvedBy.login == "sourcery-ai[bot]"`) accompanied by explicit commit acknowledgements are treated as strong evidence of reconciliation.
   - However, the referenced commit SHA must match an ancestor of the current PR head.
+  - Snapshot callers must supply verified ancestor SHAs through `NormalizeSnapshotOptions.ancestorCommitShas`. The collector does not collect commit ancestry; base and head revisions alone do not prove intermediate ancestry. Without this evidence, only acknowledgements matching the current head can establish reconciliation. Abbreviated SHAs must uniquely match a known commit, ignoring hexadecimal case.
 
 ### 2.3. OpenAI / ChatGPT Codex Connector
 

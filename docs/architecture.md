@@ -127,7 +127,7 @@ The publisher translates the engine verdict into official GitHub artifacts while
   - The publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the event evaluation SHA: `pull_request.head.sha` for pull request events or `merge_group.head_sha` for merge queue events. Both supported credential models use this API.
   - `PASS` completes the check with `success`; `PENDING` keeps it `in_progress` with conclusion `null`; terminal `FAIL`, `STALE`, and `ERROR` use a blocking `failure` or `action_required` conclusion. Never emit `neutral` or `skipped` for non-passing outcomes.
   - For `STALE`, skip writing only if a newer evaluation already owns an in-progress or blocking check. Otherwise publish a blocking result so an earlier success cannot remain mergeable.
-  - As established in [ADR 0002](docs/adr/0002-authoritative-status-check-vs-pr-approval.md), there is no supported legacy Commit Status API publishing fallback. External commit statuses remain collector inputs.
+  - As established in [ADR 0002](adr/0002-authoritative-status-check-vs-pr-approval.md), there is no supported legacy Commit Status API publishing fallback. External commit statuses remain collector inputs.
 - **Configurable Approval Provider Abstraction (PR Review Endorsement)**: When verdict is `PASS` and the matched path risk tier permits automated approval, Merge Verdict submits or verifies a formal `APPROVE` review via a configurable provider (`github_copilot` or `github_app`):
   - `github_copilot`: Requests a Copilot code review on `head_sha` (with effort matched to the path risk tier) or verifies an existing active `APPROVE` review from `copilot-pull-request-reviewer[bot]`.
   - `github_app`: Submits an official review (`POST /repos/{owner}/{repo}/pulls/{number}/reviews`) with event `APPROVE` under the Merge Verdict App identity as a dedicated audit endorsement.
@@ -155,7 +155,7 @@ It is critical to recognize that GitHub Actions and GitHub Apps are complementar
 - GitHub Actions provides the **execution runtime** (compute, triggers, runner containers).
 - A GitHub App provides the **integration identity and authorization** (distinct bot user, fine-grained Checks API access, independent approval authority).
 
-Merge Verdict operates in GitHub Actions in both models. The dedicated App model mints a temporary installation access token from App credentials. A restricted workflow token must produce a setup/publication error and withhold approval rather than switch to commit statuses. See the permission and fork boundaries in [Security Architecture](docs/security.md).
+Merge Verdict operates in GitHub Actions in both models. The dedicated App model mints a temporary installation access token from App credentials. A restricted workflow token must produce a setup/publication error and withhold approval rather than switch to commit statuses. See the permission and fork boundaries in [Security Architecture](security.md).
 
 ## 5. Data Flow and Event-to-Verdict Sequence
 
@@ -209,8 +209,8 @@ sequenceDiagram
 ## 6. Architectural Alternatives Evaluated
 
 Detailed design rationale and historical alternatives are recorded in:
-- [ADR 0001: Actions-First Hybrid Architecture](docs/adr/0001-actions-first-architecture.md)
-- [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](docs/adr/0002-authoritative-status-check-vs-pr-approval.md)
+- [ADR 0001: Actions-First Hybrid Architecture](adr/0001-actions-first-architecture.md)
+- [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](adr/0002-authoritative-status-check-vs-pr-approval.md)
 
 Summary of rejected approaches:
 - **Standalone 24/7 Cloud Service with Database**: Rejected to avoid split-brain review state against GitHub, operational hosting costs, database migration complexity, and customer adoption friction.
