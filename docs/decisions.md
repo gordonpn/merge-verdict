@@ -2,12 +2,12 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
-## 2026-11-10: Bounded API retries and rate-limit backoff in GitHub collector
+## 2026-11-13: Bounded API retries, rate-limit backoff, and fail-closed pagination in GitHub collector
 
-- Decision: Implement bounded exponential backoff and rate-limit handling with strict pagination safety caps across all Octokit PR data collection calls.
+- Decision: Implement bounded exponential backoff, rate-limit handling, and fail-closed pagination safety caps (maximum 10 pages / 1000 items per collection at page size 100) across GraphQL and REST Octokit PR data collection calls.
 - Rationale: Prevents unhandled crashes and API starvation during burst review activity while ensuring large PRs fail closed rather than exhausting runner memory.
 - Rejected alternatives: Relying on default Octokit retries without explicit rate-limit backoff or max-page bounds.
-- Source: [#34 Implement GitHub PR review state collector](https://github.com/gordonpn/merge-verdict/issues/34), [#46 Add bounded API retries and rate-limit backoff](https://github.com/gordonpn/merge-verdict/pull/46)
+- Source: [#34 Implement GitHub PR review state collector](https://github.com/gordonpn/merge-verdict/issues/34), [#46 Add bounded API retries and rate-limit backoff](https://github.com/gordonpn/merge-verdict/pull/46), [#51 Fail closed when pagination exceeds safety bounds](https://github.com/gordonpn/merge-verdict/pull/51)
 
 ## 2026-11-09: Repository configuration schema with base-branch isolation
 
@@ -18,7 +18,7 @@ This document records non-obvious engineering and implementation decisions made 
 
 ## 2026-11-08: Authoritative status checks vs PR approvals
 
-- Decision: Establish the required status check (`merge-verdict` check run via Checks API) as the authoritative merge gate, treating formal PR review approval as a secondary policy-gated convenience output.
+- Decision: Establish the required status check (`merge-verdict` check run via Checks API) as the primary authoritative merge gate, and require a formal PR review with state `APPROVE` as a mandatory second output when eligible under the matched path risk tier.
 - Rationale: Status checks are strictly bound to commit SHAs, are invalidated immediately upon new commits, and carry rich structured metadata, whereas PR approvals can persist across force pushes depending on repository settings.
 - Rejected alternatives: Relying solely on formal PR approval as the merge gate, relying solely on legacy Commit Status API contexts without Checks API metadata.
 - Source: [ADR 0002](adr/0002-authoritative-status-check-vs-pr-approval.md), [#32 Reconcile authoritative status check vs PR review approval](https://github.com/gordonpn/merge-verdict/issues/32), [#33 Establish authoritative status checks and memory authority rules](https://github.com/gordonpn/merge-verdict/pull/33)
