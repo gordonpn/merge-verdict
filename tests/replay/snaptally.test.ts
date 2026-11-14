@@ -58,8 +58,12 @@ async function replay(number: number) {
       };
     } else {
       const path = decodeURIComponent(new URL(url).pathname);
-      if (path.endsWith(`/pulls/${number}`)) data = fixture.pullRequest;
-      else if (path.endsWith(`/issues/${number}/comments`)) data = fixture.comments;
+      if (path.endsWith(`/pulls/${number}`)) {
+        data = {
+          ...fixture.pullRequest,
+          base: { ...fixture.pullRequest.base, repo: { full_name: "fixture-owner/snaptally" } },
+        };
+      } else if (path.endsWith(`/issues/${number}/comments`)) data = fixture.comments;
       else if (path.endsWith("/reviews")) data = fixture.reviews;
       else if (path.endsWith("/check-runs")) data = fixture.checks;
       else if (path.endsWith("/statuses")) data = fixture.statuses;
@@ -113,6 +117,8 @@ describe("offline recorded SnapTally collector replay", () => {
     async (number) => {
       const { fixture, result } = await replay(number);
       expect(result.headSha).toBe(fixture.pullRequest.head.sha);
+      expect(fixture.pullRequest.head).not.toHaveProperty("repo");
+      expect(result.isFork).toBe(true);
       expect(result.reviewThreads).toHaveLength(fixture.threads.length);
       expect(result.changedFilePaths).toEqual(fixture.files.map((file) => file.filename));
       expect(result.reviews.map((review) => review.commitSha)).toEqual(
