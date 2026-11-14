@@ -43,6 +43,10 @@ Unknown request paths throw; no live transport is installed. The protected base
 policy response is an explicitly synthetic test placeholder, outside the
 recordings, to exercise collection without claiming a recorded SnapTally policy.
 The changed-files GraphQL wrapper uses recorded REST file names.
+The pull-request replay adapter adds the synthetic base repository identity
+`fixture-owner/snaptally` matching the collection request. The recordings omit
+repository objects; no head identity is invented, so missing head provenance
+conservatively yields `isFork: true`. Recorded JSON bytes and digests stay unchanged.
 
 The tests verify evidence transport, body digests, neutral CodeRabbit rate-limit
 evidence, Sourcery resolution, and divergent Codex and DeepSeek commit evidence.

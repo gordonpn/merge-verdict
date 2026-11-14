@@ -44,6 +44,7 @@ The developer remains responsible for executing the merge. Automatic merging is 
 ## Architecture
 
 Merge Verdict adopts an **Actions-first hybrid architecture**:
+
 - **Runtime**: Runs directly in GitHub Actions runners using Node.js 22+.
 - **No Database**: Reconstructs authoritative state on demand from live GitHub REST and GraphQL APIs, eliminating split-brain risks.
 - **Flexible Identity**: Publishes the authoritative Checks API check run using credentials with effective `checks: write` permission. A dedicated GitHub App installation token provides an independent bot identity; credential choice never substitutes a legacy commit status for the required check run.
