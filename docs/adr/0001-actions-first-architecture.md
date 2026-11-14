@@ -22,7 +22,7 @@ We adopt the **Actions-First Hybrid Architecture** as the foundational design fo
 
 The core verification logic will be implemented as a pure TypeScript library decoupled from GitHub Actions runtime wrappers. Execution will run within GitHub Actions workflows triggered by native GitHub pull request and review events.
 
-Authentication and event delivery have separate responsibilities, subject to [ADR 0002](docs/adr/0002-authoritative-status-check-vs-pr-approval.md):
+Authentication and event delivery have separate responsibilities, subject to [ADR 0002](0002-authoritative-status-check-vs-pr-approval.md):
 - **Workflow Token**: A trusted workflow can publish the authoritative check run when its `GITHUB_TOKEN` has effective `checks: write` permission. Restricted or fork-event tokens must not silently fall back to commit status publication. Approval emission follows the configured provider and its identity requirements.
 - **Dedicated GitHub App Identity**: An installation access token minted from configured App credentials provides independent check ownership and the `github_app` approval identity. This changes authentication, not the publishing API or verdict rules.
 - **Optional Serverless Webhook Bridge**: For repositories that require immediate re-evaluation upon review thread resolution (which GitHub does not dispatch to Actions workflows natively), an optional serverless worker forwards `pull_request_review_thread` webhooks to repository workflow dispatch events.
