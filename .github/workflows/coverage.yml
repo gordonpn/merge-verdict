@@ -70,7 +70,7 @@ jobs:
 
       - name: Report code coverage
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: zgosalvez/github-actions-report-lcov@eda775f552bfb2bffbdedea26f19dfb8c24a1648 # v4
+        uses: zgosalvez/github-actions-report-lcov@7e6043a0e3ae37bc6e45291401ddea852fc750e5 # v7.2.3
         with:
           coverage-files: coverage/lcov.info
           minimum-coverage: 80
