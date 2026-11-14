@@ -56,6 +56,40 @@ describe("check-diff-coverage", () => {
     ]);
   });
 
+  it("counts uncovered UTF-8 paths quoted by Git separately from the preceding file", () => {
+    const diff = [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -0,0 +1 @@",
+      'diff --git "a/src/caf\\303\\251.ts" "b/src/caf\\303\\251.ts"',
+      '+++ "b/src/caf\\303\\251.ts"',
+      "@@ -0,0 +1 @@",
+    ].join("\n");
+    const result = evaluateDiffCoverage({
+      lcovMap: parseLcov("SF:src/a.ts\nDA:1,1\nend_of_record", "/repo"),
+      diffMap: parseUnifiedDiff(diff),
+    });
+    expect(result.passed).toBe(false);
+    expect(result.totalLines).toBe(2);
+    expect(result.coveredLines).toBe(1);
+    expect(result.uncoveredByFile).toEqual({ "src/café.ts": [1] });
+  });
+
+  it("resets the tracked file at each diff header", () => {
+    const changed = parseUnifiedDiff(
+      [
+        "diff --git a/src/a.ts b/src/a.ts",
+        "+++ b/src/a.ts",
+        "@@ -0,0 +1 @@",
+        "diff --git a/src/deleted.ts b/src/deleted.ts",
+        "+++ /dev/null",
+        "@@ -1 +0,0 @@",
+        "@@ -0,0 +20 @@",
+      ].join("\n"),
+    );
+    expect([...(changed.get("src/a.ts") ?? [])]).toEqual([1]);
+  });
+
   it("fails when uncovered diff lines drop below threshold", () => {
     const lcovMap = parseLcov(
       ["SF:src/a.ts", "DA:10,1", "DA:11,0", "DA:12,0", "end_of_record"].join("\n"),

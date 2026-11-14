@@ -53,6 +53,36 @@ export function parseLcov(lcovText, rootDir = process.cwd()) {
 }
 
 /**
+ * Decode Git's C-style quoted filename, including octal-escaped UTF-8 bytes.
+ * @param {string} path
+ * @returns {string}
+ */
+function unquoteGitPath(path) {
+  if (!path.startsWith('"')) return path;
+  const escapes = { a: "\x07", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v" };
+  const chunks = [];
+  const body = path.slice(1, -1);
+  for (let i = 0; i < body.length; ) {
+    if (body[i] === "\\") {
+      const octal = /^[0-7]{3}/.exec(body.slice(i + 1));
+      if (octal) {
+        chunks.push(Buffer.from([Number.parseInt(octal[0], 8)]));
+        i += 4;
+      } else {
+        const escaped = body[i + 1];
+        chunks.push(Buffer.from(escapes[escaped] ?? escaped));
+        i += 2;
+      }
+    } else {
+      const character = String.fromCodePoint(body.codePointAt(i));
+      chunks.push(Buffer.from(character));
+      i += character.length;
+    }
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
  * Parse unified git diff (-U0) into a map of tracked source files to added/modified line numbers.
  * @param {string} diffText
  * @returns {Map<string, Set<number>>}
@@ -62,8 +92,11 @@ export function parseUnifiedDiff(diffText) {
   let currentFile = null;
 
   for (const line of diffText.split(/\r?\n/)) {
-    if (line.startsWith("+++ b/")) {
-      const path = line.slice(6).replace(/\\/g, "/");
+    if (line.startsWith("diff --git ")) {
+      currentFile = null;
+    } else if (line.startsWith("+++ ")) {
+      const destination = unquoteGitPath(line.slice(4));
+      const path = destination.startsWith("b/") ? destination.slice(2) : "";
       currentFile = isTrackedSourcePath(path) ? path : null;
       if (currentFile && !changed.has(currentFile)) {
         changed.set(currentFile, new Set());
