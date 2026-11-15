@@ -470,6 +470,15 @@ function appendMetadataFooter(params: {
   return lines.join("\n");
 }
 
+function haveSameStringSet(left: readonly string[], right: readonly string[]): boolean {
+  const sortedLeft = [...new Set(left)].sort();
+  const sortedRight = [...new Set(right)].sort();
+  if (sortedLeft.length !== sortedRight.length) {
+    return false;
+  }
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
+}
+
 function formatError(error: unknown): string {
   return sanitizeDiagnostic(error instanceof Error ? error.message : String(error));
 }
@@ -568,6 +577,11 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
 
   try {
     failFast = parseBooleanInput(getActionInput("fail-fast", env), false);
+    if (configPath !== DEFAULT_CONFIG_FILE_PATH) {
+      throw new Error(
+        `Unsupported config-path "${configPath}": protected-base collection only reads "${DEFAULT_CONFIG_FILE_PATH}".`,
+      );
+    }
     const token = getActionInput("github-token", env) || env.GITHUB_TOKEN?.trim() || "";
     collector = options.collector ?? (options.createCollector ?? createGitHubCollector)(token);
     initialPrData = await collector.collectPullRequest({
@@ -614,9 +628,16 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
       capturedAt: evaluatedAt,
       ...(options.normalizers ? { normalizers: options.normalizers } : {}),
     });
+    const baseOrPathsChanged =
+      finalPrData.baseSha !== initialPrData.baseSha ||
+      finalPrData.policyVersion !== initialPrData.policyVersion ||
+      finalPrData.policyContent !== initialPrData.policyContent ||
+      !haveSameStringSet(finalPrData.changedFilePaths, initialPrData.changedFilePaths);
     finalSnapshot = {
       headSha: finalReviewSnapshot.headSha,
-      stateFingerprint: finalReviewSnapshot.stateFingerprint,
+      stateFingerprint: baseOrPathsChanged
+        ? `stale-policy-or-paths:${snapshot.stateFingerprint}`
+        : finalReviewSnapshot.stateFingerprint,
     };
   } catch (error) {
     executionErrors.push(formatError(error));
@@ -631,9 +652,7 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
     });
   }
 
-  const codeEvidenceSatisfied =
-    options.codeEvidenceSatisfied ??
-    (!config.semanticVerification.enabled || unresolvedThreadIds.length === 0 ? true : undefined);
+  const codeEvidenceSatisfied = options.codeEvidenceSatisfied;
 
   const evaluation = evaluatePolicy({
     snapshot,

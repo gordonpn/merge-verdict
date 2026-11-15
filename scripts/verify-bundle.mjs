@@ -58,9 +58,20 @@ function verifyStandaloneActionArtifacts() {
       });
     }
 
-    const actionCjs = createRequire(pathToFileURL(join(isolatedDirectory, "action.cjs")))(
-      join(isolatedDirectory, "action.cjs"),
-    );
+    const previousAutorunDisable = process.env.MERGE_VERDICT_DISABLE_AUTORUN;
+    process.env.MERGE_VERDICT_DISABLE_AUTORUN = "true";
+    let actionCjs;
+    try {
+      actionCjs = createRequire(pathToFileURL(join(isolatedDirectory, "action.cjs")))(
+        join(isolatedDirectory, "action.cjs"),
+      );
+    } finally {
+      if (previousAutorunDisable === undefined) {
+        delete process.env.MERGE_VERDICT_DISABLE_AUTORUN;
+      } else {
+        process.env.MERGE_VERDICT_DISABLE_AUTORUN = previousAutorunDisable;
+      }
+    }
     verifyActionBundleExports(actionCjs, actionCjs);
   } finally {
     rmSync(isolatedDirectory, { recursive: true, force: true });

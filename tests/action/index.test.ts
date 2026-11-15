@@ -476,6 +476,7 @@ describe("runAction end-to-end orchestration", () => {
     const result = await runAction({
       env: baseEnv(),
       createCollector,
+      codeEvidenceSatisfied: true,
     });
 
     expect(result.verdict).toBe("PASS");
@@ -522,6 +523,7 @@ describe("runAction end-to-end orchestration", () => {
       env: baseEnv({ "INPUT_FAIL-FAST": "true" }),
       collector,
       now: fixedNow,
+      codeEvidenceSatisfied: true,
     });
 
     expect(result.verdict).toBe("PENDING");
@@ -766,7 +768,92 @@ describe("runAction end-to-end orchestration", () => {
       now: fixedNow,
       requireIssueLink: true,
       pullRequestBody: "Closes #13",
+      codeEvidenceSatisfied: true,
     });
     expect(linkedIssueRun.verdict).toBe("PASS");
+  });
+
+  it("keeps required code evidence PENDING when semantic verification is disabled and no attestation is supplied", async () => {
+    const fixture = createPullRequestFixture();
+    const collector: PullRequestCollector = {
+      collectPullRequest: vi.fn().mockResolvedValue(fixture),
+    };
+
+    const result = await runAction({
+      env: baseEnv(),
+      collector,
+      now: fixedNow,
+    });
+
+    expect(result.verdict).toBe("PENDING");
+    expect(result.evaluation?.reasons).toContainEqual(
+      expect.objectContaining({
+        condition: 8,
+        outcome: "PENDING",
+        code: "CODE_EVIDENCE_MISSING",
+        subject: "code-evidence",
+      }),
+    );
+  });
+
+  it("rejects non-default config-path inputs instead of silently loading .github/merge-verdict.yml", async () => {
+    const collectPullRequest = vi.fn();
+    const collector: PullRequestCollector = { collectPullRequest };
+
+    const result = await runAction({
+      env: baseEnv({ "INPUT_CONFIG-PATH": ".github/custom-policy.yml" }),
+      collector,
+      now: fixedNow,
+    });
+
+    expect(result.verdict).toBe("ERROR");
+    expect(result.summary).toContain("Unsupported config-path");
+    expect(collectPullRequest).not.toHaveBeenCalled();
+  });
+
+  it("returns STALE when base policy or changed files mutate between initial and final collection", async () => {
+    const initialFixture = createPullRequestFixture();
+    const mutatedPolicyFixture = createPullRequestFixture({
+      policyVersion: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    });
+    const policyCollector: PullRequestCollector = {
+      collectPullRequest: vi
+        .fn()
+        .mockResolvedValueOnce(initialFixture)
+        .mockResolvedValueOnce(mutatedPolicyFixture),
+    };
+
+    const stalePolicyRun = await runAction({
+      env: baseEnv(),
+      collector: policyCollector,
+      now: fixedNow,
+      codeEvidenceSatisfied: true,
+    });
+    expect(stalePolicyRun.verdict).toBe("STALE");
+    expect(stalePolicyRun.evaluation?.reasons).toContainEqual(
+      expect.objectContaining({
+        condition: 6,
+        outcome: "STALE",
+        code: "SNAPSHOT_CHANGED",
+      }),
+    );
+
+    const mutatedPathsFixture = createPullRequestFixture({
+      changedFilePaths: ["docs/guide.md", "src/critical.ts"],
+    });
+    const pathsCollector: PullRequestCollector = {
+      collectPullRequest: vi
+        .fn()
+        .mockResolvedValueOnce(initialFixture)
+        .mockResolvedValueOnce(mutatedPathsFixture),
+    };
+
+    const stalePathsRun = await runAction({
+      env: baseEnv(),
+      collector: pathsCollector,
+      now: fixedNow,
+      codeEvidenceSatisfied: true,
+    });
+    expect(stalePathsRun.verdict).toBe("STALE");
   });
 });
