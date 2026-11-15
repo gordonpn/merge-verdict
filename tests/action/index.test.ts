@@ -692,6 +692,82 @@ describe("runAction end-to-end orchestration", () => {
     expect(published?.output.summary.length).toBeLessThan(400);
   });
 
+  it("uses the checks-client factory and blocks policy errors even if error-publication head lookup fails", async () => {
+    const checks = createChecksFixture();
+    vi.mocked(checks.client.getHeadSha)
+      .mockResolvedValueOnce(createPullRequestFixture().headSha)
+      .mockRejectedValueOnce(new Error("lookup failed"));
+    const createChecksClient = vi.fn().mockReturnValue(checks.client);
+    const result = await executeAction({
+      env: baseEnv(),
+      createChecksClient,
+      collector: { collectPullRequest: vi.fn().mockRejectedValue(new Error("policy unavailable")) },
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(createChecksClient).toHaveBeenCalledWith("test-token");
+    expect(checks.createCheckRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headSha: createPullRequestFixture().headSha,
+        conclusion: "failure",
+      }),
+    );
+  });
+
+  it("authenticates the default Octokit client before trusting the publication head", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ head: { sha: "invalid" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const collectPullRequest = vi.fn();
+      const result = await executeAction({
+        env: baseEnv(),
+        collector: { collectPullRequest },
+        now: fixedNow,
+      });
+      expect(result.verdict).toBe("ERROR");
+      expect(result.summary).toContain("valid head SHA");
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(collectPullRequest).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses malformed authenticated head SHAs before collection or publication", async () => {
+    const checks = createChecksFixture();
+    vi.mocked(checks.client.getHeadSha).mockResolvedValue("invalid");
+    const collectPullRequest = vi.fn();
+    const result = await runAction({
+      env: baseEnv(),
+      checksClient: checks.client,
+      collector: { collectPullRequest },
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(result.summary).toContain("valid head SHA");
+    expect(collectPullRequest).not.toHaveBeenCalled();
+    expect(checks.createCheckRun).not.toHaveBeenCalled();
+  });
+
+  it("retains collection and error-publication diagnostics when the blocking write fails", async () => {
+    const checks = createChecksFixture();
+    checks.createCheckRun.mockRejectedValue(new Error("checks unavailable"));
+    const result = await runAction({
+      env: baseEnv(),
+      checksClient: checks.client,
+      collector: { collectPullRequest: vi.fn().mockRejectedValue(new Error("policy unavailable")) },
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(result.summary).toContain("policy unavailable");
+    expect(result.summary).toContain("Check publication failed: checks unavailable");
+  });
+
   it("does not publish when authenticated head resolution fails or only payload repository exists", async () => {
     const checks = createChecksFixture();
     vi.mocked(checks.client.getHeadSha).mockRejectedValue(new Error("not found"));
@@ -861,6 +937,66 @@ describe("runAction end-to-end orchestration", () => {
     expect(failFastRun.exitCode).toBe(1);
     expect(process.exitCode).toBe(1);
   });
+
+  it.each(["conversation", "thread"])(
+    "rejects PASS after a same-SHA %s comment edit",
+    async (kind) => {
+      const comment = {
+        id: "comment",
+        authorLogin: "octocat",
+        body: "original",
+        bodyDigest: "original-digest",
+        createdAt: "2026-11-14T12:00:00Z",
+        updatedAt: "2026-11-14T12:00:00Z",
+        path: null,
+        line: null,
+        originalLine: null,
+        commitSha: null,
+      };
+      const fixture = createPullRequestFixture(
+        kind === "conversation"
+          ? {
+              conversationComments: [{ ...comment, id: 55 }],
+            }
+          : {
+              reviewThreads: [
+                {
+                  id: "thread",
+                  isResolved: true,
+                  resolvedByLogin: "octocat",
+                  isOutdated: false,
+                  path: null,
+                  line: null,
+                  originalLine: null,
+                  comments: [comment],
+                },
+              ],
+            },
+      );
+      const edited = {
+        ...comment,
+        body: "edited",
+        bodyDigest: "edited-digest",
+        updatedAt: "2026-11-14T12:01:00Z",
+      };
+      const latest = {
+        ...fixture,
+        ...(kind === "conversation"
+          ? { conversationComments: [{ ...edited, id: 55 }] }
+          : {
+              reviewThreads: fixture.reviewThreads.map((thread) => ({
+                ...thread,
+                comments: [edited],
+              })),
+            }),
+      };
+      const collector = {
+        collectPullRequest: vi.fn().mockResolvedValueOnce(fixture).mockResolvedValueOnce(latest),
+      };
+      const result = await runAction({ env: baseEnv(), collector, now: fixedNow });
+      expect(result.verdict).toBe("STALE");
+    },
+  );
 
   it("returns STALE when the final snapshot head SHA mutates during evaluation", async () => {
     const initialFixture = createPullRequestFixture();

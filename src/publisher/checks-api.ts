@@ -445,11 +445,18 @@ export async function publishErrorCheckRun(
   input: PublishErrorCheckRunInput,
 ): Promise<PublishCheckRunResult> {
   const checkName = input.checkName ?? DEFAULT_CHECK_NAME;
-  const currentHeadSha = await client.getHeadSha({
-    owner: input.owner,
-    repo: input.repo,
-    pullNumber: input.pullNumber,
-  });
+  // A lookup failure cannot leave an evaluated, previously passing check green.
+  // The authenticated evaluated SHA remains a safe target for blocking publication.
+  let currentHeadSha = input.headSha;
+  try {
+    currentHeadSha = await client.getHeadSha({
+      owner: input.owner,
+      repo: input.repo,
+      pullNumber: input.pullNumber,
+    });
+  } catch {
+    // Preserve ERROR and continue through the existing ownership checks.
+  }
   const effectiveVerdict: "ERROR" | "STALE" = currentHeadSha === input.headSha ? "ERROR" : "STALE";
 
   const existingRuns = await client.listCheckRunsForRef({
