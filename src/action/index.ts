@@ -744,7 +744,22 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
     });
     evaluation = { ...evaluation, verdict: publication.verdict };
   } catch (error) {
-    const diagnostic = formatError(error);
+    let diagnostic = formatError(error);
+    try {
+      await publishErrorCheckRun(checksClient, {
+        owner: repository.owner,
+        repo: repository.repo,
+        pullNumber: pullRequestNumber,
+        headSha: snapshot.headSha,
+        evaluatedAt,
+        errorCode: "PUBLICATION_ERROR",
+        errorMessage: diagnostic,
+      });
+    } catch (invalidationError) {
+      diagnostic = sanitizeDiagnostic(
+        `${diagnostic}; Blocking check publication also failed: ${formatError(invalidationError)}`,
+      );
+    }
     return failBeforeSnapshot({
       env,
       repository: repository.fullName,

@@ -611,6 +611,46 @@ describe("runAction end-to-end orchestration", () => {
     );
   });
 
+  it("invalidates a previous passing check when final freshness collection fails", async () => {
+    const checks = createChecksFixture();
+    const fixture = createPullRequestFixture();
+    vi.mocked(checks.client.listCheckRunsForRef).mockResolvedValue([
+      {
+        id: 1,
+        name: "merge-verdict",
+        headSha: fixture.headSha,
+        status: "completed",
+        conclusion: "success",
+        htmlUrl: "",
+        externalId: `merge-verdict:${fixture.headSha}`,
+      },
+    ]);
+    const collector = {
+      collectPullRequest: vi
+        .fn()
+        .mockResolvedValueOnce(fixture)
+        .mockResolvedValueOnce(fixture)
+        .mockRejectedValueOnce(new Error("final freshness collection failed")),
+    };
+    const result = await runAction({
+      env: baseEnv(),
+      collector,
+      checksClient: checks.client,
+      codeEvidenceSatisfied: true,
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(result.exitCode).toBe(1);
+    expect(checks.updateCheckRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checkRunId: 1,
+        status: "completed",
+        conclusion: "failure",
+      }),
+    );
+    expect(checks.createCheckRun).not.toHaveBeenCalled();
+  });
+
   it("fails the Action when publication fails even when fail-fast is disabled", async () => {
     const checks = createChecksFixture();
     checks.createCheckRun.mockRejectedValue(new Error("permission denied"));
