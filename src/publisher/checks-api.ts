@@ -24,6 +24,7 @@ export interface ExistingCheckRun {
   readonly htmlUrl: string;
   readonly appId?: number | null;
   readonly externalId?: string | null;
+  readonly annotationsCount?: number;
 }
 
 export interface PublishedCheckRun {
@@ -73,6 +74,7 @@ export interface ChecksClient {
   }): Promise<readonly ExistingCheckRun[]>;
   createCheckRun(params: CreateCheckRunParams): Promise<PublishedCheckRun>;
   updateCheckRun(params: UpdateCheckRunParams): Promise<PublishedCheckRun>;
+  readonly ownedExternalIdPrefix?: string;
   isOwnedCheckRun(checkRun: ExistingCheckRun): boolean;
 }
 
@@ -199,6 +201,7 @@ export function createOctokitChecksClient(
   const api = octokit.rest ?? octokit;
   const externalIdPrefix = options.ownedExternalIdPrefix ?? DEFAULT_OWNED_EXTERNAL_ID_PREFIX;
   return {
+    ownedExternalIdPrefix: externalIdPrefix,
     async getHeadSha(target) {
       const { data } = await api.pulls.get({
         owner: target.owner,
@@ -224,6 +227,7 @@ export function createOctokitChecksClient(
         htmlUrl: run.html_url ?? "",
         appId: run.app?.id ?? null,
         externalId: run.external_id ?? null,
+        annotationsCount: run.output?.annotations_count ?? 0,
       }));
     },
     async createCheckRun(params) {
@@ -318,6 +322,12 @@ function shouldSkipStaleOverwrite(
   );
 }
 
+// GitHub PATCH /check-runs/{id} appends annotations instead of replacing them,
+// so any owned check run that already holds annotations must be superseded by a fresh run.
+function canReuseCheckRun(existing: ExistingCheckRun | undefined): existing is ExistingCheckRun {
+  return existing !== undefined && (existing.annotationsCount ?? 0) === 0;
+}
+
 /**
  * Publishes or updates the authoritative merge-verdict check run with pre-flight
  * head and fingerprint freshness verification, ownership filtering, and 50-item
@@ -335,9 +345,13 @@ export async function publishCheckRun(
     pullNumber: input.pullNumber,
   });
   let isFresh = currentHeadSha === headSha;
-  if (isFresh && input.getLatestStateFingerprint !== undefined) {
-    const latestFingerprint = await input.getLatestStateFingerprint();
-    isFresh = latestFingerprint === input.snapshot.stateFingerprint;
+  if (isFresh) {
+    if (input.getLatestStateFingerprint !== undefined) {
+      const latestFingerprint = await input.getLatestStateFingerprint();
+      isFresh = latestFingerprint === input.snapshot.stateFingerprint;
+    } else if (input.verdict === "PASS") {
+      isFresh = false;
+    }
   }
   const effectiveVerdict: PublisherVerdict = isFresh ? input.verdict : "STALE";
 
@@ -371,12 +385,14 @@ export async function publishCheckRun(
   const initialOutput: CheckRunOutputPayload =
     firstBatch !== undefined ? { ...report.output, annotations: firstBatch } : { ...report.output };
 
+  const externalIdPrefix = client.ownedExternalIdPrefix ?? DEFAULT_OWNED_EXTERNAL_ID_PREFIX;
+  const reusableOwned = canReuseCheckRun(latestOwned) ? latestOwned : undefined;
   let published: PublishedCheckRun;
-  if (latestOwned !== undefined) {
+  if (reusableOwned !== undefined) {
     published = await client.updateCheckRun({
       owner: input.owner,
       repo: input.repo,
-      checkRunId: latestOwned.id,
+      checkRunId: reusableOwned.id,
       status: checkState.status,
       conclusion: checkState.conclusion,
       ...(checkState.status === "completed" ? { completedAt: input.evaluatedAt } : {}),
@@ -390,7 +406,7 @@ export async function publishCheckRun(
       headSha,
       status: checkState.status,
       conclusion: checkState.conclusion,
-      externalId: `${DEFAULT_OWNED_EXTERNAL_ID_PREFIX}${headSha}`,
+      externalId: `${externalIdPrefix}${headSha}`,
       startedAt: input.evaluatedAt,
       ...(checkState.status === "completed" ? { completedAt: input.evaluatedAt } : {}),
       output: initialOutput,
@@ -410,7 +426,7 @@ export async function publishCheckRun(
   }
 
   return {
-    action: latestOwned !== undefined ? "updated" : "created",
+    action: reusableOwned !== undefined ? "updated" : "created",
     verdict: effectiveVerdict,
     headSha,
     status: checkState.status,
@@ -462,12 +478,14 @@ export async function publishErrorCheckRun(
   });
   const checkState = mapVerdictToCheckState(effectiveVerdict);
 
+  const externalIdPrefix = client.ownedExternalIdPrefix ?? DEFAULT_OWNED_EXTERNAL_ID_PREFIX;
+  const reusableOwned = canReuseCheckRun(latestOwned) ? latestOwned : undefined;
   const published =
-    latestOwned !== undefined
+    reusableOwned !== undefined
       ? await client.updateCheckRun({
           owner: input.owner,
           repo: input.repo,
-          checkRunId: latestOwned.id,
+          checkRunId: reusableOwned.id,
           status: checkState.status,
           conclusion: checkState.conclusion,
           completedAt: input.evaluatedAt,
@@ -480,14 +498,14 @@ export async function publishErrorCheckRun(
           headSha: input.headSha,
           status: checkState.status,
           conclusion: checkState.conclusion,
-          externalId: `${DEFAULT_OWNED_EXTERNAL_ID_PREFIX}${input.headSha}`,
+          externalId: `${externalIdPrefix}${input.headSha}`,
           startedAt: input.evaluatedAt,
           completedAt: input.evaluatedAt,
           output,
         });
 
   return {
-    action: latestOwned !== undefined ? "updated" : "created",
+    action: reusableOwned !== undefined ? "updated" : "created",
     verdict: effectiveVerdict,
     headSha: input.headSha,
     status: checkState.status,

@@ -127,6 +127,7 @@ describe("publishCheckRun", () => {
       verdict: "PASS",
       evaluatedAt,
       requiredChecks: ["ci"],
+      getLatestStateFingerprint: async () => snapshot.stateFingerprint,
     });
 
     expect(result).toEqual({
@@ -244,14 +245,16 @@ describe("publishCheckRun", () => {
     });
     const client = makeClient([foreignRun, wrongNameRun, wrongShaRun]);
 
+    const snapshot = makeSnapshot();
     const result = await publishCheckRun(client, {
       owner: "owner",
       repo: "repo",
       pullNumber: 42,
-      snapshot: makeSnapshot(),
+      snapshot,
       verdict: "PASS",
       evaluatedAt,
       requiredChecks: ["ci"],
+      getLatestStateFingerprint: async () => snapshot.stateFingerprint,
     });
 
     expect(result.action).toBe("created");
@@ -411,14 +414,16 @@ describe("publishCheckRun", () => {
     const client = makeClient([existingSuccess]);
     client.getHeadSha = vi.fn(async () => "moved-head");
 
+    const snapshot = makeSnapshot();
     const result = await publishCheckRun(client, {
       owner: "owner",
       repo: "repo",
       pullNumber: 42,
-      snapshot: makeSnapshot(),
+      snapshot,
       verdict: "PASS",
       evaluatedAt,
       requiredChecks: ["ci"],
+      getLatestStateFingerprint: async () => snapshot.stateFingerprint,
     });
 
     expect(result).toEqual({
@@ -435,6 +440,110 @@ describe("publishCheckRun", () => {
         checkRunId: 301,
         status: "completed",
         conclusion: "action_required",
+      }),
+    );
+  });
+
+  it("fails closed to STALE when verdict is PASS without getLatestStateFingerprint", async () => {
+    const existingSuccess = makeExistingRun({
+      id: 302,
+      status: "completed",
+      conclusion: "success",
+    });
+    const client = makeClient([existingSuccess]);
+
+    const result = await publishCheckRun(client, {
+      owner: "owner",
+      repo: "repo",
+      pullNumber: 42,
+      snapshot: makeSnapshot(),
+      verdict: "PASS",
+      evaluatedAt,
+      requiredChecks: ["ci"],
+    });
+
+    expect(result.verdict).toBe("STALE");
+    expect(result.conclusion).toBe("action_required");
+    expect(client.updateCheckRun).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        checkRunId: 302,
+        status: "completed",
+        conclusion: "action_required",
+      }),
+    );
+  });
+
+  it("creates a fresh check run instead of appending annotations onto an annotated owned run", async () => {
+    const annotatedRun = makeExistingRun({
+      id: 305,
+      status: "completed",
+      conclusion: "failure",
+      annotationsCount: 2,
+    });
+    const client = makeClient([annotatedRun]);
+    const snapshot = makeSnapshot();
+
+    const result = await publishCheckRun(client, {
+      owner: "owner",
+      repo: "repo",
+      pullNumber: 42,
+      snapshot,
+      verdict: "PASS",
+      evaluatedAt,
+      requiredChecks: ["ci"],
+      getLatestStateFingerprint: async () => snapshot.stateFingerprint,
+    });
+
+    expect(result).toEqual({
+      action: "created",
+      verdict: "PASS",
+      headSha,
+      status: "completed",
+      conclusion: "success",
+      checkRunId: 200,
+      htmlUrl: "https://github.com/owner/repo/runs/200",
+    });
+    expect(client.createCheckRun).toHaveBeenCalledOnce();
+    expect(client.updateCheckRun).not.toHaveBeenCalled();
+  });
+
+  it("uses custom client ownedExternalIdPrefix when creating check runs", async () => {
+    const client = {
+      ...makeClient(),
+      ownedExternalIdPrefix: "custom-gate:",
+    };
+    const snapshot = makeSnapshot();
+
+    await publishCheckRun(client, {
+      owner: "owner",
+      repo: "repo",
+      pullNumber: 42,
+      snapshot,
+      verdict: "PASS",
+      evaluatedAt,
+      requiredChecks: ["ci"],
+      getLatestStateFingerprint: async () => snapshot.stateFingerprint,
+    });
+
+    expect(client.createCheckRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalId: `custom-gate:${headSha}`,
+      }),
+    );
+
+    await publishErrorCheckRun(client, {
+      owner: "owner",
+      repo: "repo",
+      pullNumber: 42,
+      headSha,
+      evaluatedAt,
+      errorCode: "COLLECTION_FAILED",
+      errorMessage: "boom",
+    });
+
+    expect(client.createCheckRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        externalId: `custom-gate:${headSha}`,
       }),
     );
   });
@@ -744,10 +853,14 @@ describe("createOctokitChecksClient", () => {
       checks: { listForRef: vi.fn(), create: vi.fn(), update: vi.fn() },
     } as unknown as Octokit;
 
-    const withAppId = createOctokitChecksClient(directOctokit, { expectedAppId: 77 });
+    const withAppId = createOctokitChecksClient(directOctokit, {
+      expectedAppId: 77,
+      ownedExternalIdPrefix: "custom-gate:",
+    });
+    expect(withAppId.ownedExternalIdPrefix).toBe("custom-gate:");
     expect(
       withAppId.isOwnedCheckRun(
-        makeExistingRun({ appId: 77, externalId: `merge-verdict:${headSha}` }),
+        makeExistingRun({ appId: 77, externalId: `custom-gate:${headSha}` }),
       ),
     ).toBe(true);
     expect(withAppId.isOwnedCheckRun(makeExistingRun({ appId: 77, externalId: null }))).toBe(true);
