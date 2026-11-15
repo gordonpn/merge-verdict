@@ -246,6 +246,10 @@ function createStandardFetch(
       );
     }
 
+    if (pathname.endsWith("/commits")) {
+      return jsonResponse([{ sha: "head-sha" }], {}, requestUrl.href);
+    }
+
     if (pathname.endsWith("/statuses")) {
       const statuses =
         page === 1
@@ -357,6 +361,110 @@ describe("GitHubCollector", () => {
         .filter((url) => url.pathname.endsWith("/statuses"))
         .every((url) => url.pathname.includes("/head-sha/")),
     ).toBe(true);
+  });
+
+  it("collects body and verified head ancestors independently of evaluation SHA", async () => {
+    const standard = createStandardFetch();
+    const ancestryRequests: URL[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith("/commits")) {
+        ancestryRequests.push(url);
+        const page = Number(url.searchParams.get("page") ?? 1);
+        return jsonResponse(
+          page === 1 ? [{ sha: "head-sha" }, { sha: "parent-a" }] : [{ sha: "parent-b" }],
+          { headers: nextPageHeaders(url, page) },
+          url.href,
+        );
+      }
+      if (url.pathname.endsWith("/pulls/123")) {
+        return jsonResponse(
+          { ...createPullRequestPayload(), body: "Reviewer evidence" },
+          {},
+          url.href,
+        );
+      }
+      return standard.fetcher(input, init);
+    };
+    const result = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+      evaluationSha: "merge-sha",
+    });
+    expect(result.body).toBe("Reviewer evidence");
+    expect(result.ancestorCommitShas).toEqual(["parent-a", "parent-b"]);
+    expect(ancestryRequests).toHaveLength(2);
+    expect(ancestryRequests.every((url) => url.searchParams.get("sha") === "head-sha")).toBe(true);
+  });
+
+  it("loads a custom policy path only at the protected base SHA", async () => {
+    const standard = createStandardFetch();
+    const requests: URL[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (decodeURIComponent(url.pathname).includes("/contents/")) {
+        requests.push(url);
+        return jsonResponse(createPolicyContentPayload(), {}, url.href);
+      }
+      return standard.fetcher(input, init);
+    };
+    const result = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+      configPath: "config/verdict.yml",
+    });
+    expect(result.policyContent).toBe("verification: true");
+    expect(requests).toHaveLength(1);
+    expect(decodeURIComponent(requests[0]?.pathname ?? "")).toContain(
+      "/contents/config/verdict.yml",
+    );
+    expect(requests[0]?.searchParams.get("ref")).toBe("base-sha");
+  });
+
+  it.each([
+    "",
+    "/policy.yml",
+    "../policy.yml",
+    "config/../policy.yml",
+    "config//policy.yml",
+    "https://evil.test/policy",
+    "config\\policy.yml",
+    "config/./policy.yml",
+    "policy.yml\n",
+  ])("rejects unsafe config path %j", async (configPath) => {
+    const { fetcher } = createStandardFetch();
+    await expect(
+      createCollector(fetcher).collectPullRequest({ ...repository, pullRequestNumber, configPath }),
+    ).rejects.toMatchObject({ kind: "policy" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(["error", "overflow"])("handles ancestry %s conservatively", async (mode) => {
+    const standard = createStandardFetch();
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith("/commits")) {
+        if (mode === "error")
+          return jsonResponse({ message: "Forbidden" }, { status: 403 }, url.href);
+        const next = new URL(url);
+        next.searchParams.set("page", String(Number(url.searchParams.get("page") ?? 1) + 1));
+        return jsonResponse(
+          [{ sha: "parent" }],
+          { headers: { link: `<${next.href}>; rel="next"` } },
+          url.href,
+        );
+      }
+      return standard.fetcher(input, init);
+    };
+    const result = createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+    });
+    if (mode === "error") {
+      await expect(result).rejects.toMatchObject({ kind: "api" });
+    } else {
+      expect((await result).ancestorCommitShas).toEqual(["parent"]);
+    }
   });
 
   it("paginates GraphQL review threads and comments in pages of 100", async () => {
