@@ -5,6 +5,7 @@
 Merge Verdict is an automated pull request verification and approval system. It operates as an Actions-first engine that queries GitHub APIs to assess review completion, thread resolution, check runs, and reviewer freshness, then publishes a required status check and an official pull request approval review.
 
 The architecture emphasizes:
+
 - **Zero operational overhead**: Runs directly inside GitHub Actions without requiring an external database or persistent compute.
 - **Strict decoupling**: Core verification logic is isolated in an engine library independent of the GitHub Actions runner wrapper.
 - **Fail-closed deterministic execution**: Verification verdicts are computed deterministically from authoritative GitHub snapshots before any optional AI inference is consulted.
@@ -75,6 +76,7 @@ The trigger subsystem is responsible for invoking the verification engine whenev
 The data collector queries the GitHub REST and GraphQL APIs to assemble a coherent point-in-time snapshot of the PR.
 
 Responsibilities:
+
 - Fetch PR metadata: base branch, head branch, head SHA, mergeable status, draft state, author identity, and changed file paths.
 - Query review threads via GraphQL: thread ID, resolution status (`isResolved`), resolved by user, outdated status (`isOutdated`), and thread comment history.
 - Query top-level PR conversation comments: comment ID, author, body, update timestamp, and body digest for reviewer summaries and commands.
@@ -87,6 +89,7 @@ Responsibilities:
 External review tools present findings in radically different formats. The normalization layer converts these heterogeneous outputs into strongly typed `NormalizedFinding` and `ReviewerExecutionRecord` objects.
 
 Standardized adapter responsibilities:
+
 - **CodeRabbit Adapter**: Parses summary comments, identifies free-tier rate limit warnings (which produce neutral check runs without actual review), extracts inline actionable findings, and filters out high-level change summaries and promotional links.
 - **Sourcery Adapter**: Extracts inline review comments, maps severity badges (High, Medium, Low) to normalized severities, tracks explicit author acknowledgements (such as `Addressed in [commit]`), and recognizes bot thread resolutions.
 - **Codex Adapter**: Detects machine-readable review state markers (such as `<!-- codex-review-state:v1 ... -->`), extracts target commit SHA, verification status, and unresolved finding counters.
@@ -100,6 +103,7 @@ Standardized adapter responsibilities:
 The core policy engine evaluates the normalized snapshot against configured rules without calling external AI models.
 
 Responsibilities:
+
 - **Required Check Rule**: Asserts that every configured CI check has completed with conclusion `success`, or with `neutral` or `skipped` when explicitly permitted by repository configuration.
 - **Reviewer Completion Rule**: Asserts that all mandatory reviewers have posted completed reviews for the current PR snapshot.
 - **Thread Resolution Rule**: Asserts that no review threads remain unresolved, or that all unresolved threads are non-blocking advisory notes according to policy.
@@ -113,6 +117,7 @@ Responsibilities:
 When deterministic rules encounter ambiguous findings (for example, a thread left unresolved where the developer pushed a commit claiming a fix, but the reviewer has not acknowledged it), the policy engine can escalate the specific finding to the semantic engine.
 
 Characteristics:
+
 - Communicates with any OpenAI-compatible API endpoint (such as DeepSeek).
 - Conditioned on configured effort tiers (`lite`, `balanced`, `max`) so expensive semantic inference is invoked only for unresolved ambiguity or high-risk file paths.
 - Receives only the isolated finding, the specific code diff hunk, and developer comments.
@@ -123,6 +128,7 @@ Characteristics:
 ### 3.6. Verdict and Approval Publisher
 
 The publisher translates the engine verdict into official GitHub artifacts while separating the verification assessment, approval emission eligibility, and branch-protection recognition:
+
 - **Status Check (Authoritative Gate)**:
   - The publisher calls the Checks API (`POST /repos/{owner}/{repo}/check-runs`) targeting the event evaluation SHA: `pull_request.head.sha` for pull request events or `merge_group.head_sha` for merge queue events. Both supported credential models use this API.
   - `PASS` completes the check with `success`; `PENDING` keeps it `in_progress` with conclusion `null`; terminal `FAIL`, `STALE`, and `ERROR` use a blocking `failure` or `action_required` conclusion. Never emit `neutral` or `skipped` for non-passing outcomes.
@@ -152,6 +158,7 @@ Merge Verdict supports two credential models with the same Checks API publicatio
 ### Relationship Between Actions and GitHub App
 
 It is critical to recognize that GitHub Actions and GitHub Apps are complementary:
+
 - GitHub Actions provides the **execution runtime** (compute, triggers, runner containers).
 - A GitHub App provides the **integration identity and authorization** (distinct bot user, fine-grained Checks API access, independent approval authority).
 
@@ -209,10 +216,12 @@ sequenceDiagram
 ## 6. Architectural Alternatives Evaluated
 
 Detailed design rationale and historical alternatives are recorded in:
+
 - [ADR 0001: Actions-First Hybrid Architecture](adr/0001-actions-first-architecture.md)
 - [ADR 0002: Authoritative Required Status Check vs. Formal PR Approval](adr/0002-authoritative-status-check-vs-pr-approval.md)
 
 Summary of rejected approaches:
+
 - **Standalone 24/7 Cloud Service with Database**: Rejected to avoid split-brain review state against GitHub, operational hosting costs, database migration complexity, and customer adoption friction.
 - **Pure Actions Without GitHub App Support**: Rejected as the sole design because event permissions can restrict workflow tokens, approval providers need suitable identities, and thread resolution requires optional event bridging.
 - **Formal PR Approval as Primary Merge Gate**: Rejected because PR authors cannot approve own PRs, human review thresholds conflict with bot approvals, and approvals do not dismiss automatically on new review comments on unchanged commits.

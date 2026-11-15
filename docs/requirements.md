@@ -9,6 +9,7 @@ In modern AI-assisted engineering workflows, coding agents (such as Codex CLI, O
 Engineers must manually check whether all automated reviewers have finished, reconcile multiple comment formats, confirm whether unresolved threads were addressed, verify that required CI tests passed, and decide whether the PR is ready to merge.
 
 Merge Verdict automates this reconciliation. It continuously verifies PR review feedback against a defined verification policy and produces two core outputs:
+
 1. A **GitHub required status check** (named `merge-verdict`) that serves as the authoritative merge gate under branch protection or repository rulesets.
 2. An **official GitHub PR review with `APPROVE`** via a configurable approval provider (`github_copilot` or `github_app`) when all policy and path risk-tier conditions are satisfied.
 
@@ -46,6 +47,7 @@ Merge Verdict is not a general-purpose AI code reviewer. It does not replace Git
 ### FR-01: Automated Re-Evaluation on PR Lifecycle Events
 
 The system must automatically evaluate or re-evaluate a pull request whenever relevant code or review state changes occur:
+
 - Pull request opened, reopened, marked ready for review, or synchronized (new commit pushed).
 - PR review submitted, edited, or dismissed.
 - Inline PR review comment created, edited, or deleted.
@@ -84,6 +86,7 @@ The system must verify whether each reviewer's latest analysis corresponds to th
 ### FR-09: Incomplete, Skipped, and Rate-Limited Review Detection
 
 The system must identify reviewer runs that did not perform a substantive review. Specifically, it must detect:
+
 - Check runs with neutral or skipped conclusions resulting from rate limits (such as CodeRabbit free-tier hourly quotas).
 - Workflow runs that failed or timed out.
 - Reviewers that never ran or posted no completion signal.
@@ -100,6 +103,7 @@ The system must publish a status check named `merge-verdict` targeting the curre
 ### FR-12: Configurable PR Approval Provider and Eligibility Separation
 
 The system must separate the verification verdict (`PASS`), approval emission eligibility (governed by repository policy and path risk tiers), and whether GitHub branch protection recognizes that approval as satisfying required review rules. When verification passes and automated approval is permitted, the publisher must support three configurable approval providers:
+
 - `github_copilot`: Requests or verifies a review from `copilot-pull-request-reviewer[bot]` on the current head SHA and checks whether its formal `APPROVE` review is active.
 - `github_app`: Submits an official GitHub pull request review with event `APPROVE` and a concise evidence summary referencing the authoritative `merge-verdict` check run.
 - `none`: Publishes only the authoritative `merge-verdict` check run without emitting a formal PR approval review.
@@ -107,6 +111,7 @@ The system must separate the verification verdict (`PASS`), approval emission el
 ### FR-13: Policy-Driven Approval Withholding and Invalidation
 
 The system must withhold approval whenever verification is incomplete, failing, stale, or ambiguous under configured rules. Furthermore, if a PR was previously approved by Merge Verdict and subsequent activity (such as a new commit or a reopened review thread) invalidates that approval:
+
 - The `merge-verdict` check run must immediately transition to `status: in_progress` with `conclusion: null`, or `status: completed` with a blocking conclusion (`failure` or `action_required`).
 - The existing approval must be dismissed or superseded according to configuration.
 

@@ -41,6 +41,7 @@ Three specific GitHub platform behaviors directly affect this architectural deci
 ### The Semantic Staleness Problem
 
 A passing check and an approved review can both become semantically stale without any new commit being pushed. For example:
+
 1. Merge Verdict evaluates commit `abc123f` and publishes success.
 2. An automated reviewer (such as CodeRabbit or Sourcery) subsequently posts a critical blocking finding against `abc123f`.
 3. The commit SHA has not changed.
@@ -124,6 +125,7 @@ When GitHub Copilot is available and enabled, combining the required `merge-verd
 ## Reconsideration Triggers
 
 This decision should be reconsidered if:
+
 - GitHub introduces native support for automatic approval dismissal upon new review comments on unchanged commits.
 - GitHub introduces an API that unifies review approvals and check runs into a single transactional primitive.
 - Branch protection deprecates commit-level status checks in favor of review rules exclusively.

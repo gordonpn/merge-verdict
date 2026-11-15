@@ -55,6 +55,7 @@ concurrency:
 ```
 
 **Behavior**:
+
 - Workflows are isolated per pull request.
 - When a new event arrives for a PR, any currently running verification workflow for that PR is immediately cancelled.
 - Only the latest evaluation run executes to completion.
@@ -64,6 +65,7 @@ concurrency:
 Because Merge Verdict publishes status checks, check runs, and PR review submissions, it can inadvertently trigger its own workflows if events are not strictly filtered.
 
 **Mandatory Guard Rules**:
+
 1. **Actor Filtering**: Workflows must ignore events authored by the bot identity:
 
    ```yaml
@@ -82,6 +84,7 @@ A passing status check or approval review is valid only if the PR state remains 
 ### 3.1. Verification Snapshot Definition
 
 At invocation start (T0), the engine captures a **Verification Snapshot** comprising:
+
 - Target repository and PR number.
 - Authoritative PR head commit SHA (`head_sha`).
 - Total review thread count and array of thread records including thread IDs, boolean `isResolved` values, and per-comment identifiers, `updated_at` timestamps, and body digests.
@@ -90,6 +93,7 @@ At invocation start (T0), the engine captures a **Verification Snapshot** compri
 - Array of required check runs with their completed conclusions.
 
 From this snapshot, the engine computes a deterministic **State Fingerprint**:
+
 ```text
 state_fingerprint = SHA256(head_sha + ":" + sorted_threads_and_comments + ":" + sorted_issue_comments + ":" + sorted_reviews + ":" + sorted_checks)
 ```
@@ -97,6 +101,7 @@ state_fingerprint = SHA256(head_sha + ":" + sorted_threads_and_comments + ":" + 
 ### 3.2. Pre-Publication Atomic Check
 
 Immediately prior to publishing the status check or submitting the `APPROVE` review (T1):
+
 1. The engine re-queries the GitHub API to recompute the complete state fingerprint (including `pull_request.head.sha`, thread resolution states, review submissions, and mutable thread or top-level comment IDs, update timestamps, and body digests).
 2. If `current_head_sha !== snapshot.head_sha` or `current_state_fingerprint !== snapshot.state_fingerprint`:
    - A race condition occurred (new commit pushed, thread state mutated, or comment added/edited).
@@ -105,6 +110,7 @@ Immediately prior to publishing the status check or submitting the `APPROVE` rev
 ### 3.3. Fast Invalidation Path vs. Evaluation Path
 
 A critical operational pattern is separating the fast invalidation path from the slower evaluation and AI inference path:
+
 1. **Immediate Invalidation**: Upon receiving any relevant PR event (commit push, new review comment, or thread status modification), the workflow or webhook bridge immediately updates the existing `merge-verdict` check run status to `in_progress` (or non-passing).
 2. **Evaluation Window Isolation**: Without this fast invalidation step, a previously passing check run on commit `abc123f` remains usable to satisfy branch protection throughout the duration of the evaluation run (which may take 15 to 45 seconds).
 3. **Execution**: The evaluation engine then proceeds with data collection, normalization, deterministic verification, and optional semantic analysis.
@@ -114,6 +120,7 @@ A critical operational pattern is separating the fast invalidation path from the
 Even with a fast invalidation path, a brief network window exists between an event occurring on GitHub and the invalidation API call reaching GitHub. It is not an atomic platform transaction.
 
 To eliminate this window:
+
 - Repositories should enable GitHub's native **Require conversation resolution before merging** branch protection rule.
 - If a reviewer adds a blocking comment or unresolves a thread, GitHub immediately locks the merge button natively at the platform level, before Merge Verdict's invalidation check arrives.
 - Merge Verdict acts as the automated reconciler that verifies all conditions, while native conversation resolution serves as the instantaneous hardware lock.
@@ -121,6 +128,7 @@ To eliminate this window:
 ### 3.5. Synthetic Merge Commits and Merge Queues
 
 When repositories adopt GitHub Merge Queues:
+
 - GitHub evaluates pull requests by generating a synthetic test-merge commit (`refs/pull/{number}/merge` or temporary queue ref) combining the PR branch with current `main`.
 - Workflows triggered by `merge_group` evaluate this synthetic merge commit SHA rather than the PR branch head SHA.
 - Merge Verdict binds its snapshot verification and status check to the corresponding target SHA (PR head SHA for standard pull requests, merge queue SHA for `merge_group` executions).
@@ -168,6 +176,7 @@ stateDiagram-v2
 ### 5.1. Handling Post-Approval Invalidation
 
 If Merge Verdict previously submitted an `APPROVE` review on commit `SHA-A`, and subsequent events occur on the PR:
+
 - **New Commit Pushed (`SHA-B`)**:
   - The status check `merge-verdict` on `SHA-B` defaults to `in_progress` until verified.
   - If the repository has configured GitHub branch protection to "Dismiss stale pull request approvals when new commits are pushed", GitHub automatically dismisses the approval.
@@ -179,6 +188,7 @@ If Merge Verdict previously submitted an `APPROVE` review on commit `SHA-A`, and
 ### 5.2. Partial Failure Recovery
 
 If the authoritative check run publication succeeds via the Checks API (`POST /repos/{owner}/{repo}/check-runs` with `status` and `conclusion` fields) but the subsequent PR review approval submission fails (e.g. temporary secondary rate limit or GitHub review API error):
+
 1. The engine records a non-fatal error log.
 2. Because the required status check `merge-verdict` is the authoritative gating mechanism under branch protection, merging remains protected.
 3. The workflow exits with exit code 1, which causes GitHub Actions to flag the run as failed, allowing standard retry mechanics to re-attempt approval submission.
