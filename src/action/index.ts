@@ -661,6 +661,12 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
     executionErrors,
     repositoryRules,
     unresolvedThreadIds,
+    ...(config.blockingSeverityThreshold !== undefined
+      ? { blockingSeverityThreshold: config.blockingSeverityThreshold }
+      : {}),
+    ...(config.permittedCheckConclusions !== undefined
+      ? { permittedCheckConclusions: config.permittedCheckConclusions }
+      : {}),
     ...(codeEvidenceSatisfied !== undefined ? { codeEvidenceSatisfied } : {}),
   });
 
