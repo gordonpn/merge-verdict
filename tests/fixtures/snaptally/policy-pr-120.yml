@@ -1,0 +1,4 @@
+required_reviewers:
+  - chatgpt-codex-connector
+required_checks:
+  - runner / test

@@ -1,0 +1,6 @@
+required_reviewers:
+  - coderabbitai
+  - sourcery-ai
+required_checks:
+  - runner / test
+  - runner / biome

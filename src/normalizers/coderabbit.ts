@@ -14,6 +14,8 @@ const RATE_LIMIT_COMMENT_MARKER =
   "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->";
 const RATE_LIMIT_PATTERNS = [
   /review limit reached/i,
+  /review rate limited/i,
+  /result:\s*rate limited/i,
   /rate limited by coderabbit\.ai/i,
   /free oss reviews/i,
   /free limit to reset/i,
