@@ -5,6 +5,7 @@
 Merge Verdict is a critical infrastructure component that governs repository branch protection and pull request merges. A defect in Merge Verdict could either block all developer merges (false negative) or permit unreviewed code with critical flaws into production (false positive).
 
 Therefore, testing is organized around strict verification tiers:
+
 1. **Deterministic Unit Tests**: Pure function tests for parsing, normalization, state fingerprinting, and policy decisions. Run with zero network access and execute in milliseconds.
 2. **Fixture Replay Tests**: Full engine runs executed against recorded, anonymized GitHub REST and GraphQL response payloads taken directly from real PRs (such as SnapTally PRs #119, #120, and #121).
 3. **Simulated Concurrency and Race Condition Tests**: Verifying that atomic pre-flight checks, state fingerprinting, and `cancel-in-progress` concurrency controls prevent stale approvals when events arrive out of order or concurrently.

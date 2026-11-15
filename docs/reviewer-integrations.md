@@ -5,6 +5,7 @@
 Merge Verdict reconciles feedback from a wide array of automated pull request review tools. Rather than attempting to re-analyze code diffs directly, Merge Verdict consumes the structured data, inline comments, top-level reviews, and check runs emitted by these tools.
 
 This document details:
+
 1. Concrete behaviors observed across real-world pull requests in the reference repository [gordonpn/snaptally](https://github.com/gordonpn/snaptally) (specifically PRs #119, #120, and #121).
 2. The normalized internal schema used to represent findings and reviewer states.
 3. Specific parsing and reconciliation rules for each reviewer integration.

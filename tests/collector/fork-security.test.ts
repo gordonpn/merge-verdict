@@ -9,7 +9,8 @@ const trustedPolicy = "required_reviewers: [security-reviewer]\nrequired_checks:
 const untrustedPolicy = "required_reviewers: []\nrequired_checks: []";
 
 function createFixture(options: {
-  readonly headRepository: string | null;
+  readonly headRepository: string | null | undefined;
+  readonly baseRepository?: string | null | undefined;
   readonly policyStatus?: number;
 }) {
   const requests: URL[] = [];
@@ -32,13 +33,29 @@ function createFixture(options: {
         },
       };
     } else if (url.pathname.endsWith("/pulls/24")) {
+      const resolvedBaseRepository =
+        "baseRepository" in options ? options.baseRepository : baseRepository;
       data = {
         head: {
           ref: "main",
           sha: "untrusted-head-sha",
-          repo: options.headRepository === null ? null : { full_name: options.headRepository },
+          ...(options.headRepository === undefined
+            ? {}
+            : {
+                repo:
+                  options.headRepository === null ? null : { full_name: options.headRepository },
+              }),
         },
-        base: { ref: "main", sha: "protected-base-sha", repo: { full_name: baseRepository } },
+        base: {
+          ref: "main",
+          sha: "protected-base-sha",
+          ...(resolvedBaseRepository === undefined
+            ? {}
+            : {
+                repo:
+                  resolvedBaseRepository === null ? null : { full_name: resolvedBaseRepository },
+              }),
+        },
       };
     } else if (decodeURIComponent(url.pathname).endsWith("/contents/.github/merge-verdict.yml")) {
       const untrusted = url.searchParams.get("ref") === "untrusted-head-sha";
@@ -72,13 +89,21 @@ function createFixture(options: {
 
 describe("fork policy isolation", () => {
   it.each([
-    { headRepository: baseRepository, expectedFork: false },
-    { headRepository: "contributor/project", expectedFork: true },
-    { headRepository: null, expectedFork: true },
+    { headRepository: baseRepository, baseRepository, expectedFork: false },
+    { headRepository: "contributor/project", baseRepository, expectedFork: true },
+    { headRepository: null, baseRepository, expectedFork: true },
+    { headRepository: undefined, baseRepository, expectedFork: true },
+    { headRepository: baseRepository, baseRepository: null, expectedFork: true },
+    { headRepository: baseRepository, baseRepository: undefined, expectedFork: true },
+    { headRepository: null, baseRepository: null, expectedFork: true },
+    { headRepository: undefined, baseRepository: undefined, expectedFork: true },
   ])(
-    "reports fork metadata for head repository $headRepository",
-    async ({ headRepository, expectedFork }) => {
-      const fixture = createFixture({ headRepository });
+    "reports fork metadata for head repository $headRepository and base repository $baseRepository",
+    async ({ headRepository, baseRepository: configuredBaseRepository, expectedFork }) => {
+      const fixture = createFixture({
+        headRepository,
+        baseRepository: configuredBaseRepository,
+      });
       const result = await fixture.collector.collectPullRequest(input);
 
       expect(result.isFork).toBe(expectedFork);

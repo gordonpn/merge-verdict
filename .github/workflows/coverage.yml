@@ -29,18 +29,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 10
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -59,18 +60,22 @@ jobs:
       - name: Run tests with coverage
         run: just test-coverage
 
+      - name: Check diff coverage
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-diff-coverage.mjs
+
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage/lcov.info
-          fail_ci_if_error: false
+          fail_ci_if_error: true
           slug: ${{ github.repository }}
           use_oidc: ${{ secrets.CODECOV_TOKEN == '' }}
 
       - name: Report code coverage
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: zgosalvez/github-actions-report-lcov@eda775f552bfb2bffbdedea26f19dfb8c24a1648 # v4
+        uses: zgosalvez/github-actions-report-lcov@7e6043a0e3ae37bc6e45291401ddea852fc750e5 # v7.2.3
         with:
           coverage-files: coverage/lcov.info
           minimum-coverage: 80

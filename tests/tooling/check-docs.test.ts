@@ -129,4 +129,168 @@ describe("portable documentation checks", () => {
     expect(result.stdout).toContain("Em or en dash found in docs/invalid.md");
     expect(result.stdout).toContain("Emoji found in docs/invalid.md");
   });
+
+  it("validates used full, collapsed, and shortcut reference links against definitions", () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, "README.md"),
+      [
+        "[Guide][guide]",
+        "[collapsed][]",
+        "[shortcut]",
+        "![Diagram][diagram]",
+        "[Unresolved][missing-def]",
+        "[missing-collapsed-def][]",
+        "[guide]: missing.md",
+        "[collapsed]: missing-collapsed.md 'title'",
+        "[shortcut]: missing-shortcut.md (title)",
+        "[diagram]: missing-diagram.png",
+        '  "next-line title"',
+        "[unused]: absent-unused.md",
+        "Ordinary [unreferenced] bracketed prose.",
+      ].join("\n"),
+    );
+    const failed = check(root);
+    expect(failed.status).toBe(1);
+    expect(failed.stdout).toContain("Broken link in README.md: missing.md");
+    expect(failed.stdout).toContain("Broken link in README.md: missing-collapsed.md");
+    expect(failed.stdout).toContain("Broken link in README.md: missing-shortcut.md");
+    expect(failed.stdout).toContain("Broken link in README.md: missing-diagram.png");
+    expect(failed.stdout).toContain("Broken link in README.md: [missing-def]");
+    expect(failed.stdout).toContain("Broken link in README.md: [missing-collapsed-def]");
+    expect(failed.stdout).not.toContain("absent-unused.md");
+    expect(failed.stdout.match(/Broken link/g)).toHaveLength(6);
+
+    writeFileSync(join(root, "missing.md"), "");
+    writeFileSync(join(root, "missing-collapsed.md"), "");
+    writeFileSync(join(root, "missing-shortcut.md"), "");
+    writeFileSync(join(root, "missing-diagram.png"), "");
+    writeFileSync(
+      join(root, "README.md"),
+      [
+        "[Guide][guide]",
+        "[collapsed][]",
+        "[shortcut]",
+        "![Diagram][diagram]",
+        "[guide]: missing.md",
+        "[collapsed]: missing-collapsed.md 'title'",
+        "[shortcut]: missing-shortcut.md (title)",
+        "[diagram]: missing-diagram.png",
+        '  "next-line title"',
+        "[unused]: absent-unused.md",
+        "Ordinary [unreferenced] bracketed prose.",
+      ].join("\n"),
+    );
+    const passed = check(root);
+    expect(passed.status, passed.stdout + passed.stderr).toBe(0);
+  });
+
+  it("normalizes reference labels, unwraps angle-bracket destinations, and uses the first duplicate definition", () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, "docs", "guide.md"),
+      [
+        "[Normalized][my guide]",
+        "[MY   GUIDE][]",
+        "[My\n  Guide]",
+        "[Angle][angle]",
+        "[First wins][dup]",
+        "",
+        "[My   Guide]: ../README.md",
+        '[angle]: <some file.md> "title"',
+        "[dup]: ../README.md",
+        "[DUP]: missing-duplicate.md",
+      ].join("\n"),
+    );
+    const passed = check(root);
+    expect(passed.status, passed.stdout + passed.stderr).toBe(0);
+
+    writeFileSync(
+      join(root, "docs", "broken-dup.md"),
+      ["[First wins][dup]", "", "[dup]: missing-first.md", "[dup]: ../README.md"].join("\n"),
+    );
+    const failed = check(root);
+    expect(failed.status).toBe(1);
+    expect(failed.stdout).toContain("Broken link in docs/broken-dup.md: missing-first.md");
+  });
+
+  it("ignores inline code, fenced code blocks, indented code blocks, and HTML comments during link extraction", () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, "README.md"),
+      [
+        "Inline `[Example](missing-inline.md)` and ``[Double](missing-double.md) ` [StillCode](missing.md)``.",
+        "Inline reference `[Guide][code-def]` with definition in prose should not resolve.",
+        "",
+        "```md",
+        "[Fenced](missing-fenced.md)",
+        "[FencedRef][fenced-def]",
+        "[fenced-def]: missing-fenced-def.md",
+        "[prose-ref]: missing-from-fence.md",
+        "```",
+        "",
+        "~~~markdown",
+        "[Tilde](missing-tilde.md)",
+        "~~~",
+        "",
+        "- ```",
+        "  [ListFenced](missing-list-fenced.md)",
+        "  ```",
+        "",
+        "> > ```",
+        "> > [QuotedFenced](missing-quoted-fenced.md)",
+        "> [VisibleAfterQuoteFence](docs/some%20file.md)",
+        "",
+        "    [IndentedSpaces](missing-indented-spaces.md)",
+        "\t[IndentedTab](missing-indented-tab.md)",
+        "",
+        "<!-- [CommentLink](missing-comment.md) -->",
+        "",
+        "Unmatched ` backtick in prose keeps [VisibleLink](docs/some%20file.md) active.",
+        "[ProseRef][prose-ref]",
+        "[prose-ref]: docs/some%20file.md",
+      ].join("\n"),
+    );
+    const passed = check(root);
+    expect(passed.status, passed.stdout + passed.stderr).toBe(0);
+
+    writeFileSync(
+      join(root, "docs", "after-code.md"),
+      [
+        "`[Ignored](missing-code.md)`",
+        "",
+        "```md",
+        "[IgnoredFence](missing-fence.md)",
+        "```",
+        "",
+        "Unmatched ` backtick before [BrokenAfterCode](missing-real.md).",
+      ].join("\n"),
+    );
+    const failed = check(root);
+    expect(failed.status).toBe(1);
+    expect(failed.stdout).toContain("Broken link in docs/after-code.md: missing-real.md");
+    expect(failed.stdout.match(/Broken link/g)).toHaveLength(1);
+  });
+
+  it("still rejects forbidden dashes and emojis inside inline and fenced code", () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, "docs", "inline-code-dash.md"),
+      "Inline `em dash \u2014 and en dash \u2013` in code.\n",
+    );
+    const inlineDash = check(root);
+    expect(inlineDash.status).toBe(1);
+    expect(inlineDash.stdout).toContain("Em or en dash found in docs/inline-code-dash.md");
+
+    rmSync(join(root, "docs", "inline-code-dash.md"));
+    writeFileSync(
+      join(root, "docs", "fenced-code-emoji.md"),
+      ["```md", "[Ignored](missing.md) \u{1f600} \u2014", "```"].join("\n"),
+    );
+    const fenced = check(root);
+    expect(fenced.status).toBe(1);
+    expect(fenced.stdout).toContain("Em or en dash found in docs/fenced-code-emoji.md");
+    expect(fenced.stdout).toContain("Emoji found in docs/fenced-code-emoji.md");
+    expect(fenced.stdout).not.toContain("Broken link");
+  });
 });

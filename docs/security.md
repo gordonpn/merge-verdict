@@ -7,6 +7,7 @@ Merge Verdict operates as a gatekeeper for pull request merges. Because it has t
 ### 1.1. Untrusted Inputs
 
 The following system inputs originate outside the trust boundary and must be treated as untrusted:
+
 - **Pull Request Source Code and Diffs**: May contain malicious scripts or crafted exploits.
 - **Pull Request Descriptions and Commit Messages**: May contain social-engineering payloads or prompt injection attempts.
 - **Review Comments and Summaries**: Even comments from automated bots may echo untrusted strings originally injected into code or PR descriptions.
@@ -16,6 +17,7 @@ The following system inputs originate outside the trust boundary and must be tre
 ### 1.2. Privileged Operations
 
 The following operations cross the trust boundary into privileged state:
+
 - Publishing a `success` Checks API check run for `merge-verdict`.
 - Submitting an official `APPROVE` review via the GitHub Pull Request API.
 - Dismissing an active `CHANGES_REQUESTED` review.
