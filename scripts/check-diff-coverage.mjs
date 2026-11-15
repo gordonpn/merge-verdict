@@ -90,24 +90,54 @@ function unquoteGitPath(path) {
 export function parseUnifiedDiff(diffText) {
   const changed = new Map();
   let currentFile = null;
+  let oldRemaining = 0;
+  let newRemaining = 0;
 
   for (const line of diffText.split(/\r?\n/)) {
     if (line.startsWith("diff --git ")) {
       currentFile = null;
-    } else if (line.startsWith("+++ ")) {
+      oldRemaining = 0;
+      newRemaining = 0;
+      continue;
+    }
+
+    if (oldRemaining > 0 || newRemaining > 0) {
+      if (line.startsWith("+")) {
+        newRemaining = Math.max(0, newRemaining - 1);
+        continue;
+      }
+      if (line.startsWith("-")) {
+        oldRemaining = Math.max(0, oldRemaining - 1);
+        continue;
+      }
+      if (line.startsWith(" ")) {
+        oldRemaining = Math.max(0, oldRemaining - 1);
+        newRemaining = Math.max(0, newRemaining - 1);
+        continue;
+      }
+      if (line.startsWith("\\")) {
+        continue;
+      }
+      oldRemaining = 0;
+      newRemaining = 0;
+    }
+
+    if (line.startsWith("+++ ")) {
       const destination = unquoteGitPath(line.slice(4));
       const path = destination.startsWith("b/") ? destination.slice(2) : "";
       currentFile = isTrackedSourcePath(path) ? path : null;
       if (currentFile && !changed.has(currentFile)) {
         changed.set(currentFile, new Set());
       }
-    } else if (line.startsWith("@@ ") && currentFile) {
-      const match = /\+(\d+)(?:,(\d+))?/.exec(line);
+    } else if (line.startsWith("@@ ")) {
+      const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
       if (!match) continue;
-      const start = Number.parseInt(match[1], 10);
-      const count = match[2] === undefined ? 1 : Number.parseInt(match[2], 10);
+      oldRemaining = match[2] === undefined ? 1 : Number.parseInt(match[2], 10);
+      newRemaining = match[4] === undefined ? 1 : Number.parseInt(match[4], 10);
+      if (!currentFile) continue;
+      const start = Number.parseInt(match[3], 10);
       const lineSet = changed.get(currentFile);
-      for (let i = 0; i < count; i += 1) {
+      for (let i = 0; i < newRemaining; i += 1) {
         lineSet.add(start + i);
       }
     }

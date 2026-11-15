@@ -90,6 +90,29 @@ describe("check-diff-coverage", () => {
     expect([...(changed.get("src/a.ts") ?? [])]).toEqual([1]);
   });
 
+  it("ignores added source lines starting with ++ inside hunk bodies across multiple hunks", () => {
+    const diff = [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -10,0 +10,2 @@",
+      "+const covered = 1;",
+      "+++ /* increment */ count;",
+      "@@ -20,0 +22,1 @@",
+      "+const uncovered = 2;",
+    ].join("\n");
+
+    const result = evaluateDiffCoverage({
+      lcovMap: parseLcov("SF:src/a.ts\nDA:10,1\nDA:11,1\nDA:22,0\nend_of_record", "/repo"),
+      diffMap: parseUnifiedDiff(diff),
+      threshold: 85,
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.totalLines).toBe(3);
+    expect(result.coveredLines).toBe(2);
+    expect(result.uncoveredByFile).toEqual({ "src/a.ts": [22] });
+  });
+
   it("fails when uncovered diff lines drop below threshold", () => {
     const lcovMap = parseLcov(
       ["SF:src/a.ts", "DA:10,1", "DA:11,0", "DA:12,0", "end_of_record"].join("\n"),
