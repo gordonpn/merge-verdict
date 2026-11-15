@@ -1,0 +1,21 @@
+required_reviewers:
+  - sourcery-ai
+required_checks:
+  - runner / test
+  - runner / biome
+approval:
+  risk:
+    docs:
+      paths:
+        - "docs/**"
+        - "*.md"
+      automated_approval: allowed
+      require_human_review: false
+      effort: lite
+    application:
+      paths:
+        - "src/**"
+        - "tests/**"
+      automated_approval: allowed
+      require_human_review: false
+      effort: balanced

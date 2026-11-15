@@ -9,29 +9,11 @@ import { buildReviewSnapshotFromPullRequest } from "../../src/normalizers/index.
 import { evaluatePolicy } from "../../src/policy/evaluator.js";
 import { evaluateRiskTier } from "../../src/policy/risk-tier.js";
 
-const DEFAULT_REPLAY_POLICY = [
-  "required_reviewers:",
-  "  - sourcery-ai",
-  "required_checks:",
-  "  - runner / test",
-  "  - runner / biome",
-  "approval:",
-  "  risk:",
-  "    docs:",
-  "      paths:",
-  '        - "docs/**"',
-  '        - "*.md"',
-  "      automated_approval: allowed",
-  "      require_human_review: false",
-  "      effort: lite",
-  "    application:",
-  "      paths:",
-  '        - "src/**"',
-  '        - "tests/**"',
-  "      automated_approval: allowed",
-  "      require_human_review: false",
-  "      effort: balanced",
-].join("\n");
+function loadPolicy(name: string): string {
+  return readFileSync(new URL(`../fixtures/snaptally/${name}.yml`, import.meta.url), "utf8");
+}
+
+const DEFAULT_REPLAY_POLICY = loadPolicy("policy-default");
 
 function load(number: number) {
   return JSON.parse(
@@ -203,15 +185,7 @@ describe("offline recorded SnapTally collector replay", () => {
 
 describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
   it("normalizes PR #119 CodeRabbit rate limit, Sourcery ancestry resolution, and PENDING policy verdict", async () => {
-    const policyYaml = [
-      "required_reviewers:",
-      "  - coderabbitai",
-      "  - sourcery-ai",
-      "required_checks:",
-      "  - runner / test",
-      "  - runner / biome",
-    ].join("\n");
-    const { fixture, result } = await replay(119, policyYaml);
+    const { fixture, result } = await replay(119, loadPolicy("policy-pr-119"));
     const config = parseConfig(result.policyContent);
 
     const snapshotWithoutAncestry = buildReviewSnapshotFromPullRequest(result);
@@ -257,13 +231,7 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
   });
 
   it("normalizes PR #120 stale Codex review commit as PENDING and detects mutated finalSnapshot as STALE", async () => {
-    const policyYaml = [
-      "required_reviewers:",
-      "  - chatgpt-codex-connector",
-      "required_checks:",
-      "  - runner / test",
-    ].join("\n");
-    const { result } = await replay(120, policyYaml);
+    const { result } = await replay(120, loadPolicy("policy-pr-120"));
     const config = parseConfig(result.policyContent);
     const snapshot = buildReviewSnapshotFromPullRequest(result);
 
