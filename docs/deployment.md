@@ -183,8 +183,6 @@ required_checks:
   - "runner / test"
   - "runner / codeql"
   - "runner / coverage"
-  - "runner / actionlint"
-  - "runner / biome"
 
 required_reviewers:
   - coderabbitai
@@ -221,6 +219,8 @@ approval:
       require_human_review: true
       effort: max
 ```
+
+`runner / actionlint` and `runner / biome` are omitted from `required_checks` because `.github/workflows/reviewdog.yml` skips both jobs on fork pull requests (`if: github.event.pull_request.head.repo.full_name == github.repository`), and `evaluatePolicy` treats `skipped` conclusions as `CHECK_FAILED` unless explicitly permitted via runtime `permittedCheckConclusions`. Required linting still runs unconditionally on all pull requests inside `runner / test` via `just lint`.
 
 After initial advisory validation passes, update `approval.providers` to `["github_copilot"]` (or `["github_app"]`) when ready to enable formal PR approval reviews on eligible risk tiers.
 
