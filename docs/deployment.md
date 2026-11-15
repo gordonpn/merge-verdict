@@ -33,7 +33,7 @@ The system requires zero external databases, zero persistent background servers,
 |     - Output structured verdict: PASS, PENDING, FAIL, STALE, or ERROR             |
 |                                                                                   |
 |  4. Publisher                                                                     |
-|     - Publish authoritative merge-verdict check run or commit status              |
+|     - Publish authoritative merge-verdict check run (GitHub Checks API)           |
 |     - Submit formal APPROVE review when eligible under configured provider        |
 +-----------------------------------------------------------------------------------+
                                           |
@@ -48,17 +48,20 @@ The system requires zero external databases, zero persistent background servers,
 
 ## 2. Component Readiness Matrix
 
-| Component                         | Status   | Location                              | Notes                                                                                       |
-| :-------------------------------- | :------- | :------------------------------------ | :------------------------------------------------------------------------------------------ |
-| **Tooling & Task Runner**         | Complete | `Justfile`, `package.json`            | Strict TypeScript, Biome linter, Vitest test suite.                                         |
-| **Domain Models**                 | Complete | `src/models/`                         | Schemas for findings, reviewer records, check runs, snapshots, state fingerprints.          |
-| **PR Data Collector**             | Complete | `src/collector/`                      | Octokit REST and GraphQL pagination, protected base policy retrieval, error classification. |
-| **Policy Configuration**          | Complete | `src/config/`, `src/models/config.ts` | Zod schema validating `.github/merge-verdict.yml` with strict typing and defaults.          |
-| **Reviewer Normalizers**          | Pending  | `src/normalizers/`                    | Adapters for CodeRabbit, Sourcery, Codex, Copilot, and generic CI checks.                   |
-| **Policy Evaluator**              | Pending  | `src/policy/`                         | 8-condition decision engine and path risk-tier resolver.                                    |
-| **Action Entry Point & Bundling** | Pending  | `src/action/`, `dist/`                | Standalone bundler (`tsup`) generating `dist/index.js` for Action execution.                |
-| **Status Publisher**              | Pending  | `src/publisher/`                      | Commit status and Checks API publisher, plus approval provider abstraction.                 |
-| **Dogfood Workflow**              | Pending  | `.github/workflows/merge-verdict.yml` | Workflow triggering Merge Verdict within this repository.                                   |
+| Component                         | Status      | Location                                                           | Notes                                                                                             |
+| :-------------------------------- | :---------- | :----------------------------------------------------------------- | :------------------------------------------------------------------------------------------------ |
+| **Tooling & Task Runner**         | Complete    | `Justfile`, `package.json`                                         | Strict TypeScript, Biome linter, Vitest test suite.                                               |
+| **Domain Models**                 | Complete    | `src/models/`                                                      | Schemas for findings, reviewer records, check runs, snapshots, state fingerprints.                |
+| **PR Data Collector**             | Complete    | `src/collector/`                                                   | Octokit REST and GraphQL pagination, protected base policy retrieval, error classification.       |
+| **Policy Configuration**          | Complete    | `src/config/`, `src/models/config.ts`                              | Zod schema validating `.github/merge-verdict.yml` with strict typing and defaults.                |
+| **Reviewer Normalizers**          | Complete    | `src/normalizers/`                                                 | Adapters for CodeRabbit, Sourcery, Codex, Copilot, and generic CI checks.                         |
+| **Policy Evaluator & Risk Tiers** | Complete    | `src/policy/`                                                      | 8-condition decision engine and path risk-tier resolver.                                          |
+| **Checks Report Formatter**       | Complete    | `src/publisher/checks-formatter.ts`                                | Pure Markdown report builder and verdict-to-Checks-API conclusion mapper.                         |
+| **Approval Provider Strategies**  | Complete    | `src/publisher/approval-provider.ts`                               | Pluggable approval strategies (`github_copilot`, `github_app`, `none`).                           |
+| **Standalone Bundler**            | Complete    | `tsup.config.ts`, `scripts/`                                       | Standalone bundler (`tsup`) and GraphQL inlining generating `dist/index.js`.                      |
+| **Checks API Publisher**          | In Progress | `src/publisher/checks-api.ts`                                      | GitHub Checks API check-run publisher and fast invalidation path (#14).                           |
+| **Action Entry Point**            | In Progress | `src/action/`, `action.yml`                                        | GitHub Action runtime orchestrator wiring collector, normalizers, evaluator, and publisher (#13). |
+| **Dogfood Workflow & Policy**     | Pending     | `.github/workflows/merge-verdict.yml`, `.github/merge-verdict.yml` | Initial advisory workflow and repository verification policy (#73).                               |
 
 ---
 
@@ -85,7 +88,7 @@ Transform heterogeneous reviewer outputs collected from GitHub into uniform `Nor
    - Verify that `review.commit_id` matches `pull_request.head.sha`.
    - Parse readiness assessments and inline thread comments.
 5. **`src/normalizers/generic-checks.ts`**:
-   - Ingest CI check runs (`runner / test`, `runner / biome`, `CodeQL`, `codecov`).
+   - Ingest CI check runs (`runner / test`, `runner / codeql`, `runner / coverage`, `runner / actionlint`, `runner / biome`).
    - Map check conclusions to standard pass/fail assertions.
 
 ### Step 2: Deterministic Policy Evaluator (`src/policy/`)
@@ -115,22 +118,22 @@ Evaluate the normalized snapshot against repository policy using pure functions 
 
 ### Step 3: Publisher Layer (`src/publisher/`)
 
-Publish verification outcomes back to GitHub:
+Publish verification outcomes back to GitHub using the GitHub Checks API as the sole authoritative check gate (with no legacy Commit Status API fallback, per [ADR 0002](adr/0002-authoritative-status-check-vs-pr-approval.md)):
 
-1. **`src/publisher/commit-status.ts` / `src/publisher/checks-api.ts`**:
-   - Publish authoritative status check named `merge-verdict` bound to `pull_request.head.sha`.
-   - Map verdicts to standard GitHub states:
-     - `PASS` -> `conclusion: success` / `state: success`
-     - `PENDING` -> `status: in_progress, conclusion: null` / `state: pending`
-     - `FAIL` -> `conclusion: failure` / `state: failure`
-     - `STALE` -> `conclusion: action_required` / `state: error`
-     - `ERROR` -> `conclusion: failure` / `state: error`
+1. **`src/publisher/checks-api.ts` and `src/publisher/checks-formatter.ts`**:
+   - Publish the authoritative GitHub Checks API check run named `merge-verdict` (`POST /repos/{owner}/{repo}/check-runs` with `checks: write` permission) bound to `pull_request.head.sha`.
+   - Map verdicts to GitHub Checks API status and conclusion states:
+     - `PASS` -> `status: completed, conclusion: success`
+     - `PENDING` -> `status: in_progress, conclusion: null`
+     - `FAIL` -> `status: completed, conclusion: failure`
+     - `STALE` -> `status: completed, conclusion: action_required`
+     - `ERROR` -> `status: completed, conclusion: failure`
    - Include structured Markdown summary table detailing check conclusions, reviewer statuses, and unresolved findings.
-2. **`src/publisher/providers/`**:
+2. **`src/publisher/approval-provider.ts`**:
    - Implement `ApprovalProvider` abstraction:
      - `github_copilot`: Checks for active Copilot approval on `head_sha`.
      - `github_app`: Submits `APPROVE` review via GitHub App identity when eligible.
-     - `none`: Withholds PR review submission, relying solely on the authoritative status check.
+     - `none`: Withholds PR review submission, relying solely on the authoritative `merge-verdict` check run.
 
 ### Step 4: Standalone Action Packaging (`action.yml` and Bundler)
 
@@ -169,16 +172,19 @@ Package the TypeScript engine into a self-contained GitHub Action:
 
 ## 4. Dogfooding Guide (Running in this Repository)
 
-Once the four MVP steps are in place, dogfooding Merge Verdict in `gordonpn/merge-verdict` requires three files:
+Once the four MVP steps are in place, dogfooding Merge Verdict in `gordonpn/merge-verdict` proceeds in staged rollout phases (`#73` -> `#74` -> `#76`) across three components:
 
 ### A. Repository Policy File (`.github/merge-verdict.yml`)
 
-Commit this file to the default branch (`main`):
+Commit this file to the default branch (`main`). During initial advisory dogfooding (`#73`), set `providers: ["none"]` so Merge Verdict publishes the `merge-verdict` check run without emitting automated pull request approvals until validation is complete:
 
 ```yaml
 required_checks:
-  - "Analyze (javascript-typescript)"
-  - "CodeQL"
+  - "runner / test"
+  - "runner / codeql"
+  - "runner / coverage"
+  - "runner / actionlint"
+  - "runner / biome"
 
 required_reviewers:
   - coderabbitai
@@ -196,7 +202,7 @@ verification:
 approval:
   required_check: merge-verdict
   providers:
-    - github_copilot
+    - none
   require_verified_commit: true
 
   risk:
@@ -216,14 +222,27 @@ approval:
       effort: max
 ```
 
+After initial advisory validation passes, update `approval.providers` to `["github_copilot"]` (or `["github_app"]`) when ready to enable formal PR approval reviews on eligible risk tiers.
+
 ### B. Action Workflow File (`.github/workflows/merge-verdict.yml`)
 
-Commit this workflow to trigger the local Action on pull request activity, reviewer comments, and CI completion:
+Roll out the workflow in two stages:
+
+1. **Phase 1: Advisory Manual Dispatch (`#73`)**:
+   Start with a manual `workflow_dispatch` trigger and `cancel-in-progress: false` so initial runs against open pull requests can be inspected without cancelling active check-run publications.
+2. **Phase 2: Automatic Event Triggers (`#74`)**:
+   Enable automatic triggers on pull request activity, reviewer comments, and CI completion once advisory verification is validated:
 
 ```yaml
 name: merge-verdict
 
 on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to evaluate"
+        required: true
+        type: number
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review:
@@ -239,8 +258,8 @@ on:
     types: [completed]
 
 concurrency:
-  group: merge-verdict-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || github.sha }}
-  cancel-in-progress: true
+  group: merge-verdict-${{ github.event.inputs.pr_number || github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || github.sha }}
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -249,7 +268,6 @@ jobs:
       contents: read
       pull-requests: write
       checks: write
-      statuses: write
     steps:
       - name: Checkout trusted verifier
         uses: actions/checkout@v4
@@ -264,12 +282,12 @@ jobs:
           config-path: .github/merge-verdict.yml
 ```
 
-### C. Branch Protection Configuration
+### C. Branch Protection Configuration (`#76`)
 
-Configure GitHub branch protection or repository ruleset on `main`:
+After validating live check-run behavior across passing, pending, and failing pull requests (`#75`), configure GitHub branch protection or repository ruleset on `main` (`#76`):
 
 1. Require status checks to pass before merging.
-2. Add `merge-verdict` as a mandatory required status check.
+2. Add the `merge-verdict` check run (GitHub Checks API) as a mandatory required status check.
 3. Require branches to be up to date before merging.
 
 ---
@@ -282,7 +300,7 @@ To adopt Merge Verdict in another repository such as `gordonpn/snaptally`:
 
 Ensure GitHub Actions has the necessary permissions in repository settings (`Settings -> Actions -> General -> Workflow permissions`):
 
-- Read and write permissions enabled, or explicit job permissions configured in the workflow.
+- Read and write permissions enabled, or explicit job permissions (`contents: read`, `pull-requests: write`, `checks: write`) configured in the workflow.
 
 ### B. Add the Workflow (`.github/workflows/merge-verdict.yml`)
 
@@ -315,7 +333,6 @@ jobs:
       contents: read
       pull-requests: write
       checks: write
-      statuses: write
     steps:
       - name: Run Merge Verdict
         uses: gordonpn/merge-verdict@v1
@@ -374,7 +391,7 @@ To confirm that the MVP is operating correctly:
 3. **Stale Evaluation Path**:
    - A developer pushes a new commit to the pull request.
    - Reviewer evaluations on older commits are detected as stale (`isFresh: false`).
-   - Workflow posts `merge-verdict` with status `in_progress` / state `pending`, withholding approval until reviewers re-evaluate the head commit.
+   - Workflow posts the `merge-verdict` check run with `status: in_progress` and `conclusion: null` while reviewers are still running (or `conclusion: action_required` when terminal `STALE`), withholding approval until reviewers re-evaluate the head commit.
 
 ---
 
