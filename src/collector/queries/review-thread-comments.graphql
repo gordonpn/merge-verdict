@@ -16,6 +16,9 @@ query ReviewThreadComments($threadId: ID!, $cursor: String) {
           commit {
             oid
           }
+          originalCommit {
+            oid
+          }
         }
         pageInfo {
           hasNextPage

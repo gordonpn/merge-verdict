@@ -93,9 +93,25 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
     if (thread.resolvedByLogin) {
       finding.resolvedBy = thread.resolvedByLogin;
     }
-    if (input.repository && firstComment.commitSha && thread.path) {
-      const linePart = typeof thread.line === "number" && thread.line > 0 ? `#L${thread.line}` : "";
-      finding.rawCommentUrl = `https://github.com/${input.repository}/blob/${firstComment.commitSha}/${thread.path}${linePart}`;
+    // Keep each position with the commit and path reported on the same comment.
+    // Thread positions can move independently, so they cannot supply link provenance.
+    if (input.repository && firstComment.path) {
+      const validLine = (line: number | null): line is number =>
+        typeof line === "number" && Number.isInteger(line) && line > 0;
+      const currentLine = validLine(firstComment.line) ? firstComment.line : null;
+      const originalLine = validLine(firstComment.originalLine) ? firstComment.originalLine : null;
+      const useCurrent = firstComment.commitSha && currentLine !== null;
+      const useOriginal = !useCurrent && firstComment.originalCommitSha && originalLine !== null;
+      const commitSha = useCurrent
+        ? firstComment.commitSha
+        : useOriginal
+          ? firstComment.originalCommitSha
+          : firstComment.commitSha || firstComment.originalCommitSha;
+      const line = useCurrent ? currentLine : useOriginal ? originalLine : null;
+      if (commitSha) {
+        const linePart = line === null ? "" : `#L${line}`;
+        finding.rawCommentUrl = `https://github.com/${input.repository}/blob/${commitSha}/${firstComment.path}${linePart}`;
+      }
     }
     findings.push(finding);
   }

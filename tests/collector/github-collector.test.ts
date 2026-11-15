@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 import { describe, expect, it, vi } from "vitest";
-import { createGitHubCollector, GitHubCollector, GitHubCollectorError } from "../../src/index.js";
+import {
+  createGitHubCollector,
+  GitHubCollector,
+  GitHubCollectorError,
+  normalizeCopilotReviewer,
+} from "../../src/index.js";
 
 const repository = { owner: "octocat", repo: "hello-world" };
 const pullRequestNumber = 123;
@@ -838,5 +843,144 @@ describe("GitHubCollector", () => {
       status: 403,
       message: expect.stringContaining(".github/merge-verdict.yml at base-sha"),
     });
+  });
+});
+
+describe("historical finding provenance", () => {
+  it.each([
+    {
+      name: "current",
+      line: 7,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts#L7",
+    },
+    {
+      name: "outdated",
+      line: null,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "original-sha/src/a.ts#L5",
+    },
+    {
+      name: "deleted file",
+      line: null,
+      originalLine: 5,
+      originalCommit: "deleted-sha",
+      commit: null,
+      path: "src/deleted.ts",
+      expected: "deleted-sha/src/deleted.ts#L5",
+    },
+    {
+      name: "moved line",
+      line: 19,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts#L19",
+    },
+    {
+      name: "missing original commit",
+      line: null,
+      originalLine: 5,
+      originalCommit: null,
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts",
+    },
+    {
+      name: "missing current commit",
+      line: 19,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: null,
+      path: "src/a.ts",
+      expected: "original-sha/src/a.ts#L5",
+    },
+    {
+      name: "missing position",
+      line: null,
+      originalLine: null,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts",
+    },
+    {
+      name: "invalid original position",
+      line: null,
+      originalLine: 0,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts",
+    },
+    {
+      name: "missing path",
+      line: null,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: null,
+      expected: null,
+    },
+  ])("keeps matching revision metadata for $name", async (scenario) => {
+    const { fetcher: standardFetch } = createStandardFetch();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const requestUrl = new URL(input instanceof Request ? input.url : String(input));
+      const body = String(init?.body ?? "");
+      if (requestUrl.pathname === "/graphql" && body.includes("query ReviewThreads")) {
+        const comment = {
+          ...createReviewComment("comment-1", "Finding"),
+          author: { login: "copilot-pull-request-reviewer[bot]" },
+          path: scenario.path,
+          line: scenario.line,
+          originalLine: scenario.originalLine,
+          commit: scenario.commit ? { oid: scenario.commit } : null,
+          originalCommit: scenario.originalCommit ? { oid: scenario.originalCommit } : null,
+        };
+        const thread = {
+          ...createThread("thread-1", [comment]),
+          path: "src/current.ts",
+          line: scenario.line,
+          originalLine: scenario.originalLine,
+          isOutdated: scenario.line === null,
+        };
+        return jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [thread],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        });
+      }
+      return standardFetch(input, init);
+    });
+    const collected = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+    });
+    expect(collected.reviewThreads[0]?.comments[0]).toMatchObject({
+      commitSha: scenario.commit,
+      originalCommitSha: scenario.originalCommit,
+      line: scenario.line,
+      originalLine: scenario.originalLine,
+    });
+    const result = normalizeCopilotReviewer({ ...collected, repository: "octocat/hello-world" });
+    expect(result.findings[0]?.rawCommentUrl).toBe(
+      scenario.expected
+        ? `https://github.com/octocat/hello-world/blob/${scenario.expected}`
+        : undefined,
+    );
   });
 });
