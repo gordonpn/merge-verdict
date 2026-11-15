@@ -85,6 +85,18 @@ function verifyStandaloneActionArtifacts() {
 export function verifyBundleExports(esm, cjs) {
   assert.deepEqual(Object.keys(esm).sort(), Object.keys(cjs).sort());
   for (const bundle of [esm, cjs]) {
+    assert.deepEqual(bundle.checkIssueLinks("Refs #72"), {
+      references: [{ repository: null, number: 72 }],
+      failureMessage: null,
+    });
+    for (const name of [
+      "createApprovalProvider",
+      "publishCheckRun",
+      "publishErrorCheckRun",
+      "formatChecksReport",
+    ]) {
+      assert.equal(typeof bundle[name], "function", `${name} must be exported`);
+    }
     const config = bundle.createDefaultConfig();
     assert.equal(config.approval.requiredCheck, "merge-verdict");
     assert.equal(bundle.MergeVerdictConfigSchema.parse({}).approval.requiredCheck, "merge-verdict");
