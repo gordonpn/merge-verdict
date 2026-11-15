@@ -479,7 +479,7 @@ describe("runAction end-to-end orchestration", () => {
       const fixture = createPullRequestFixture({
         policyContent:
           "allow_advisory_exemptions: true" +
-          (threshold ? "\nblocking_severity_threshold: " + threshold : ""),
+          (threshold ? `\nblocking_severity_threshold: ${threshold}` : ""),
       });
       const result = await runAction({
         env: baseEnv(),
