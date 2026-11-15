@@ -1,0 +1,29 @@
+name: "Merge Verdict"
+description: "Automated, evidence-based pull request verification and approval engine"
+
+inputs:
+  github-token:
+    description: "GitHub token used to collect pull request evidence and publish verification results"
+    required: true
+    default: ${{ github.token }}
+  config-path:
+    description: "Repository-relative path to the verification policy configuration file"
+    required: false
+    default: ".github/merge-verdict.yml"
+  fail-fast:
+    description: "Exit with a non-zero code when the terminal verdict is FAIL, STALE, or ERROR"
+    required: false
+    default: "false"
+  pull-request-number:
+    description: "Target pull request number for manual workflow_dispatch runs"
+    required: false
+
+outputs:
+  verdict:
+    description: "Terminal verdict (PASS, PENDING, FAIL, STALE, ERROR)"
+  summary:
+    description: "Markdown evaluation summary"
+
+runs:
+  using: "node22"
+  main: "dist/action.js"

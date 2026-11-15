@@ -1,0 +1,53 @@
+name: merge-verdict
+
+on:
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: "Pull request number to evaluate"
+        required: true
+        type: string
+
+concurrency:
+  group: merge-verdict-${{ inputs.pull_request_number || github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  evaluate:
+    name: runner / merge-verdict
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build action bundle
+        run: pnpm run build
+
+      - name: Run Merge Verdict
+        id: merge-verdict
+        uses: ./
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ inputs.pull_request_number }}
