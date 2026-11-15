@@ -150,10 +150,7 @@ export function writeActionOutput(
   if (!outputPath) {
     return;
   }
-  let delimiter = `ghadelimiter_${randomBytes(16).toString("hex")}`;
-  while (value.includes(delimiter)) {
-    delimiter = `ghadelimiter_${randomBytes(16).toString("hex")}`;
-  }
+  const delimiter = `ghadelimiter_${randomBytes(16).toString("hex")}`;
   appendFileSync(outputPath, `${name}<<${delimiter}\n${value}\n${delimiter}\n`, "utf8");
 }
 
@@ -186,6 +183,16 @@ export function loadEventPayload(eventPath: string | undefined): Record<string, 
   return record;
 }
 
+function getNestedString(
+  parent: Record<string, unknown> | null | undefined,
+  childKey: string,
+  leafKey: string,
+): string {
+  const child = asRecord(parent?.[childKey]);
+  const value = child?.[leafKey];
+  return typeof value === "string" ? value.trim() : "";
+}
+
 /**
  * Evaluates mandatory loop-prevention guards from `docs/events-and-state.md` Section 2.2.
  */
@@ -210,9 +217,7 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
   }
 
   if (eventName === "pull_request_review") {
-    const review = asRecord(payload?.review);
-    const reviewUser = asRecord(review?.user);
-    const reviewLogin = typeof reviewUser?.login === "string" ? reviewUser.login.trim() : "";
+    const reviewLogin = getNestedString(asRecord(payload?.review), "user", "login");
     if (isSelfBotLogin(reviewLogin)) {
       return {
         skipped: true,
@@ -222,9 +227,7 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
   }
 
   if (eventName === "issue_comment" || eventName === "pull_request_review_comment") {
-    const comment = asRecord(payload?.comment);
-    const commentUser = asRecord(comment?.user);
-    const commentLogin = typeof commentUser?.login === "string" ? commentUser.login.trim() : "";
+    const commentLogin = getNestedString(asRecord(payload?.comment), "user", "login");
     if (isSelfBotLogin(commentLogin)) {
       return {
         skipped: true,
@@ -241,8 +244,7 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
   }
 
   if (eventName !== "workflow_dispatch") {
-    const sender = asRecord(payload?.sender);
-    const senderLogin = typeof sender?.login === "string" ? sender.login.trim() : "";
+    const senderLogin = getNestedString(payload, "sender", "login");
     if (isSelfBotLogin(senderLogin)) {
       return {
         skipped: true,
@@ -261,9 +263,8 @@ export function parseRepository(
   rawRepository: string | undefined,
   payload?: Record<string, unknown> | null,
 ): RepositoryCoordinates | null {
-  const payloadRepo = asRecord(payload?.repository);
-  const fallbackFullName = typeof payloadRepo?.full_name === "string" ? payloadRepo.full_name : "";
-  const candidate = rawRepository?.trim() || fallbackFullName.trim();
+  const fallbackFullName = getNestedString(payload, "repository", "full_name");
+  const candidate = rawRepository?.trim() || fallbackFullName;
   if (!candidate) {
     return null;
   }
@@ -324,19 +325,13 @@ export function extractPullRequestNumber(
     return null;
   }
 
-  const inputs = asRecord(payload.inputs);
-  for (const key of ["pull_request_number", "pr_number"] as const) {
-    const rawVal = inputs?.[key];
-    if (rawVal !== undefined && rawVal !== null && rawVal !== "") {
-      return parsePositiveSafeInteger(rawVal);
-    }
-  }
-
-  const clientPayload = asRecord(payload.client_payload);
-  for (const key of ["pull_request_number", "pr_number"] as const) {
-    const rawVal = clientPayload?.[key];
-    if (rawVal !== undefined && rawVal !== null && rawVal !== "") {
-      return parsePositiveSafeInteger(rawVal);
+  for (const containerKey of ["inputs", "client_payload"] as const) {
+    const container = asRecord(payload[containerKey]);
+    for (const key of ["pull_request_number", "pr_number"] as const) {
+      const rawVal = container?.[key];
+      if (rawVal !== undefined && rawVal !== null && rawVal !== "") {
+        return parsePositiveSafeInteger(rawVal);
+      }
     }
   }
 
@@ -369,7 +364,8 @@ function sanitizeDiagnostic(message: string): string {
   return redacted.length > 2000 ? `${redacted.slice(0, 1997)}...` : redacted;
 }
 
-function buildPreSnapshotErrorReport(params: {
+function failBeforeSnapshot(params: {
+  readonly env: NodeJS.ProcessEnv;
   readonly repository: string | null;
   readonly pullRequestNumber: number | null;
   readonly configPath: string;
@@ -377,7 +373,7 @@ function buildPreSnapshotErrorReport(params: {
   readonly summary: string;
   readonly diagnostic: string;
   readonly noCheckCreatedNotice?: boolean;
-}): string {
+}): ActionRunResult {
   const lines: string[] = [
     "# Merge Verdict: ERROR",
     "",
@@ -410,7 +406,28 @@ function buildPreSnapshotErrorReport(params: {
     params.diagnostic,
     "",
   );
-  return lines.join("\n");
+  const report = lines.join("\n");
+
+  writeActionOutput("verdict", "ERROR", params.env);
+  writeActionOutput("summary", params.summary, params.env);
+  appendStepSummary(report, params.env);
+  process.exitCode = 1;
+
+  return {
+    verdict: "ERROR",
+    summary: params.summary,
+    report,
+    exitCode: 1,
+    skipped: false,
+    skipReason: null,
+    repository: params.repository,
+    pullRequestNumber: params.pullRequestNumber,
+    headSha: null,
+    snapshot: null,
+    riskTier: null,
+    evaluation: null,
+    checksReport: null,
+  };
 }
 
 function appendMetadataFooter(params: {
@@ -453,6 +470,10 @@ function appendMetadataFooter(params: {
   return lines.join("\n");
 }
 
+function formatError(error: unknown): string {
+  return sanitizeDiagnostic(error instanceof Error ? error.message : String(error));
+}
+
 /**
  * Executes the Merge Verdict GitHub Action workflow entry point.
  */
@@ -465,36 +486,17 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
   try {
     payload = loadEventPayload(env.GITHUB_EVENT_PATH);
   } catch (error) {
-    const diagnostic = sanitizeDiagnostic(error instanceof Error ? error.message : String(error));
-    const summary = `ERROR: Failed to read GitHub event payload (${diagnostic}).`;
-    const report = buildPreSnapshotErrorReport({
+    const diagnostic = formatError(error);
+    return failBeforeSnapshot({
+      env,
       repository: env.GITHUB_REPOSITORY?.trim() || null,
       pullRequestNumber: null,
       configPath,
       evaluatedAt,
-      summary,
+      summary: `ERROR: Failed to read GitHub event payload (${diagnostic}).`,
       diagnostic,
       noCheckCreatedNotice: true,
     });
-    writeActionOutput("verdict", "ERROR", env);
-    writeActionOutput("summary", summary, env);
-    appendStepSummary(report, env);
-    process.exitCode = 1;
-    return {
-      verdict: "ERROR",
-      summary,
-      report,
-      exitCode: 1,
-      skipped: false,
-      skipReason: null,
-      repository: env.GITHUB_REPOSITORY?.trim() || null,
-      pullRequestNumber: null,
-      headSha: null,
-      snapshot: null,
-      riskTier: null,
-      evaluation: null,
-      checksReport: null,
-    };
   }
 
   const selfTrigger = isSelfTriggeredEvent({
@@ -504,7 +506,7 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
   });
 
   if (selfTrigger.skipped) {
-    const summary = `SKIPPED_SELF_EVENT: ${selfTrigger.reason ?? "Ignored self-triggered event."}`;
+    const summary = `SKIPPED_SELF_EVENT: ${selfTrigger.reason}`;
     const report = [
       "# Merge Verdict: SKIPPED_SELF_EVENT",
       "",
@@ -546,35 +548,16 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
       missingParts.push("pull request number (expected positive integer)");
     }
     const diagnostic = `Missing or invalid ${missingParts.join(" and ")} for event "${env.GITHUB_EVENT_NAME ?? "unknown"}".`;
-    const summary = `ERROR: ${diagnostic} No check run was created.`;
-    const report = buildPreSnapshotErrorReport({
+    return failBeforeSnapshot({
+      env,
       repository: repository?.fullName ?? null,
       pullRequestNumber,
       configPath,
       evaluatedAt,
-      summary,
+      summary: `ERROR: ${diagnostic} No check run was created.`,
       diagnostic,
       noCheckCreatedNotice: true,
     });
-    writeActionOutput("verdict", "ERROR", env);
-    writeActionOutput("summary", summary, env);
-    appendStepSummary(report, env);
-    process.exitCode = 1;
-    return {
-      verdict: "ERROR",
-      summary,
-      report,
-      exitCode: 1,
-      skipped: false,
-      skipReason: null,
-      repository: repository?.fullName ?? null,
-      pullRequestNumber,
-      headSha: null,
-      snapshot: null,
-      riskTier: null,
-      evaluation: null,
-      checksReport: null,
-    };
   }
 
   let failFast = false;
@@ -598,35 +581,16 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
       ...(options.normalizers ? { normalizers: options.normalizers } : {}),
     });
   } catch (error) {
-    const diagnostic = sanitizeDiagnostic(error instanceof Error ? error.message : String(error));
-    const summary = `ERROR: Pre-evaluation failure for ${repository.fullName}#${pullRequestNumber} (${diagnostic}).`;
-    const report = buildPreSnapshotErrorReport({
+    const diagnostic = formatError(error);
+    return failBeforeSnapshot({
+      env,
       repository: repository.fullName,
       pullRequestNumber,
       configPath,
       evaluatedAt,
-      summary,
+      summary: `ERROR: Pre-evaluation failure for ${repository.fullName}#${pullRequestNumber} (${diagnostic}).`,
       diagnostic,
     });
-    writeActionOutput("verdict", "ERROR", env);
-    writeActionOutput("summary", summary, env);
-    appendStepSummary(report, env);
-    process.exitCode = 1;
-    return {
-      verdict: "ERROR",
-      summary,
-      report,
-      exitCode: 1,
-      skipped: false,
-      skipReason: null,
-      repository: repository.fullName,
-      pullRequestNumber,
-      headSha: null,
-      snapshot: null,
-      riskTier: null,
-      evaluation: null,
-      checksReport: null,
-    };
   }
 
   const risk = evaluateRiskTier(initialPrData.changedFilePaths, config);
@@ -655,9 +619,7 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
       stateFingerprint: finalReviewSnapshot.stateFingerprint,
     };
   } catch (error) {
-    executionErrors.push(
-      sanitizeDiagnostic(error instanceof Error ? error.message : String(error)),
-    );
+    executionErrors.push(formatError(error));
   }
 
   const repositoryRules = [...(options.repositoryRules ?? [])];
@@ -744,12 +706,22 @@ export function shouldAutoRun(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.GITHUB_ACTIONS === "true";
 }
 
-if (shouldAutoRun(process.env)) {
-  void runAction().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    appendStepSummary(
-      `# Merge Verdict: ERROR\n\nUnhandled action error: ${sanitizeDiagnostic(message)}\n`,
-    );
-    process.exitCode = 1;
-  });
+/**
+ * Invokes the provided action runner when `shouldAutoRun(env)` is true.
+ */
+export function executeIfAutoRun(
+  env: NodeJS.ProcessEnv = process.env,
+  runner: () => Promise<unknown> = () => runAction({ env }),
+): void {
+  if (shouldAutoRun(env)) {
+    void runner().catch((error: unknown) => {
+      appendStepSummary(
+        `# Merge Verdict: ERROR\n\nUnhandled action error: ${formatError(error)}\n`,
+        env,
+      );
+      process.exitCode = 1;
+    });
+  }
 }
+
+executeIfAutoRun(process.env);

@@ -21,9 +21,20 @@ inputs:
 outputs:
   verdict:
     description: "Terminal verdict (PASS, PENDING, FAIL, STALE, ERROR)"
+    value: ${{ steps.evaluate.outputs.verdict }}
   summary:
     description: "Markdown evaluation summary"
+    value: ${{ steps.evaluate.outputs.summary }}
 
 runs:
-  using: "node22"
-  main: "dist/action.js"
+  using: "composite"
+  steps:
+    - id: evaluate
+      name: Run Merge Verdict
+      shell: bash
+      env:
+        INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
+        INPUT_CONFIG-PATH: ${{ inputs.config-path }}
+        INPUT_FAIL-FAST: ${{ inputs.fail-fast }}
+        INPUT_PULL-REQUEST-NUMBER: ${{ inputs.pull-request-number }}
+      run: node "${GITHUB_ACTION_PATH}/dist/action.js"

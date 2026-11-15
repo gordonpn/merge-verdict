@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendStepSummary,
+  executeIfAutoRun,
   extractPullRequestNumber,
   getActionInput,
   isSelfTriggeredEvent,
@@ -146,6 +147,9 @@ describe("GitHub Action environment and input helpers", () => {
   });
 
   it("writes multiline outputs to GITHUB_OUTPUT and summaries to GITHUB_STEP_SUMMARY", () => {
+    writeActionOutput("verdict", "PASS", {});
+    appendStepSummary("Ignored when unset", {});
+
     const outputFile = join(tempDir, "github_output.txt");
     const summaryFile = join(tempDir, "step_summary.md");
     const env: NodeJS.ProcessEnv = {
@@ -156,6 +160,7 @@ describe("GitHub Action environment and input helpers", () => {
     writeActionOutput("verdict", "PASS", env);
     writeActionOutput("summary", "Line 1\nLine 2", env);
     appendStepSummary("# Heading\n\nBody text", env);
+    appendStepSummary("Already newline\n", env);
 
     const parsedOutputs = parseGitHubOutputFile(readFileSync(outputFile, "utf8"));
     expect(parsedOutputs).toEqual({
@@ -164,7 +169,7 @@ describe("GitHub Action environment and input helpers", () => {
     });
 
     const summaryContent = readFileSync(summaryFile, "utf8");
-    expect(summaryContent).toBe("# Heading\n\nBody text\n");
+    expect(summaryContent).toBe("# Heading\n\nBody text\nAlready newline\n");
   });
 
   it("loads valid JSON event payloads and throws on invalid JSON roots", () => {
@@ -179,7 +184,7 @@ describe("GitHub Action environment and input helpers", () => {
     expect(() => loadEventPayload(arrayPath)).toThrow(TypeError);
   });
 
-  it("guards automatic module execution in tests and non-Actions environments", () => {
+  it("guards automatic module execution in tests and non-Actions environments", async () => {
     expect(shouldAutoRun({ GITHUB_ACTIONS: "true", VITEST: "true" })).toBe(false);
     expect(shouldAutoRun({ GITHUB_ACTIONS: "true", NODE_ENV: "test" })).toBe(false);
     expect(
@@ -191,6 +196,31 @@ describe("GitHub Action environment and input helpers", () => {
     expect(shouldAutoRun({ GITHUB_ACTIONS: "false" })).toBe(false);
     expect(shouldAutoRun({ GITHUB_ACTIONS: "true", NODE_ENV: "production" })).toBe(true);
     expect(shouldAutoRun({ MERGE_VERDICT_FORCE_AUTORUN: "true" })).toBe(true);
+
+    const summaryFile = join(tempDir, "autorun_summary.md");
+    const skippedRunner = vi.fn().mockResolvedValue(undefined);
+    executeIfAutoRun({ GITHUB_ACTIONS: "false" }, skippedRunner);
+    expect(skippedRunner).not.toHaveBeenCalled();
+
+    const failingRunner = vi.fn().mockRejectedValue("unhandled rejection");
+    executeIfAutoRun(
+      {
+        MERGE_VERDICT_FORCE_AUTORUN: "true",
+        GITHUB_STEP_SUMMARY: summaryFile,
+      },
+      failingRunner,
+    );
+    await Promise.resolve();
+    expect(failingRunner).toHaveBeenCalledTimes(1);
+    expect(process.exitCode).toBe(1);
+    expect(readFileSync(summaryFile, "utf8")).toContain("unhandled rejection");
+
+    executeIfAutoRun({
+      MERGE_VERDICT_FORCE_AUTORUN: "true",
+      GITHUB_REPOSITORY: "",
+      GITHUB_STEP_SUMMARY: summaryFile,
+    });
+    await Promise.resolve();
   });
 });
 
@@ -218,6 +248,8 @@ describe("repository and pull request number extraction", () => {
   });
 
   it("extracts pull request numbers across workflow_dispatch, pull_request, issue_comment, and repository_dispatch", () => {
+    expect(extractPullRequestNumber(undefined, null)).toBeNull();
+    expect(extractPullRequestNumber(undefined, {})).toBeNull();
     expect(extractPullRequestNumber("42", { pull_request: { number: 99 } })).toBe(42);
     expect(extractPullRequestNumber("invalid", { pull_request: { number: 99 } })).toBeNull();
 
@@ -263,6 +295,18 @@ describe("repository and pull request number extraction", () => {
       }),
     ).toBe(77);
 
+    expect(
+      extractPullRequestNumber(undefined, {
+        check_run: { pull_requests: [{}] },
+      }),
+    ).toBeNull();
+
+    expect(
+      extractPullRequestNumber(undefined, {
+        pull_request: { number: true },
+      }),
+    ).toBeNull();
+
     expect(extractPullRequestNumber("0", {})).toBeNull();
     expect(extractPullRequestNumber("-5", {})).toBeNull();
   });
@@ -282,6 +326,18 @@ describe("isSelfTriggeredEvent loop prevention", () => {
     },
   );
 
+  it("skips non-dispatch events when payload.sender.login is a self bot", () => {
+    const result = isSelfTriggeredEvent({
+      eventName: "pull_request",
+      actor: "octocat",
+      payload: {
+        sender: { login: "github-actions[bot]" },
+      },
+    });
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toContain("github-actions[bot]");
+  });
+
   it("skips pull_request_review events authored by Merge Verdict or GitHub Actions bots", () => {
     const result = isSelfTriggeredEvent({
       eventName: "pull_request_review",
@@ -292,6 +348,16 @@ describe("isSelfTriggeredEvent loop prevention", () => {
     });
     expect(result.skipped).toBe(true);
     expect(result.reason).toContain("merge-verdict[bot]");
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "pull_request_review",
+        actor: "octocat",
+        payload: {
+          review: { user: { login: "reviewer-human" } },
+        },
+      }).skipped,
+    ).toBe(false);
   });
 
   it("skips issue_comment events authored by Merge Verdict or GitHub Actions bots", () => {
@@ -304,6 +370,16 @@ describe("isSelfTriggeredEvent loop prevention", () => {
     });
     expect(result.skipped).toBe(true);
     expect(result.reason).toContain("github-actions[bot]");
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "pull_request_review_comment",
+        actor: "octocat",
+        payload: {
+          comment: { user: { login: "reviewer-human" } },
+        },
+      }).skipped,
+    ).toBe(false);
   });
 
   it("skips check_run events for the merge-verdict check run", () => {
@@ -395,12 +471,11 @@ describe("runAction end-to-end orchestration", () => {
   it("evaluates a passing pull request and writes PASS outputs and step summary metadata", async () => {
     const fixture = createPullRequestFixture();
     const collectPullRequest = vi.fn().mockResolvedValue(fixture);
-    const collector: PullRequestCollector = { collectPullRequest };
+    const createCollector = vi.fn().mockReturnValue({ collectPullRequest });
 
     const result = await runAction({
       env: baseEnv(),
-      collector,
-      now: fixedNow,
+      createCollector,
     });
 
     expect(result.verdict).toBe("PASS");
@@ -408,6 +483,7 @@ describe("runAction end-to-end orchestration", () => {
     expect(result.headSha).toBe(fixture.headSha);
     expect(result.riskTier?.tier).toBe("low");
     expect(result.riskTier?.canAutoApprove).toBe(true);
+    expect(createCollector).toHaveBeenCalledWith("test-token");
     expect(collectPullRequest).toHaveBeenCalledTimes(2);
 
     const outputs = parseGitHubOutputFile(readFileSync(outputFile, "utf8"));
@@ -458,6 +534,46 @@ describe("runAction end-to-end orchestration", () => {
         subject: "ci / test",
       }),
     ]);
+  });
+
+  it("evaluates unresolved review threads and semantic verification requirements", async () => {
+    const fixture = createPullRequestFixture({
+      changedFilePaths: ["src/unknown.ts"],
+      reviewThreads: [
+        {
+          id: "PRRT_unresolved_1",
+          isResolved: false,
+          resolvedByLogin: null,
+          isOutdated: false,
+          path: "src/unknown.ts",
+          line: 10,
+          originalLine: 10,
+          comments: [],
+        },
+      ],
+      policyContent: ["semantic_verification:", "  enabled: true"].join("\n"),
+    });
+    const collector: PullRequestCollector = {
+      collectPullRequest: vi.fn().mockResolvedValue(fixture),
+    };
+
+    const result = await runAction({
+      env: baseEnv(),
+      collector,
+      now: fixedNow,
+      normalizers: [],
+    });
+
+    expect(result.verdict).toBe("FAIL");
+    expect(result.riskTier?.tier).toBeNull();
+    expect(result.evaluation?.reasons).toContainEqual(
+      expect.objectContaining({
+        condition: 3,
+        outcome: "FAIL",
+        code: "UNCLASSIFIED_UNRESOLVED_THREADS",
+        subject: "PRRT_unresolved_1",
+      }),
+    );
   });
 
   it("returns FAIL when a required check fails and respects fail-fast", async () => {
@@ -529,9 +645,14 @@ describe("runAction end-to-end orchestration", () => {
     expect(readFileSync(summaryFile, "utf8")).toContain("SNAPSHOT_CHANGED");
   });
 
-  it("handles pre-snapshot collector or policy errors with a bounded ERROR report", async () => {
+  it("handles pre-snapshot collector or policy errors with a bounded ERROR report and redacts tokens", async () => {
+    const longDetail = "x".repeat(2100);
     const collector: PullRequestCollector = {
-      collectPullRequest: vi.fn().mockRejectedValue(new Error("GitHub API rate limit exceeded")),
+      collectPullRequest: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(`GitHub API rate limit with token ghp_secret1234567890 ${longDetail}`),
+        ),
     };
 
     const result = await runAction({
@@ -546,11 +667,26 @@ describe("runAction end-to-end orchestration", () => {
 
     const outputs = parseGitHubOutputFile(readFileSync(outputFile, "utf8"));
     expect(outputs.verdict).toBe("ERROR");
-    expect(outputs.summary).toContain("GitHub API rate limit exceeded");
+    expect(outputs.summary).toContain("[REDACTED_TOKEN]");
+    expect(outputs.summary).not.toContain("ghp_secret1234567890");
 
     const stepSummary = readFileSync(summaryFile, "utf8");
     expect(stepSummary).toContain("# Merge Verdict: ERROR");
-    expect(stepSummary).toContain("GitHub API rate limit exceeded");
+    expect(stepSummary).toContain("[REDACTED_TOKEN]");
+  });
+
+  it("handles unreadable GITHUB_EVENT_PATH payloads cleanly before snapshot creation", async () => {
+    const invalidEventFile = join(tempDir, "broken.json");
+    writeFileSync(invalidEventFile, "{malformed-json", "utf8");
+
+    const result = await runAction({
+      env: baseEnv({ GITHUB_EVENT_PATH: invalidEventFile, GITHUB_REPOSITORY: "" }),
+      now: fixedNow,
+    });
+
+    expect(result.verdict).toBe("ERROR");
+    expect(result.exitCode).toBe(1);
+    expect(result.summary).toContain("Failed to read GitHub event payload");
   });
 
   it("records Condition 7 EXECUTION_ERROR when final snapshot re-collection fails", async () => {
@@ -559,7 +695,7 @@ describe("runAction end-to-end orchestration", () => {
       collectPullRequest: vi
         .fn()
         .mockResolvedValueOnce(initialFixture)
-        .mockRejectedValueOnce(new Error("Transient network reset during revalidation")),
+        .mockRejectedValueOnce("Transient network reset during revalidation"),
     };
 
     const result = await runAction({
