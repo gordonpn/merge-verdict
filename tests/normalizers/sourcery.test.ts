@@ -552,7 +552,7 @@ describe("normalizeSourceryReviewer", () => {
           conclusion: "neutral",
           commitSha: headSha,
           detailsUrl: null,
-          output: { title: "Rate limited", summary: null, text: null },
+          output: { title: "Sourcery review", summary: null, text: null },
           startedAt: null,
           completedAt: "2026-11-16T02:58:30Z",
         },
