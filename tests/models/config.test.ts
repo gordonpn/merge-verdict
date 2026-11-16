@@ -182,6 +182,7 @@ permitted_check_conclusions:
     expect(config.semanticVerification.maxTokensPerRun).toBe(2500);
     expect(config.verification.requireCurrentHeadSha).toBe(true);
     expect(config.verification.requireCodeEvidence).toBe(false);
+    expect(config.verification.requireIssueLinks).toBeUndefined();
     expect(config.approval.requiredCheck).toBe("merge-verdict-custom");
     expect(config.approval.providers).toEqual(["github_copilot"]);
     expect(config.approval.risk.low?.automatedApproval).toBe("allowed");
@@ -198,6 +199,21 @@ permitted_check_conclusions:
     });
 
     expect(() => MergeVerdictConfigSchema.parse({ verification: false })).toThrow();
+  });
+
+  it("supports optional verification.require_issue_links boolean setting", () => {
+    const enabled = MergeVerdictConfigSchema.parse({
+      verification: { require_issue_links: true },
+    });
+    const disabled = MergeVerdictConfigSchema.parse({
+      verification: { require_issue_links: false },
+    });
+
+    expect(enabled.verification.requireIssueLinks).toBe(true);
+    expect(disabled.verification.requireIssueLinks).toBe(false);
+    expect(() =>
+      MergeVerdictConfigSchema.parse({ verification: { require_issue_links: "yes" } }),
+    ).toThrow();
   });
 
   it("rejects disabling mandatory core verification gates", () => {

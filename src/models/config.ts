@@ -115,18 +115,21 @@ const BaseVerificationRulesConfigSchema = z.strictObject({
   requireResolvedThreads: z.literal(true).default(true),
   requireSuccessfulCi: z.literal(true).default(true),
   requireCodeEvidence: z.boolean().default(true),
+  requireIssueLinks: z.boolean().optional(),
 });
 
 /**
  * Zod schema validating verification rules with boolean shorthand support.
  */
 export const VerificationRulesConfigSchema = z.union([
-  z.literal(true).transform(() => ({
-    requireCurrentHeadSha: true as const,
-    requireResolvedThreads: true as const,
-    requireSuccessfulCi: true as const,
-    requireCodeEvidence: true,
-  })),
+  z.literal(true).transform(
+    (): VerificationRulesConfig => ({
+      requireCurrentHeadSha: true as const,
+      requireResolvedThreads: true as const,
+      requireSuccessfulCi: true as const,
+      requireCodeEvidence: true,
+    }),
+  ),
   BaseVerificationRulesConfigSchema,
 ]);
 
