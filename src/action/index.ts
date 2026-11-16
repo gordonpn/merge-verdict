@@ -506,6 +506,20 @@ function buildSnapshot(
   });
 }
 
+function hasCollectionDrift(
+  initial: GitHubPullRequestData,
+  next: GitHubPullRequestData,
+  trackBody: boolean,
+): boolean {
+  return (
+    next.baseSha !== initial.baseSha ||
+    next.policyVersion !== initial.policyVersion ||
+    next.policyContent !== initial.policyContent ||
+    !haveSameStringSet(next.changedFilePaths, initial.changedFilePaths) ||
+    (trackBody && (next.body ?? null) !== (initial.body ?? null))
+  );
+}
+
 /**
  * Executes the Merge Verdict GitHub Action workflow entry point.
  */
@@ -668,6 +682,10 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
     .filter((thread) => !thread.isResolved)
     .map((thread) => thread.id);
 
+  const requireIssueLink =
+    options.requireIssueLink ?? config.verification.requireIssueLinks === true;
+  const trackBodyFreshness = requireIssueLink && options.pullRequestBody === undefined;
+
   const executionErrors: string[] = [];
   let finalSnapshot = {
     headSha: snapshot.headSha,
@@ -677,14 +695,10 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
   try {
     const finalPrData = await collector.collectPullRequest(collectInput);
     const finalReviewSnapshot = buildSnapshot(finalPrData, evaluatedAt, options.normalizers);
-    const baseOrPathsChanged =
-      finalPrData.baseSha !== initialPrData.baseSha ||
-      finalPrData.policyVersion !== initialPrData.policyVersion ||
-      finalPrData.policyContent !== initialPrData.policyContent ||
-      !haveSameStringSet(finalPrData.changedFilePaths, initialPrData.changedFilePaths);
+    const collectionDrifted = hasCollectionDrift(initialPrData, finalPrData, trackBodyFreshness);
     finalSnapshot = {
       headSha: finalReviewSnapshot.headSha,
-      stateFingerprint: baseOrPathsChanged
+      stateFingerprint: collectionDrifted
         ? `stale-policy-or-paths:${snapshot.stateFingerprint}`
         : finalReviewSnapshot.stateFingerprint,
     };
@@ -693,8 +707,6 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
   }
 
   const repositoryRules = [...(options.repositoryRules ?? [])];
-  const requireIssueLink =
-    options.requireIssueLink ?? config.verification.requireIssueLinks === true;
   const pullRequestBody =
     options.pullRequestBody !== undefined ? options.pullRequestBody : (initialPrData.body ?? null);
   if (requireIssueLink) {
@@ -735,12 +747,7 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
       getLatestStateFingerprint: async () => {
         if (evaluation.verdict !== "PASS") return finalSnapshot.stateFingerprint;
         const latest = await collector.collectPullRequest(collectInput);
-        if (
-          latest.baseSha !== initialPrData.baseSha ||
-          latest.policyVersion !== initialPrData.policyVersion ||
-          latest.policyContent !== initialPrData.policyContent ||
-          !haveSameStringSet(latest.changedFilePaths, initialPrData.changedFilePaths)
-        ) {
+        if (hasCollectionDrift(initialPrData, latest, trackBodyFreshness)) {
           return `stale-policy-or-paths:${snapshot.stateFingerprint}`;
         }
         return buildSnapshot(latest, evaluatedAt, options.normalizers).stateFingerprint;

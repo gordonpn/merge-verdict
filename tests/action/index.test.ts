@@ -1442,4 +1442,62 @@ describe("runAction end-to-end orchestration", () => {
     });
     expect(stalePathsRun.verdict).toBe("STALE");
   });
+
+  it("returns STALE when PR body changes during final or pre-publish checks under require_issue_links", async () => {
+    const policyWithIssueLinks = [
+      "required_checks:",
+      "  - ci / test",
+      "verification:",
+      "  require_code_evidence: false",
+      "  require_issue_links: true",
+    ].join("\n");
+    const linkedFixture = createPullRequestFixture({
+      body: "Refs #72",
+      policyContent: policyWithIssueLinks,
+    });
+    const unlinkedFixture = createPullRequestFixture({
+      body: "Issue link removed",
+      policyContent: policyWithIssueLinks,
+    });
+
+    const finalDriftRun = await runAction({
+      env: baseEnv(),
+      collector: {
+        collectPullRequest: vi
+          .fn()
+          .mockResolvedValueOnce(linkedFixture)
+          .mockResolvedValueOnce(unlinkedFixture),
+      },
+      now: fixedNow,
+    });
+    expect(finalDriftRun.verdict).toBe("STALE");
+    expect(finalDriftRun.evaluation?.reasons).toContainEqual(
+      expect.objectContaining({
+        condition: 6,
+        outcome: "STALE",
+        code: "SNAPSHOT_CHANGED",
+      }),
+    );
+
+    const checks = createChecksFixture();
+    const prePublishDriftRun = await runAction({
+      env: baseEnv(),
+      checksClient: checks.client,
+      collector: {
+        collectPullRequest: vi
+          .fn()
+          .mockResolvedValueOnce(linkedFixture)
+          .mockResolvedValueOnce(linkedFixture)
+          .mockResolvedValueOnce(unlinkedFixture),
+      },
+      now: fixedNow,
+    });
+    expect(prePublishDriftRun.verdict).toBe("STALE");
+    expect(checks.createCheckRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "completed",
+        conclusion: "action_required",
+      }),
+    );
+  });
 });
