@@ -27,6 +27,9 @@ query ReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: Str
               commit {
                 oid
               }
+              originalCommit {
+                oid
+              }
             }
             pageInfo {
               hasNextPage

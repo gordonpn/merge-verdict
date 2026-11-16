@@ -35,6 +35,7 @@ interface ReviewThreadCommentNode {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly commit: { readonly oid: string } | null;
+  readonly originalCommit?: { readonly oid: string } | null;
 }
 
 interface ReviewThreadCommentConnection {
@@ -124,6 +125,8 @@ export interface GitHubReviewThreadComment {
   readonly path: string | null;
   readonly line: number | null;
   readonly originalLine: number | null;
+  /** Revision matching originalLine and path; optional for existing callers and fixtures. */
+  readonly originalCommitSha?: string | null;
   readonly commitSha: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -374,6 +377,7 @@ function mapThreadComment(comment: ReviewThreadCommentNode): GitHubReviewThreadC
     line: comment.line,
     originalLine: comment.originalLine,
     commitSha: comment.commit?.oid ?? null,
+    originalCommitSha: comment.originalCommit?.oid ?? null,
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
   };
