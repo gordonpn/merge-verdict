@@ -525,4 +525,31 @@ describe("normalizeCopilotReviewer", () => {
     expect(result.isFresh).toBe(false);
     expect(result.evaluatedCommitSha).toBe(olderSha);
   });
+
+  it("does not classify a completed COMMENTED review discussing rate limiting as RATE_LIMITED", () => {
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 5914538935,
+        reviewerLogin: "copilot-pull-request-reviewer[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-11-16T03:00:00Z",
+        body: "This pull request adds rate limiting to the API endpoints.",
+        bodyDigest: "d_prose_rate_limit",
+      },
+    ];
+
+    const result = normalizeCopilotReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("COMMENTED");
+    expect(result.isFresh).toBe(true);
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
 });

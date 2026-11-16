@@ -15,9 +15,8 @@ const COPILOT_LOGINS = new Set([
 ]);
 
 const RATE_LIMIT_PATTERNS = [
+  /unable to review\b[^\n]*\b(?:insufficient remaining quota|quota|rate limit)/i,
   /insufficient remaining quota/i,
-  /quota (?:limit )?(?:reached|exceeded)/i,
-  /rate limit(?:ed)?/i,
 ];
 
 function isCopilotAuthor(login: string | null): boolean {
