@@ -26,9 +26,24 @@ export const ReviewSnapshotSchema = z.object({
 export type ReviewSnapshot = z.infer<typeof ReviewSnapshotSchema>;
 
 /**
- * Input fields required to compute a deterministic state fingerprint.
+ * Mutable comment metadata used by the atomic pre-flight guard.
  */
+export interface FingerprintComment {
+  readonly id: string | number;
+  readonly updatedAt: string | null;
+  readonly bodyDigest: string | null;
+}
+
+/** Input fields required to compute a deterministic state fingerprint. */
 export interface StateFingerprintInput {
+  readonly conversationComments?: readonly FingerprintComment[];
+  readonly reviewThreads?: readonly {
+    readonly id: string;
+    readonly isResolved: boolean;
+    readonly isOutdated: boolean;
+    readonly resolvedByLogin: string | null;
+    readonly comments: readonly FingerprintComment[];
+  }[];
   readonly headSha: string;
   readonly unresolvedThreadCount: number;
   readonly blockingDecisionCount: number;
@@ -104,8 +119,25 @@ export function computeStateFingerprint(input: StateFingerprintInput): string {
     commitSha: run.commitSha,
   }));
 
+  const normalizeComments = (comments: readonly FingerprintComment[]) =>
+    comments
+      .map(({ id, updatedAt, bodyDigest }) => ({ id, updatedAt, bodyDigest }))
+      .sort((a, b) => compareCodeUnits(String(a.id), String(b.id)));
+  const conversationComments = normalizeComments(input.conversationComments ?? []);
+  const reviewThreads = (input.reviewThreads ?? [])
+    .map((thread) => ({
+      id: thread.id,
+      isResolved: thread.isResolved,
+      isOutdated: thread.isOutdated,
+      resolvedByLogin: thread.resolvedByLogin,
+      comments: normalizeComments(thread.comments),
+    }))
+    .sort((a, b) => compareCodeUnits(a.id, b.id));
+
   const canonicalPayload = JSON.stringify({
     headSha: input.headSha,
+    conversationComments,
+    reviewThreads,
     unresolvedThreadCount: input.unresolvedThreadCount,
     blockingDecisionCount: input.blockingDecisionCount,
     reviewers: normalizedReviewers,

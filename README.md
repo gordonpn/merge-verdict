@@ -54,15 +54,15 @@ For full architectural details, see [docs/architecture.md](docs/architecture.md)
 
 ## Contributor Toolchain
 
-The root `.node-version` pins Node.js 22.12.0. With fnm installed, enable
+The root `.node-version` pins Node.js 22.18.0. With fnm installed, enable
 repository selection in Bash with `eval "$(fnm env --use-on-cd --shell bash)"`,
 then run `fnm install` in the repository once to install its pinned runtime.
 Subsequent directory changes select that version automatically.
 
-Verified with fnm 1.38.1: starting outside the repository on system Node.js
-24.22.1, entering the repository selected Node.js 22.12.0 from `.node-version`.
-Both `fnm current` and `node --version` reported `v22.12.0`. The five required
-`just` gates also passed on Node.js 22.12.0.
+The contributor build requires Node.js `^22.18.0 || ^24.11.0 || >=26.0.0`,
+matching tsup 9's engine requirement. The package runtime requirement remains
+Node.js 22.12.0 or newer; development tool requirements do not change the
+supported runtime of the generated library bundles.
 
 ## Project Status
 
@@ -71,7 +71,7 @@ Merge Verdict is currently in the **foundation and architecture phase**. The arc
 ## Building
 
 Run `pnpm install --frozen-lockfile`, then `just build` (or `pnpm run build`)
-with Node.js 22.12 or newer. The build produces standalone `dist/index.js`
+with a supported contributor Node.js version (22.18.0 is pinned). The build produces standalone `dist/index.js`
 (ESM) and `dist/index.cjs` (CommonJS) bundles with source maps. Runtime
 dependencies and GraphQL query text are included in each bundle; Node.js
 built-ins are supplied by the runtime.

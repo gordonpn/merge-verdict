@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 import { describe, expect, it, vi } from "vitest";
-import { createGitHubCollector, GitHubCollector, GitHubCollectorError } from "../../src/index.js";
+import {
+  createGitHubCollector,
+  GitHubCollector,
+  GitHubCollectorError,
+  normalizeCopilotReviewer,
+} from "../../src/index.js";
 
 const repository = { owner: "octocat", repo: "hello-world" };
 const pullRequestNumber = 123;
@@ -246,6 +251,10 @@ function createStandardFetch(
       );
     }
 
+    if (pathname.endsWith("/commits")) {
+      return jsonResponse([{ sha: "head-sha" }], {}, requestUrl.href);
+    }
+
     if (pathname.endsWith("/statuses")) {
       const statuses =
         page === 1
@@ -357,6 +366,110 @@ describe("GitHubCollector", () => {
         .filter((url) => url.pathname.endsWith("/statuses"))
         .every((url) => url.pathname.includes("/head-sha/")),
     ).toBe(true);
+  });
+
+  it("collects body and verified head ancestors independently of evaluation SHA", async () => {
+    const standard = createStandardFetch();
+    const ancestryRequests: URL[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith("/commits")) {
+        ancestryRequests.push(url);
+        const page = Number(url.searchParams.get("page") ?? 1);
+        return jsonResponse(
+          page === 1 ? [{ sha: "head-sha" }, { sha: "parent-a" }] : [{ sha: "parent-b" }],
+          { headers: nextPageHeaders(url, page) },
+          url.href,
+        );
+      }
+      if (url.pathname.endsWith("/pulls/123")) {
+        return jsonResponse(
+          { ...createPullRequestPayload(), body: "Reviewer evidence" },
+          {},
+          url.href,
+        );
+      }
+      return standard.fetcher(input, init);
+    };
+    const result = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+      evaluationSha: "merge-sha",
+    });
+    expect(result.body).toBe("Reviewer evidence");
+    expect(result.ancestorCommitShas).toEqual(["parent-a", "parent-b"]);
+    expect(ancestryRequests).toHaveLength(2);
+    expect(ancestryRequests.every((url) => url.searchParams.get("sha") === "head-sha")).toBe(true);
+  });
+
+  it("loads a custom policy path only at the protected base SHA", async () => {
+    const standard = createStandardFetch();
+    const requests: URL[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (decodeURIComponent(url.pathname).includes("/contents/")) {
+        requests.push(url);
+        return jsonResponse(createPolicyContentPayload(), {}, url.href);
+      }
+      return standard.fetcher(input, init);
+    };
+    const result = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+      configPath: "config/verdict.yml",
+    });
+    expect(result.policyContent).toBe("verification: true");
+    expect(requests).toHaveLength(1);
+    expect(decodeURIComponent(requests[0]?.pathname ?? "")).toContain(
+      "/contents/config/verdict.yml",
+    );
+    expect(requests[0]?.searchParams.get("ref")).toBe("base-sha");
+  });
+
+  it.each([
+    "",
+    "/policy.yml",
+    "../policy.yml",
+    "config/../policy.yml",
+    "config//policy.yml",
+    "https://evil.test/policy",
+    "config\\policy.yml",
+    "config/./policy.yml",
+    "policy.yml\n",
+  ])("rejects unsafe config path %j", async (configPath) => {
+    const { fetcher } = createStandardFetch();
+    await expect(
+      createCollector(fetcher).collectPullRequest({ ...repository, pullRequestNumber, configPath }),
+    ).rejects.toMatchObject({ kind: "policy" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(["error", "overflow"])("handles ancestry %s conservatively", async (mode) => {
+    const standard = createStandardFetch();
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith("/commits")) {
+        if (mode === "error")
+          return jsonResponse({ message: "Forbidden" }, { status: 403 }, url.href);
+        const next = new URL(url);
+        next.searchParams.set("page", String(Number(url.searchParams.get("page") ?? 1) + 1));
+        return jsonResponse(
+          [{ sha: "parent" }],
+          { headers: { link: `<${next.href}>; rel="next"` } },
+          url.href,
+        );
+      }
+      return standard.fetcher(input, init);
+    };
+    const result = createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+    });
+    if (mode === "error") {
+      await expect(result).rejects.toMatchObject({ kind: "api" });
+    } else {
+      expect((await result).ancestorCommitShas).toEqual(["parent"]);
+    }
   });
 
   it("paginates GraphQL review threads and comments in pages of 100", async () => {
@@ -838,5 +951,144 @@ describe("GitHubCollector", () => {
       status: 403,
       message: expect.stringContaining(".github/merge-verdict.yml at base-sha"),
     });
+  });
+});
+
+describe("historical finding provenance", () => {
+  it.each([
+    {
+      name: "current",
+      line: 7,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts#L7",
+    },
+    {
+      name: "outdated",
+      line: null,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "original-sha/src/a.ts#L5",
+    },
+    {
+      name: "deleted file",
+      line: null,
+      originalLine: 5,
+      originalCommit: "deleted-sha",
+      commit: null,
+      path: "src/deleted.ts",
+      expected: "deleted-sha/src/deleted.ts#L5",
+    },
+    {
+      name: "moved line",
+      line: 19,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts#L19",
+    },
+    {
+      name: "missing original commit",
+      line: null,
+      originalLine: 5,
+      originalCommit: null,
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts",
+    },
+    {
+      name: "missing current commit",
+      line: 19,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: null,
+      path: "src/a.ts",
+      expected: "original-sha/src/a.ts#L5",
+    },
+    {
+      name: "missing position",
+      line: null,
+      originalLine: null,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts",
+    },
+    {
+      name: "invalid original position",
+      line: null,
+      originalLine: 0,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: "src/a.ts",
+      expected: "head-sha/src/a.ts",
+    },
+    {
+      name: "missing path",
+      line: null,
+      originalLine: 5,
+      originalCommit: "original-sha",
+      commit: "head-sha",
+      path: null,
+      expected: null,
+    },
+  ])("keeps matching revision metadata for $name", async (scenario) => {
+    const { fetcher: standardFetch } = createStandardFetch();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const requestUrl = new URL(input instanceof Request ? input.url : String(input));
+      const body = String(init?.body ?? "");
+      if (requestUrl.pathname === "/graphql" && body.includes("query ReviewThreads")) {
+        const comment = {
+          ...createReviewComment("comment-1", "Finding"),
+          author: { login: "copilot-pull-request-reviewer[bot]" },
+          path: scenario.path,
+          line: scenario.line,
+          originalLine: scenario.originalLine,
+          commit: scenario.commit ? { oid: scenario.commit } : null,
+          originalCommit: scenario.originalCommit ? { oid: scenario.originalCommit } : null,
+        };
+        const thread = {
+          ...createThread("thread-1", [comment]),
+          path: "src/current.ts",
+          line: scenario.line,
+          originalLine: scenario.originalLine,
+          isOutdated: scenario.line === null,
+        };
+        return jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [thread],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        });
+      }
+      return standardFetch(input, init);
+    });
+    const collected = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+    });
+    expect(collected.reviewThreads[0]?.comments[0]).toMatchObject({
+      commitSha: scenario.commit,
+      originalCommitSha: scenario.originalCommit,
+      line: scenario.line,
+      originalLine: scenario.originalLine,
+    });
+    const result = normalizeCopilotReviewer({ ...collected, repository: "octocat/hello-world" });
+    expect(result.findings[0]?.rawCommentUrl).toBe(
+      scenario.expected
+        ? `https://github.com/octocat/hello-world/blob/${scenario.expected}`
+        : undefined,
+    );
   });
 });

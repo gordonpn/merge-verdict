@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type ActionRuntimeOptions,
   appendStepSummary,
+  runAction as executeAction,
   executeIfAutoRun,
   extractPullRequestNumber,
   getActionInput,
@@ -12,12 +14,16 @@ import {
   type PullRequestCollector,
   parseBooleanInput,
   parseRepository,
-  runAction,
   shouldAutoRun,
   writeActionOutput,
 } from "../../src/action/index.js";
 import type { GitHubPullRequestData } from "../../src/collector/github-collector.js";
 import { VERSION } from "../../src/index.js";
+import type {
+  ChecksClient,
+  CreateCheckRunParams,
+  UpdateCheckRunParams,
+} from "../../src/publisher/checks-api.js";
 
 function createPullRequestFixture(
   overrides: Partial<GitHubPullRequestData> = {},
@@ -74,6 +80,33 @@ function createPullRequestFixture(
     ].join("\n"),
     ...overrides,
   };
+}
+
+function createChecksFixture() {
+  const createCheckRun = vi.fn(async (params: CreateCheckRunParams) => ({
+    id: 1,
+    htmlUrl: "https://example.test/check",
+    status: params.status,
+    conclusion: params.conclusion,
+  }));
+  const updateCheckRun = vi.fn(async (params: UpdateCheckRunParams) => ({
+    id: params.checkRunId,
+    htmlUrl: "https://example.test/check",
+    status: params.status ?? ("completed" as const),
+    conclusion: params.conclusion ?? null,
+  }));
+  const client: ChecksClient = {
+    getHeadSha: vi.fn(async () => createPullRequestFixture().headSha),
+    listCheckRunsForRef: vi.fn(async () => []),
+    createCheckRun,
+    updateCheckRun,
+    isOwnedCheckRun: (run) => run.externalId?.startsWith("merge-verdict:") ?? false,
+  };
+  return { client, createCheckRun, updateCheckRun };
+}
+
+function runAction(options: ActionRuntimeOptions) {
+  return executeAction({ checksClient: createChecksFixture().client, ...options });
 }
 
 function parseGitHubOutputFile(content: string): Record<string, string> {
@@ -447,6 +480,75 @@ describe("runAction end-to-end orchestration", () => {
     };
   }
 
+  it.each(["neutral", "skipped"] as const)(
+    "permits a protected policy's explicit %s check conclusion",
+    async (conclusion) => {
+      const original = createPullRequestFixture();
+      const fixture = createPullRequestFixture({
+        policyContent:
+          "required_checks: [ci_test]\npermitted_check_conclusions:\n  ci_test: [" +
+          conclusion +
+          "]",
+        checkRuns: original.checkRuns.map((run) => ({ ...run, name: "ci_test", conclusion })),
+      });
+      const result = await runAction({
+        env: baseEnv(),
+        collector: { collectPullRequest: vi.fn().mockResolvedValue(fixture) },
+        codeEvidenceSatisfied: true,
+      });
+      expect(result.verdict).toBe("PASS");
+    },
+  );
+
+  it.each([
+    [undefined, "MEDIUM", "FAIL"],
+    ["HIGH", "MEDIUM", "PASS"],
+    ["MEDIUM", "MEDIUM", "FAIL"],
+    [undefined, "LOW", "PASS"],
+    ["LOW", "LOW", "FAIL"],
+  ] as const)(
+    "applies protected severity %s to %s findings",
+    async (threshold, severity, verdict) => {
+      const fixture = createPullRequestFixture({
+        policyContent:
+          "allow_advisory_exemptions: true" +
+          (threshold ? `\nblocking_severity_threshold: ${threshold}` : ""),
+      });
+      const result = await runAction({
+        env: baseEnv(),
+        collector: { collectPullRequest: vi.fn().mockResolvedValue(fixture) },
+        codeEvidenceSatisfied: true,
+        normalizers: [
+          {
+            reviewerId: "test",
+            reviewerName: "Test",
+            normalize: ({ headSha }) => ({
+              reviewerId: "test",
+              reviewerName: "Test",
+              status: "COMPLETED",
+              evaluatedCommitSha: headSha,
+              isFresh: true,
+              verdict: "COMMENTED",
+              checkRunConclusion: null,
+              findings: [
+                {
+                  id: "finding",
+                  reviewerId: "test",
+                  title: "Advisory",
+                  description: "",
+                  severity,
+                  isBlocking: false,
+                  isResolved: false,
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      expect(result.verdict).toBe(verdict);
+    },
+  );
+
   it("terminates with exit code 0 and SKIPPED_SELF_EVENT when self-triggered", async () => {
     const collectPullRequest = vi.fn();
     const collector: PullRequestCollector = { collectPullRequest };
@@ -468,6 +570,295 @@ describe("runAction end-to-end orchestration", () => {
     expect(readFileSync(summaryFile, "utf8")).toContain("SKIPPED_SELF_EVENT");
   });
 
+  it("publishes the authoritative check on the evaluated SHA", async () => {
+    const checks = createChecksFixture();
+    const result = await runAction({
+      env: baseEnv(),
+      collector: { collectPullRequest: vi.fn().mockResolvedValue(createPullRequestFixture()) },
+      checksClient: checks.client,
+      codeEvidenceSatisfied: true,
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("PASS");
+    expect(checks.createCheckRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "merge-verdict",
+        headSha: createPullRequestFixture().headSha,
+        status: "completed",
+        conclusion: "success",
+      }),
+    );
+  });
+
+  it.each([
+    ["PENDING", "in_progress", null],
+    ["FAIL", "completed", "failure"],
+    ["ERROR", "completed", "failure"],
+    ["STALE", "completed", "action_required"],
+  ] as const)(
+    "publishes %s as a blocking or pending check",
+    async (verdict, status, conclusion) => {
+      const checks = createChecksFixture();
+      const fixture = createPullRequestFixture();
+      const changed = createPullRequestFixture({ policyVersion: "changed" });
+      const collector = { collectPullRequest: vi.fn().mockResolvedValue(fixture) };
+      if (verdict === "PENDING")
+        collector.collectPullRequest.mockResolvedValue(
+          createPullRequestFixture({
+            checkRuns: fixture.checkRuns.map((run) => ({
+              ...run,
+              status: "in_progress",
+              conclusion: null,
+            })),
+          }),
+        );
+      if (verdict === "ERROR")
+        collector.collectPullRequest
+          .mockResolvedValueOnce(fixture)
+          .mockRejectedValueOnce(new Error("collection failed"));
+      if (verdict === "STALE")
+        collector.collectPullRequest.mockResolvedValueOnce(fixture).mockResolvedValueOnce(changed);
+      const result = await runAction({
+        env: baseEnv(),
+        collector,
+        checksClient: checks.client,
+        codeEvidenceSatisfied: verdict !== "FAIL",
+        now: fixedNow,
+      });
+      expect(result.verdict).toBe(verdict);
+      expect(checks.createCheckRun).toHaveBeenCalledWith(
+        expect.objectContaining({ headSha: fixture.headSha, status, conclusion }),
+      );
+    },
+  );
+
+  it("revalidates immediately before publication and updates only the owned run on repeated execution", async () => {
+    const checks = createChecksFixture();
+    const fixture = createPullRequestFixture();
+    const collector = { collectPullRequest: vi.fn().mockResolvedValue(fixture) };
+    const options = {
+      env: baseEnv(),
+      collector,
+      checksClient: checks.client,
+      codeEvidenceSatisfied: true,
+      now: fixedNow,
+    };
+    await runAction(options);
+    vi.mocked(checks.client.listCheckRunsForRef).mockResolvedValue([
+      {
+        id: 1,
+        name: "merge-verdict",
+        headSha: fixture.headSha,
+        status: "completed",
+        conclusion: "success",
+        htmlUrl: "",
+        externalId: `merge-verdict:${fixture.headSha}`,
+      },
+      {
+        id: 99,
+        name: "merge-verdict",
+        headSha: fixture.headSha,
+        status: "completed",
+        conclusion: "success",
+        htmlUrl: "",
+        externalId: "other-app",
+      },
+    ]);
+    await runAction(options);
+    expect(checks.createCheckRun).toHaveBeenCalledTimes(1);
+    expect(checks.updateCheckRun).toHaveBeenCalledWith(
+      expect.objectContaining({ checkRunId: 1, conclusion: "success" }),
+    );
+    collector.collectPullRequest
+      .mockResolvedValueOnce(fixture)
+      .mockResolvedValueOnce(fixture)
+      .mockResolvedValueOnce(createPullRequestFixture({ policyVersion: "changed" }));
+    const stale = await runAction(options);
+    expect(stale.verdict).toBe("STALE");
+    expect(checks.updateCheckRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({ checkRunId: 1, conclusion: "action_required" }),
+    );
+  });
+
+  it("invalidates a previous passing check when final freshness collection fails", async () => {
+    const checks = createChecksFixture();
+    const fixture = createPullRequestFixture();
+    vi.mocked(checks.client.listCheckRunsForRef).mockResolvedValue([
+      {
+        id: 1,
+        name: "merge-verdict",
+        headSha: fixture.headSha,
+        status: "completed",
+        conclusion: "success",
+        htmlUrl: "",
+        externalId: `merge-verdict:${fixture.headSha}`,
+      },
+    ]);
+    const collector = {
+      collectPullRequest: vi
+        .fn()
+        .mockResolvedValueOnce(fixture)
+        .mockResolvedValueOnce(fixture)
+        .mockRejectedValueOnce(new Error("final freshness collection failed")),
+    };
+    const result = await runAction({
+      env: baseEnv(),
+      collector,
+      checksClient: checks.client,
+      codeEvidenceSatisfied: true,
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(result.exitCode).toBe(1);
+    expect(checks.updateCheckRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checkRunId: 1,
+        status: "completed",
+        conclusion: "failure",
+      }),
+    );
+    expect(checks.createCheckRun).not.toHaveBeenCalled();
+  });
+
+  it("fails the Action when publication fails even when fail-fast is disabled", async () => {
+    const checks = createChecksFixture();
+    checks.createCheckRun.mockRejectedValue(new Error("permission denied"));
+    const result = await runAction({
+      env: baseEnv(),
+      collector: { collectPullRequest: vi.fn().mockResolvedValue(createPullRequestFixture()) },
+      checksClient: checks.client,
+      codeEvidenceSatisfied: true,
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(result.exitCode).toBe(1);
+    expect(result.summary).toContain("Check publication failed");
+    expect(parseGitHubOutputFile(readFileSync(outputFile, "utf8")).verdict).toBe("ERROR");
+  });
+
+  it("publishes bounded pre-snapshot errors using only an authenticated target head", async () => {
+    const checks = createChecksFixture();
+    const result = await runAction({
+      env: baseEnv(),
+      collector: {
+        collectPullRequest: vi
+          .fn()
+          .mockRejectedValue(new Error(`ghp_secret123 ${"x".repeat(5000)}`)),
+      },
+      checksClient: checks.client,
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(checks.createCheckRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headSha: createPullRequestFixture().headSha,
+        conclusion: "failure",
+      }),
+    );
+    const published = checks.createCheckRun.mock.calls[0]?.[0];
+    expect(published?.output.text).not.toContain("ghp_secret123");
+    expect(published?.output.text.length).toBeLessThan(3000);
+    expect(published?.output.summary.length).toBeLessThan(400);
+  });
+
+  it("uses the checks-client factory and blocks policy errors even if error-publication head lookup fails", async () => {
+    const checks = createChecksFixture();
+    vi.mocked(checks.client.getHeadSha)
+      .mockResolvedValueOnce(createPullRequestFixture().headSha)
+      .mockRejectedValueOnce(new Error("lookup failed"));
+    const createChecksClient = vi.fn().mockReturnValue(checks.client);
+    const result = await executeAction({
+      env: baseEnv(),
+      createChecksClient,
+      collector: { collectPullRequest: vi.fn().mockRejectedValue(new Error("policy unavailable")) },
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(createChecksClient).toHaveBeenCalledWith("test-token");
+    expect(checks.createCheckRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headSha: createPullRequestFixture().headSha,
+        conclusion: "failure",
+      }),
+    );
+  });
+
+  it("authenticates the default Octokit client before trusting the publication head", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ head: { sha: "invalid" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const collectPullRequest = vi.fn();
+      const result = await executeAction({
+        env: baseEnv(),
+        collector: { collectPullRequest },
+        now: fixedNow,
+      });
+      expect(result.verdict).toBe("ERROR");
+      expect(result.summary).toContain("valid head SHA");
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(collectPullRequest).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses malformed authenticated head SHAs before collection or publication", async () => {
+    const checks = createChecksFixture();
+    vi.mocked(checks.client.getHeadSha).mockResolvedValue("invalid");
+    const collectPullRequest = vi.fn();
+    const result = await runAction({
+      env: baseEnv(),
+      checksClient: checks.client,
+      collector: { collectPullRequest },
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(result.summary).toContain("valid head SHA");
+    expect(collectPullRequest).not.toHaveBeenCalled();
+    expect(checks.createCheckRun).not.toHaveBeenCalled();
+  });
+
+  it("retains collection and error-publication diagnostics when the blocking write fails", async () => {
+    const checks = createChecksFixture();
+    checks.createCheckRun.mockRejectedValue(new Error("checks unavailable"));
+    const result = await runAction({
+      env: baseEnv(),
+      checksClient: checks.client,
+      collector: { collectPullRequest: vi.fn().mockRejectedValue(new Error("policy unavailable")) },
+      now: fixedNow,
+    });
+    expect(result.verdict).toBe("ERROR");
+    expect(result.summary).toContain("policy unavailable");
+    expect(result.summary).toContain("Check publication failed: checks unavailable");
+  });
+
+  it("does not publish when authenticated head resolution fails or only payload repository exists", async () => {
+    const checks = createChecksFixture();
+    vi.mocked(checks.client.getHeadSha).mockRejectedValue(new Error("not found"));
+    await runAction({ env: baseEnv(), checksClient: checks.client, now: fixedNow });
+    expect(checks.createCheckRun).not.toHaveBeenCalled();
+    writeFileSync(
+      eventFile,
+      JSON.stringify({
+        repository: { full_name: "attacker/repo" },
+        pull_request: { number: 42, head: { sha: createPullRequestFixture().headSha } },
+      }),
+    );
+    vi.mocked(checks.client.getHeadSha).mockClear();
+    await runAction({
+      env: baseEnv({ GITHUB_REPOSITORY: "" }),
+      checksClient: checks.client,
+      now: fixedNow,
+    });
+    expect(checks.client.getHeadSha).not.toHaveBeenCalled();
+    expect(checks.createCheckRun).not.toHaveBeenCalled();
+  });
+
   it("evaluates a passing pull request and writes PASS outputs and step summary metadata", async () => {
     const fixture = createPullRequestFixture();
     const collectPullRequest = vi.fn().mockResolvedValue(fixture);
@@ -485,7 +876,7 @@ describe("runAction end-to-end orchestration", () => {
     expect(result.riskTier?.tier).toBe("low");
     expect(result.riskTier?.canAutoApprove).toBe(true);
     expect(createCollector).toHaveBeenCalledWith("test-token");
-    expect(collectPullRequest).toHaveBeenCalledTimes(2);
+    expect(collectPullRequest).toHaveBeenCalledTimes(3);
 
     const outputs = parseGitHubOutputFile(readFileSync(outputFile, "utf8"));
     expect(outputs.verdict).toBe("PASS");
@@ -615,6 +1006,66 @@ describe("runAction end-to-end orchestration", () => {
     expect(failFastRun.exitCode).toBe(1);
     expect(process.exitCode).toBe(1);
   });
+
+  it.each(["conversation", "thread"])(
+    "rejects PASS after a same-SHA %s comment edit",
+    async (kind) => {
+      const comment = {
+        id: "comment",
+        authorLogin: "octocat",
+        body: "original",
+        bodyDigest: "original-digest",
+        createdAt: "2026-11-14T12:00:00Z",
+        updatedAt: "2026-11-14T12:00:00Z",
+        path: null,
+        line: null,
+        originalLine: null,
+        commitSha: null,
+      };
+      const fixture = createPullRequestFixture(
+        kind === "conversation"
+          ? {
+              conversationComments: [{ ...comment, id: 55 }],
+            }
+          : {
+              reviewThreads: [
+                {
+                  id: "thread",
+                  isResolved: true,
+                  resolvedByLogin: "octocat",
+                  isOutdated: false,
+                  path: null,
+                  line: null,
+                  originalLine: null,
+                  comments: [comment],
+                },
+              ],
+            },
+      );
+      const edited = {
+        ...comment,
+        body: "edited",
+        bodyDigest: "edited-digest",
+        updatedAt: "2026-11-14T12:01:00Z",
+      };
+      const latest = {
+        ...fixture,
+        ...(kind === "conversation"
+          ? { conversationComments: [{ ...edited, id: 55 }] }
+          : {
+              reviewThreads: fixture.reviewThreads.map((thread) => ({
+                ...thread,
+                comments: [edited],
+              })),
+            }),
+      };
+      const collector = {
+        collectPullRequest: vi.fn().mockResolvedValueOnce(fixture).mockResolvedValueOnce(latest),
+      };
+      const result = await runAction({ env: baseEnv(), collector, now: fixedNow });
+      expect(result.verdict).toBe("STALE");
+    },
+  );
 
   it("returns STALE when the final snapshot head SHA mutates during evaluation", async () => {
     const initialFixture = createPullRequestFixture();

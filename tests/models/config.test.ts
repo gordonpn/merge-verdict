@@ -14,6 +14,46 @@ import {
 } from "../../src/index.js";
 
 describe("MergeVerdictConfigSchema", () => {
+  it.each(["HIGH", "MEDIUM", "LOW"])(
+    "accepts severity threshold %s and exact check names",
+    (threshold) => {
+      const config = parseConfig(`blocking_severity_threshold: ${threshold}
+permitted_check_conclusions:
+  ci_test: [neutral, skipped]
+  ciTest: [skipped]
+  constructor: [neutral]
+  __proto__: [skipped]
+`);
+      expect(config.blockingSeverityThreshold).toBe(threshold);
+      expect(config.permittedCheckConclusions).toMatchObject({
+        ci_test: ["neutral", "skipped"],
+        ciTest: ["skipped"],
+        constructor: ["neutral"],
+      });
+      expect(Object.hasOwn(config.permittedCheckConclusions ?? {}, "__proto__")).toBe(true);
+      expect(
+        Object.getOwnPropertyDescriptor(config.permittedCheckConclusions ?? {}, "__proto__")?.value,
+      ).toEqual(["skipped"]);
+    },
+  );
+
+  it.each(["failure", "cancelled", "timed_out", "action_required", "success", "unknown"])(
+    "rejects prohibited configured conclusion %s",
+    (conclusion) => {
+      expect(() =>
+        parseConfig(`permitted_check_conclusions:\n  ci_test: [${conclusion}]`),
+      ).toThrow();
+      expect(() =>
+        parseConfig(`permitted_check_conclusions:\n  __proto__: [${conclusion}]`),
+      ).toThrow();
+    },
+  );
+
+  it("rejects invalid thresholds and misspelled policy option keys", () => {
+    expect(() => parseConfig("blocking_severity_threshold: BLOCKER")).toThrow();
+    expect(() => parseConfig("permitted_check_conclusion: {} ")).toThrow();
+  });
+
   it("supplies canonical defaults when given an empty object", () => {
     const config = MergeVerdictConfigSchema.parse({});
     expect(config).toEqual(DEFAULT_CONFIG);

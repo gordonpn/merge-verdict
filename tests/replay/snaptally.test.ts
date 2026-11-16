@@ -25,7 +25,7 @@ function load(number: number) {
       base: { sha: string };
     };
     comments: { id: number; body: string }[];
-    reviews: { body: string; commit_id: string }[];
+    reviews: { body: string; commit_id: string; state: string; user: { login: string } }[];
     checks: { check_runs: { name: string; conclusion: string; head_sha: string }[] };
     statuses: unknown[];
     files: { filename: string }[];
@@ -38,8 +38,13 @@ function load(number: number) {
   };
 }
 
-async function replay(number: number, policyYaml: string = DEFAULT_REPLAY_POLICY) {
+async function replay(
+  number: number,
+  policyYaml: string = DEFAULT_REPLAY_POLICY,
+  scenario?: (fixture: ReturnType<typeof load>) => void,
+) {
   const fixture = load(number);
+  scenario?.(fixture);
   const requests: string[] = [];
   const policy = policyYaml;
   const fetch = async (input: string | URL | Request, init?: RequestInit) => {
@@ -76,6 +81,7 @@ async function replay(number: number, policyYaml: string = DEFAULT_REPLAY_POLICY
         };
       } else if (path.endsWith(`/issues/${number}/comments`)) data = fixture.comments;
       else if (path.endsWith("/reviews")) data = fixture.reviews;
+      else if (path.endsWith("/commits")) data = [{ sha: fixture.pullRequest.head.sha }];
       else if (path.endsWith("/check-runs")) data = fixture.checks;
       else if (path.endsWith("/statuses")) data = fixture.statuses;
       else if (path.endsWith("/contents/.github/merge-verdict.yml")) {
@@ -102,7 +108,7 @@ async function replay(number: number, policyYaml: string = DEFAULT_REPLAY_POLICY
     repo: "snaptally",
     pullRequestNumber: number,
   });
-  expect(requests).toHaveLength(8);
+  expect(requests).toHaveLength(9);
   expect(result.policyContent).toBe(policy);
   return { fixture, result, requests };
 }
@@ -200,6 +206,24 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
     );
     expect(unresolvedSourceryFinding?.isResolved).toBe(false);
 
+    const unresolvedEvaluation = evaluatePolicy({
+      snapshot: snapshotWithoutAncestry,
+      config,
+      finalSnapshot: snapshotWithoutAncestry,
+      executionErrors: [],
+      repositoryRules: [],
+      unresolvedThreadIds: result.reviewThreads
+        .filter((thread) => !thread.isResolved)
+        .map((thread) => thread.id),
+    });
+    expect(unresolvedEvaluation.verdict).toBe("FAIL");
+    expect(unresolvedEvaluation.reasons).toContainEqual({
+      condition: 3,
+      outcome: "FAIL",
+      code: "UNRESOLVED_FINDING",
+      subject: "PRRT_kwDOUey2HM6w-DWe",
+    });
+
     const snapshotWithAncestry = buildReviewSnapshotFromPullRequest(result, {
       ancestorCommitShas: fixture.commits.map((commit) => commit.sha),
     });
@@ -219,6 +243,9 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
       },
       executionErrors: [],
       repositoryRules: [],
+      unresolvedThreadIds: result.reviewThreads
+        .filter((thread) => !thread.isResolved)
+        .map((thread) => thread.id),
       codeEvidenceSatisfied: true,
     });
     expect(evaluation.verdict).toBe("PENDING");
@@ -227,6 +254,72 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
       outcome: "PENDING",
       code: "REVIEWER_INCOMPLETE",
       subject: "coderabbitai",
+    });
+  });
+
+  it("fails on a reopened recorded thread with complete collector thread identities", async () => {
+    // Explicit scenario variation; the immutable recording remains byte-verified above.
+    const { result } = await replay(119, loadPolicy("policy-pr-119"), (fixture) => {
+      const thread = fixture.threads[0];
+      if (!thread) throw new Error("Missing recorded thread");
+      thread.isResolved = false;
+    });
+    const snapshot = buildReviewSnapshotFromPullRequest(result);
+    const unresolvedThreadIds = result.reviewThreads
+      .filter((thread) => !thread.isResolved)
+      .map((thread) => thread.id);
+    expect(unresolvedThreadIds).toEqual(["PRRT_kwDOUey2HM6w-A8i"]);
+    expect(snapshot.unresolvedThreadCount).toBe(1);
+    const evaluation = evaluatePolicy({
+      snapshot,
+      config: parseConfig(result.policyContent),
+      finalSnapshot: snapshot,
+      executionErrors: [],
+      repositoryRules: [],
+      unresolvedThreadIds,
+    });
+    expect(evaluation.verdict).toBe("FAIL");
+    expect(evaluation.reasons).not.toContainEqual(
+      expect.objectContaining({
+        code: "UNRESOLVED_THREAD_IDENTITIES_MISSING_OR_INCONSISTENT",
+      }),
+    );
+    expect(evaluation.reasons).toContainEqual({
+      condition: 3,
+      outcome: "FAIL",
+      code: "UNRESOLVED_FINDING",
+      subject: unresolvedThreadIds[0],
+    });
+  });
+
+  it("fails Condition 4 when a recorded reviewer requests changes", async () => {
+    // Exercise collection and normalization of an explicit blocking review variation.
+    const { result } = await replay(119, loadPolicy("policy-pr-119"), (fixture) => {
+      const review = [...fixture.reviews]
+        .reverse()
+        .find((item) => item.user.login === "fixture-owner");
+      if (!review) throw new Error("Missing recorded owner review");
+      review.state = "CHANGES_REQUESTED";
+      review.commit_id = fixture.pullRequest.head.sha;
+    });
+    const snapshot = buildReviewSnapshotFromPullRequest(result);
+    expect(snapshot.blockingDecisionCount).toBe(1);
+    const evaluation = evaluatePolicy({
+      snapshot,
+      config: parseConfig(result.policyContent),
+      finalSnapshot: snapshot,
+      executionErrors: [],
+      repositoryRules: [],
+      unresolvedThreadIds: result.reviewThreads
+        .filter((thread) => !thread.isResolved)
+        .map((thread) => thread.id),
+    });
+    expect(evaluation.verdict).toBe("FAIL");
+    expect(evaluation.reasons).toContainEqual({
+      condition: 4,
+      outcome: "FAIL",
+      code: "ACTIVE_BLOCKING_DECISIONS",
+      subject: "1",
     });
   });
 
@@ -250,6 +343,9 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
       },
       executionErrors: [],
       repositoryRules: [],
+      unresolvedThreadIds: result.reviewThreads
+        .filter((thread) => !thread.isResolved)
+        .map((thread) => thread.id),
       codeEvidenceSatisfied: true,
     });
     expect(pendingEvaluation.verdict).toBe("PENDING");
@@ -269,6 +365,9 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
       },
       executionErrors: [],
       repositoryRules: [],
+      unresolvedThreadIds: result.reviewThreads
+        .filter((thread) => !thread.isResolved)
+        .map((thread) => thread.id),
       codeEvidenceSatisfied: true,
     });
     expect(staleEvaluation.verdict).toBe("STALE");
@@ -309,6 +408,9 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
       },
       executionErrors: [],
       repositoryRules: [],
+      unresolvedThreadIds: result.reviewThreads
+        .filter((thread) => !thread.isResolved)
+        .map((thread) => thread.id),
       codeEvidenceSatisfied: true,
     });
     expect(passEvaluation.verdict).toBe("PASS");
@@ -353,6 +455,9 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
       },
       executionErrors: [],
       repositoryRules: [],
+      unresolvedThreadIds: result.reviewThreads
+        .filter((thread) => !thread.isResolved)
+        .map((thread) => thread.id),
       codeEvidenceSatisfied: true,
     });
     expect(failEvaluation.verdict).toBe("FAIL");
@@ -368,7 +473,7 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
     const startMs = performance.now();
     for (const number of [119, 120, 121]) {
       const { fixture, result, requests } = await replay(number);
-      expect(requests).toHaveLength(8);
+      expect(requests).toHaveLength(9);
       const config = parseConfig(result.policyContent);
       const snapshot = buildReviewSnapshotFromPullRequest(result, {
         ancestorCommitShas: fixture.commits.map((commit) => commit.sha),
@@ -383,6 +488,9 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
         },
         executionErrors: [],
         repositoryRules: [],
+        unresolvedThreadIds: result.reviewThreads
+          .filter((thread) => !thread.isResolved)
+          .map((thread) => thread.id),
         codeEvidenceSatisfied: true,
       });
       expect(riskTier.usedFallback).toBe(false);

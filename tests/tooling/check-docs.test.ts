@@ -118,6 +118,34 @@ describe("portable documentation checks", () => {
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
+  it.each([
+    "\u2764\ufe0f",
+    "\u2764",
+    "\u263a",
+    "\u{1f600}",
+    "\u{1fae9}",
+    "1\ufe0f\u20e3",
+    "#\u20e3",
+    "*\ufe0f\u20e3",
+    "\u{1f469}\u200d\u{1f4bb}",
+    "\u{1f1e8}\u{1f1e6}",
+  ])("rejects emoji throughout fenced code examples: %s", (emoji) => {
+    const root = fixture();
+    writeFileSync(join(root, "README.md"), `# Example\n\`\`\`text\n${emoji}\n\`\`\`\n`);
+    const result = check(root);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("Emoji found in README.md");
+  });
+
+  it("accepts supplementary text and incomplete sequence components", () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, "README.md"),
+      "# Text\n0123456789 # * ! ? . , + - =\n\u{20000} \u{1d11e}\n\ufe0f \ufe0e \u200d \u20e3 1\ufe0f A\u20e3\n",
+    );
+    expect(check(root).status).toBe(0);
+  });
+
   it("keeps punctuation and emoji checks while excluding dependencies", () => {
     const root = fixture();
     mkdirSync(join(root, "node_modules"));

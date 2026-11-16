@@ -54,7 +54,7 @@ function snakeToCamel(str: string): string {
 
 /**
  * Recursively converts object property keys from snake_case to camelCase,
- * while preserving user-defined record keys under approval.risk.
+ * while preserving user-defined risk-tier and check-name record keys.
  */
 export function normalizeConfigKeys(
   value: unknown,
@@ -71,11 +71,13 @@ export function normalizeConfigKeys(
     return value.map((item) => normalizeConfigKeys(item, path, seen));
   }
   if (value !== null && typeof value === "object") {
-    const preserveKeys = path.length === 2 && path[0] === "approval" && path[1] === "risk";
-    const result: Record<string, unknown> = {};
+    const preserveKeys =
+      (path.length === 2 && path[0] === "approval" && path[1] === "risk") ||
+      (path.length === 1 && path[0] === "permittedCheckConclusions");
+    const result: Record<string, unknown> = Object.create(null);
     for (const [key, val] of Object.entries(value)) {
       const outKey = preserveKeys ? key : snakeToCamel(key);
-      if (!preserveKeys && key !== outKey && outKey in (value as Record<string, unknown>)) {
+      if (!preserveKeys && key !== outKey && Object.hasOwn(value, outKey)) {
         const existingVal = (value as Record<string, unknown>)[outKey];
         if (JSON.stringify(existingVal) !== JSON.stringify(val)) {
           throw new Error(
@@ -197,11 +199,38 @@ export const ApprovalConfigSchema = z.strictObject({
 export type ApprovalConfig = z.infer<typeof ApprovalConfigSchema>;
 
 /**
+ * Validates check permissions while retaining all own check names, including __proto__.
+ * Zod's record output omits __proto__, so preserve the validated input entries.
+ */
+const PermittedCheckConclusionsSchema = z.unknown().transform((input, context) => {
+  const valueSchema = z.array(z.enum(["neutral", "skipped"]));
+  const result = z.record(z.string(), valueSchema).safeParse(input);
+  if (!result.success) {
+    for (const issue of result.error.issues) context.addIssue({ ...issue });
+    return z.NEVER;
+  }
+  const entries: [string, ("neutral" | "skipped")[]][] = [];
+  for (const [name, value] of Object.entries(input as Record<string, unknown>)) {
+    const parsed = valueSchema.safeParse(value);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        context.addIssue({ ...issue, path: [name, ...issue.path] });
+      }
+      return z.NEVER;
+    }
+    entries.push([name, parsed.data]);
+  }
+  return Object.fromEntries(entries);
+});
+
+/**
  * Internal object schema defining the canonical shape of repository configuration.
  */
 const CanonicalMergeVerdictConfigSchema = z.strictObject({
   requiredReviewers: StringListSchema,
   requiredChecks: StringListSchema,
+  blockingSeverityThreshold: z.enum(["HIGH", "MEDIUM", "LOW"]).optional(),
+  permittedCheckConclusions: PermittedCheckConclusionsSchema.optional(),
   allowAdvisoryExemptions: z.boolean().default(false),
   rateLimitTimeoutMinutes: z.number().int().positive().default(30),
   semanticVerification: SemanticVerificationConfigSchema.default({

@@ -35,6 +35,7 @@ interface ReviewThreadCommentNode {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly commit: { readonly oid: string } | null;
+  readonly originalCommit?: { readonly oid: string } | null;
 }
 
 interface ReviewThreadCommentConnection {
@@ -112,6 +113,8 @@ export interface CollectPullRequestInput {
   readonly evaluationSha?: string;
   /** Protected base commit used to load policy content; defaults to the pull request base SHA. */
   readonly policySha?: string;
+  /** Repository-relative policy file path, loaded only from the protected base revision. */
+  readonly configPath?: string;
 }
 
 export interface GitHubReviewThreadComment {
@@ -122,6 +125,8 @@ export interface GitHubReviewThreadComment {
   readonly path: string | null;
   readonly line: number | null;
   readonly originalLine: number | null;
+  /** Revision matching originalLine and path; optional for existing callers and fixtures. */
+  readonly originalCommitSha?: string | null;
   readonly commitSha: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -206,6 +211,10 @@ export interface GitHubPullRequestData {
   readonly repository: string;
   readonly pullRequestNumber: number;
   readonly headSha: string;
+  /** Untrusted PR description; absent on older serialized collector snapshots. */
+  readonly body?: string | null;
+  /** Verified reachable subset of headSha history, excluding headSha itself; not exhaustive. */
+  readonly ancestorCommitShas?: readonly string[];
   readonly baseSha: string;
   readonly headRef: string;
   readonly baseRef: string;
@@ -368,6 +377,7 @@ function mapThreadComment(comment: ReviewThreadCommentNode): GitHubReviewThreadC
     line: comment.line,
     originalLine: comment.originalLine,
     commitSha: comment.commit?.oid ?? null,
+    originalCommitSha: comment.originalCommit?.oid ?? null,
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
   };
@@ -572,12 +582,13 @@ async function getPolicyContent(
   owner: string,
   repo: string,
   policySha: string,
+  configPath: string,
 ): Promise<string> {
   try {
     const { data } = await rest.rest.repos.getContent({
       owner,
       repo,
-      path: POLICY_FILE_PATH,
+      path: configPath,
       ref: policySha,
     });
     if (Array.isArray(data)) {
@@ -599,7 +610,7 @@ async function getPolicyContent(
       collectorError.kind === "rate_limit" ? "rate_limit" : "policy";
     throw new GitHubCollectorError(
       kind,
-      `Failed to read ${POLICY_FILE_PATH} at ${policySha}: ${collectorError.message}`,
+      `Failed to read ${configPath} at ${policySha}: ${collectorError.message}`,
       collectorError.cause,
       collectorError.status,
     );
@@ -636,6 +647,20 @@ export class GitHubCollector {
     retry: RetryRequest,
   ): Promise<GitHubPullRequestData> {
     const { owner, repo, pullRequestNumber } = input;
+    const configPath = input.configPath ?? POLICY_FILE_PATH;
+    if (
+      configPath.length === 0 ||
+      /[\\:]/.test(configPath) ||
+      [...configPath].some(
+        (character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127,
+      ) ||
+      configPath.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+    ) {
+      throw new GitHubCollectorError(
+        "policy",
+        "configPath must be a normalized repository-relative file path.",
+      );
+    }
     const { data: pullRequest } = await this.rest.rest.pulls.get({
       owner,
       repo,
@@ -643,53 +668,77 @@ export class GitHubCollector {
     });
     const evaluationSha = input.evaluationSha ?? pullRequest.head.sha;
     const policyVersion = input.policySha ?? pullRequest.base.sha;
+    let ancestryPages = 0;
+    let ancestryItems = 0;
 
-    const [changedFilePaths, comments, reviews, checkRuns, statuses, reviewThreads, policyContent] =
-      await Promise.all([
-        collectChangedFilePaths(this.graph, owner, repo, pullRequestNumber, retry),
-        this.rest.paginate(
-          this.rest.rest.issues.listComments,
-          {
-            owner,
-            repo,
-            issue_number: pullRequestNumber,
-            per_page: PAGE_SIZE,
-          },
-          boundedRestPages("conversation_comments"),
-        ),
-        this.rest.paginate(
-          this.rest.rest.pulls.listReviews,
-          {
-            owner,
-            repo,
-            pull_number: pullRequestNumber,
-            per_page: PAGE_SIZE,
-          },
-          boundedRestPages("reviews"),
-        ),
-        this.rest.paginate(
-          this.rest.rest.checks.listForRef,
-          {
-            owner,
-            repo,
-            ref: evaluationSha,
-            per_page: PAGE_SIZE,
-          },
-          boundedRestPages("check_runs"),
-        ),
-        this.rest.paginate(
-          this.rest.rest.repos.listCommitStatusesForRef,
-          {
-            owner,
-            repo,
-            ref: evaluationSha,
-            per_page: PAGE_SIZE,
-          },
-          boundedRestPages("commit_statuses"),
-        ),
-        collectReviewThreads(this.graph, owner, repo, pullRequestNumber, retry),
-        getPolicyContent(this.rest, owner, repo, policyVersion),
-      ]);
+    const [
+      changedFilePaths,
+      comments,
+      reviews,
+      checkRuns,
+      statuses,
+      reviewThreads,
+      policyContent,
+      commits,
+    ] = await Promise.all([
+      collectChangedFilePaths(this.graph, owner, repo, pullRequestNumber, retry),
+      this.rest.paginate(
+        this.rest.rest.issues.listComments,
+        {
+          owner,
+          repo,
+          issue_number: pullRequestNumber,
+          per_page: PAGE_SIZE,
+        },
+        boundedRestPages("conversation_comments"),
+      ),
+      this.rest.paginate(
+        this.rest.rest.pulls.listReviews,
+        {
+          owner,
+          repo,
+          pull_number: pullRequestNumber,
+          per_page: PAGE_SIZE,
+        },
+        boundedRestPages("reviews"),
+      ),
+      this.rest.paginate(
+        this.rest.rest.checks.listForRef,
+        {
+          owner,
+          repo,
+          ref: evaluationSha,
+          per_page: PAGE_SIZE,
+        },
+        boundedRestPages("check_runs"),
+      ),
+      this.rest.paginate(
+        this.rest.rest.repos.listCommitStatusesForRef,
+        {
+          owner,
+          repo,
+          ref: evaluationSha,
+          per_page: PAGE_SIZE,
+        },
+        boundedRestPages("commit_statuses"),
+      ),
+      collectReviewThreads(this.graph, owner, repo, pullRequestNumber, retry),
+      getPolicyContent(this.rest, owner, repo, policyVersion, configPath),
+      // A bounded subset is sufficient to prove membership, never non-membership.
+      // Missing historical commits keep findings unresolved in the normalizers.
+      this.rest.paginate(
+        this.rest.rest.repos.listCommits,
+        { owner, repo, sha: pullRequest.head.sha, per_page: PAGE_SIZE },
+        (response, done) => {
+          ancestryPages += 1;
+          const page = response.data.slice(0, MAX_CONNECTION_ITEMS - ancestryItems);
+          ancestryItems += page.length;
+          if (ancestryPages >= MAX_CONNECTION_PAGES || ancestryItems >= MAX_CONNECTION_ITEMS)
+            done();
+          return page;
+        },
+      ),
+    ]);
     const latestStatuses = new Map<string, (typeof statuses)[number]>();
     for (const status of statuses) {
       const latest = latestStatuses.get(status.context);
@@ -705,6 +754,10 @@ export class GitHubCollector {
       repository: `${owner}/${repo}`,
       pullRequestNumber,
       headSha: pullRequest.head.sha,
+      body: pullRequest.body ?? null,
+      ancestorCommitShas: [...new Set(commits.map((commit) => commit.sha))].filter(
+        (sha) => sha !== pullRequest.head.sha,
+      ),
       baseSha: pullRequest.base.sha,
       headRef: pullRequest.head.ref,
       baseRef: pullRequest.base.ref,
