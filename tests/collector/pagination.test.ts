@@ -128,6 +128,7 @@ function fixture(target: Operation, itemsPerPage: number, totalPages: number) {
         url.href,
       );
     }
+    if (url.pathname.endsWith("/commits")) return response([], url.href);
     const operation = url.pathname.endsWith("/comments")
       ? "conversation_comments"
       : url.pathname.endsWith("/reviews")

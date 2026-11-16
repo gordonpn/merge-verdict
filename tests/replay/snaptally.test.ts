@@ -81,6 +81,7 @@ async function replay(
         };
       } else if (path.endsWith(`/issues/${number}/comments`)) data = fixture.comments;
       else if (path.endsWith("/reviews")) data = fixture.reviews;
+      else if (path.endsWith("/commits")) data = [{ sha: fixture.pullRequest.head.sha }];
       else if (path.endsWith("/check-runs")) data = fixture.checks;
       else if (path.endsWith("/statuses")) data = fixture.statuses;
       else if (path.endsWith("/contents/.github/merge-verdict.yml")) {
@@ -107,7 +108,7 @@ async function replay(
     repo: "snaptally",
     pullRequestNumber: number,
   });
-  expect(requests).toHaveLength(8);
+  expect(requests).toHaveLength(9);
   expect(result.policyContent).toBe(policy);
   return { fixture, result, requests };
 }
@@ -472,7 +473,7 @@ describe("end-to-end SnapTally normalizer and policy evaluation replay", () => {
     const startMs = performance.now();
     for (const number of [119, 120, 121]) {
       const { fixture, result, requests } = await replay(number);
-      expect(requests).toHaveLength(8);
+      expect(requests).toHaveLength(9);
       const config = parseConfig(result.policyContent);
       const snapshot = buildReviewSnapshotFromPullRequest(result, {
         ancestorCommitShas: fixture.commits.map((commit) => commit.sha),
