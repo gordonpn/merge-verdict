@@ -20,6 +20,7 @@ jobs:
       cancel-in-progress: true
     # Secrets are not available to pull_request events from forks; restrict to same-repository PRs.
     if: |
+      vars.ENABLE_DEEPSEEK_REVIEW == 'true' &&
       github.event.sender.type != 'Bot' &&
       github.actor != 'dependabot[bot]' &&
       ((github.event_name == 'pull_request' &&

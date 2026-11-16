@@ -16,6 +16,7 @@ jobs:
     name: runner / pr-agent
     # Direct PR triggers require repository secrets unavailable to forks; fork PRs use authorized issue comments.
     if: |
+      vars.ENABLE_PR_AGENT == 'true' &&
       github.event.sender.type != 'Bot' &&
       github.actor != 'dependabot[bot]' &&
       ((github.event_name == 'pull_request' &&
@@ -24,7 +25,12 @@ jobs:
         (github.event_name == 'issue_comment' &&
          github.event.issue.pull_request &&
          github.event.issue.state == 'open' &&
-         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)))
+         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+         (contains(github.event.comment.body, '/review') ||
+          contains(github.event.comment.body, '/describe') ||
+          contains(github.event.comment.body, '/improve') ||
+          contains(github.event.comment.body, '/ask') ||
+          contains(github.event.comment.body, '/compliance'))))
     concurrency:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
       cancel-in-progress: false
