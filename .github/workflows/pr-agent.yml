@@ -26,11 +26,14 @@ jobs:
          github.event.issue.pull_request &&
          github.event.issue.state == 'open' &&
          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
-         (contains(github.event.comment.body, '/review') ||
-          contains(github.event.comment.body, '/describe') ||
-          contains(github.event.comment.body, '/improve') ||
-          contains(github.event.comment.body, '/ask') ||
-          contains(github.event.comment.body, '/compliance'))))
+         (github.event.comment.body == '/review' ||
+          startsWith(github.event.comment.body, '/review ') ||
+          github.event.comment.body == '/describe' ||
+          startsWith(github.event.comment.body, '/describe ') ||
+          github.event.comment.body == '/improve' ||
+          startsWith(github.event.comment.body, '/improve ') ||
+          github.event.comment.body == '/ask' ||
+          startsWith(github.event.comment.body, '/ask '))))
     concurrency:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
       cancel-in-progress: false

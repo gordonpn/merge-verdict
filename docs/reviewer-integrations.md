@@ -88,7 +88,7 @@ For the repository workflows' event, identity, credential, and cancellation boun
   - PR conversation comments with marker `<!-- pr-agent:review:full -->`.
   - Markdown tables detailing ticket compliance (e.g. `Ticket compliance analysis`).
 - **Observed Behavior on Reference PRs**:
-  - Opt-in via `vars.ENABLE_PR_AGENT == 'true'` (plus non-empty `DEEPSEEK_API_KEY`), triggering on `pull_request` (`opened` and `ready_for_review` for non-draft same-repository PRs) and on open-PR `issue_comment` (`created`, `edited`) slash commands (`/review`, `/describe`, `/improve`, `/ask`, `/compliance`) from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts (non-draft PRs only).
+  - Opt-in via `vars.ENABLE_PR_AGENT == 'true'` (plus non-empty `DEEPSEEK_API_KEY`), triggering on `pull_request` (`opened` and `ready_for_review` for non-draft same-repository PRs) and on open-PR `issue_comment` (`created`, `edited`) leading slash commands (`/review`, `/describe`, `/improve`, `/ask`) from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts (non-draft PRs only).
 - **Merge Verdict Policy Rule**:
   - The adapter checks whether required ticket compliance sections indicate non-compliance or unresolved concerns.
 
