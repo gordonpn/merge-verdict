@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type {
   GitHubCheckRun,
+  GitHubConversationComment,
+  GitHubPullRequestData,
   GitHubReviewSubmission,
   GitHubReviewThread,
 } from "../../src/collector/github-collector.js";
+import { parseConfig } from "../../src/config/loader.js";
 import { ReviewerExecutionRecordSchema } from "../../src/models/reviewer.js";
+import { buildReviewSnapshotFromPullRequest } from "../../src/normalizers/index.js";
 import { normalizeSourceryReviewer, sourceryNormalizer } from "../../src/normalizers/sourcery.js";
+import { evaluatePolicy } from "../../src/policy/evaluator.js";
 
 describe("normalizeSourceryReviewer", () => {
   const headSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
@@ -476,5 +481,262 @@ describe("normalizeSourceryReviewer", () => {
     expect(result.verdict).toBe("CHANGES_REQUESTED");
     expect(result.findings[0]?.isResolved).toBe(false);
     expect(result.findings[0]?.isBlocking).toBe(true);
+  });
+
+  it("classifies skipped Sourcery check runs without quota notice as SKIPPED", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 201,
+        name: "Sourcery review",
+        status: "completed",
+        conclusion: "skipped",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: { title: "Skipped", summary: "No eligible files changed.", text: null },
+        startedAt: null,
+        completedAt: "2026-11-16T02:58:40Z",
+      },
+    ];
+
+    const result = normalizeSourceryReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("SKIPPED");
+    expect(result.verdict).toBe("NONE");
+    expect(result.isFresh).toBe(true);
+    expect(result.checkRunConclusion).toBe("skipped");
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("classifies skipped or neutral Sourcery quota-limit runs and comments as RATE_LIMITED", () => {
+    const budgetSummary =
+      "Sorry @maintainer, you've used your own review budget of 250,000 diff characters for the last 7 days.\n\nYou can request another review in 12 hours and 26 minutes by commenting `@sourcery-ai review`.";
+
+    const skippedQuota = normalizeSourceryReviewer({
+      headSha,
+      checkRuns: [
+        {
+          id: 202,
+          name: "Sourcery review",
+          status: "completed",
+          conclusion: "skipped",
+          commitSha: headSha,
+          detailsUrl: null,
+          output: { title: "Skipped", summary: budgetSummary, text: null },
+          startedAt: null,
+          completedAt: "2026-11-16T02:58:40Z",
+        },
+      ],
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [],
+    });
+
+    expect(skippedQuota.status).toBe("RATE_LIMITED");
+    expect(skippedQuota.verdict).toBe("NONE");
+    expect(skippedQuota.isFresh).toBe(true);
+    expect(skippedQuota.checkRunConclusion).toBe("skipped");
+
+    const neutralQuota = normalizeSourceryReviewer({
+      headSha,
+      checkRuns: [
+        {
+          id: 203,
+          name: "Sourcery review",
+          status: "completed",
+          conclusion: "neutral",
+          commitSha: headSha,
+          detailsUrl: null,
+          output: { title: "Rate limited", summary: null, text: null },
+          startedAt: null,
+          completedAt: "2026-11-16T02:58:30Z",
+        },
+      ],
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [
+        {
+          id: 9001,
+          authorLogin: "sourcery-ai",
+          body: budgetSummary,
+          bodyDigest: "quota-digest",
+          createdAt: "2026-11-16T02:58:35Z",
+          updatedAt: null,
+        } satisfies GitHubConversationComment,
+      ],
+    });
+
+    expect(neutralQuota.status).toBe("RATE_LIMITED");
+    expect(neutralQuota.verdict).toBe("NONE");
+    expect(ReviewerExecutionRecordSchema.safeParse(neutralQuota).success).toBe(true);
+  });
+
+  it("ignores historical Sourcery quota comments once a fresh success check run completes", () => {
+    const result = normalizeSourceryReviewer({
+      headSha,
+      checkRuns: [
+        {
+          id: 204,
+          name: "Sourcery review",
+          status: "completed",
+          conclusion: "success",
+          commitSha: headSha,
+          detailsUrl: null,
+          output: { title: "Passed", summary: "Review complete.", text: null },
+          startedAt: null,
+          completedAt: "2026-11-16T03:10:00Z",
+        },
+      ],
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [
+        {
+          id: 9002,
+          authorLogin: "sourcery-ai[bot]",
+          body: "Sorry @maintainer, you've used your own review budget of 250,000 diff characters for the last 7 days.",
+          bodyDigest: "old-quota-digest",
+          createdAt: "2026-11-16T02:00:00Z",
+          updatedAt: null,
+        },
+      ],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("APPROVE");
+  });
+
+  it("ignores empty or pre-check Sourcery quota comments when check run completes without quota notice", () => {
+    const result = normalizeSourceryReviewer({
+      headSha,
+      checkRuns: [
+        {
+          id: 205,
+          name: "Sourcery review",
+          status: "completed",
+          conclusion: "neutral",
+          commitSha: headSha,
+          detailsUrl: null,
+          output: { title: "Neutral", summary: "Finished with neutral status.", text: null },
+          startedAt: null,
+          completedAt: "2026-11-16T03:00:00Z",
+        },
+      ],
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [
+        {
+          id: 9003,
+          authorLogin: "sourcery-ai",
+          body: "Sorry @maintainer, you've used your own review budget of 250,000 diff characters for the last 7 days.",
+          bodyDigest: "stale-quota",
+          createdAt: "2026-11-16T02:00:00Z",
+          updatedAt: null,
+        },
+        {
+          id: 9004,
+          authorLogin: "sourcery-ai",
+          body: null,
+          bodyDigest: null,
+          createdAt: "2026-11-16T03:01:00Z",
+          updatedAt: null,
+        },
+        {
+          id: 9005,
+          authorLogin: "sourcery-ai",
+          body: "## Reviewer's Guide\nComment `@sourcery-ai review` to trigger a new review.",
+          bodyDigest: "guide-digest",
+          createdAt: "2026-11-16T03:02:00Z",
+          updatedAt: null,
+        },
+      ],
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.verdict).toBe("NONE");
+  });
+
+  it("evaluates Sourcery skipped quota runs as PENDING rather than ERROR in policy evaluation", () => {
+    const config = parseConfig(
+      [
+        "required_checks:",
+        "  - runner / test",
+        "required_reviewers:",
+        "  - sourcery-ai",
+        "verification:",
+        "  require_code_evidence: false",
+      ].join("\n"),
+    );
+    const prData: GitHubPullRequestData = {
+      repository: "gordonpn/merge-verdict",
+      pullRequestNumber: 112,
+      headSha,
+      baseSha: "1111111111111111111111111111111111111111",
+      headRef: "docs/refresh-next",
+      baseRef: "main",
+      isFork: false,
+      isDraft: false,
+      mergeable: true,
+      authorLogin: "maintainer",
+      evaluationSha: headSha,
+      policyVersion: "1111111111111111111111111111111111111111",
+      changedFilePaths: ["NEXT.md"],
+      reviewThreads: [],
+      conversationComments: [],
+      reviews: [],
+      checkRuns: [
+        {
+          id: 1,
+          name: "runner / test",
+          status: "completed",
+          conclusion: "success",
+          commitSha: headSha,
+          detailsUrl: null,
+          output: { title: null, summary: null, text: null },
+          startedAt: null,
+          completedAt: null,
+        },
+        {
+          id: 2,
+          name: "Sourcery review",
+          status: "completed",
+          conclusion: "skipped",
+          commitSha: headSha,
+          detailsUrl: null,
+          output: {
+            title: "Skipped",
+            summary:
+              "Sorry @maintainer, you've used your own review budget of 250,000 diff characters for the last 7 days.",
+            text: null,
+          },
+          startedAt: null,
+          completedAt: "2026-11-16T02:58:40Z",
+        },
+      ],
+      commitStatuses: [],
+      policyContent: "",
+    };
+
+    const snapshot = buildReviewSnapshotFromPullRequest(prData);
+    const evaluation = evaluatePolicy({
+      snapshot,
+      config,
+      finalSnapshot: { headSha: snapshot.headSha, stateFingerprint: snapshot.stateFingerprint },
+      executionErrors: [],
+      repositoryRules: [],
+    });
+
+    expect(snapshot.reviewers["sourcery-ai"]?.status).toBe("RATE_LIMITED");
+    expect(evaluation.verdict).toBe("PENDING");
+    expect(evaluation.reasons).toContainEqual({
+      condition: 2,
+      outcome: "PENDING",
+      code: "REVIEWER_INCOMPLETE",
+      subject: "sourcery-ai",
+    });
   });
 });
