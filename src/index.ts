@@ -25,6 +25,8 @@ export {
   GitHubCollectorError,
 } from "./collector/github-collector.js";
 export * from "./config/index.js";
+export type { CheckRunStatus } from "./models/index.js";
 export * from "./models/index.js";
 export * from "./normalizers/index.js";
 export * from "./policy/index.js";
+export * from "./publisher/index.js";
