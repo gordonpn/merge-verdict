@@ -109,6 +109,8 @@ export function buildReviewSnapshotFromPullRequest(
   }
 
   const stateFingerprint = computeStateFingerprint({
+    conversationComments: prData.conversationComments,
+    reviewThreads: prData.reviewThreads,
     headSha: prData.headSha,
     unresolvedThreadCount,
     blockingDecisionCount,

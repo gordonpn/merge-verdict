@@ -41,6 +41,69 @@ describe("ReviewSnapshotSchema", () => {
     },
   };
 
+  it("fingerprints comment metadata and thread state independently of API ordering", () => {
+    const firstComment = { id: "b", updatedAt: null, bodyDigest: null };
+    const secondComment = { id: "a", updatedAt: "2026-11-14T12:00:00Z", bodyDigest: "digest" };
+    const comments = [firstComment, secondComment];
+    const thread = {
+      id: "thread",
+      isResolved: true,
+      isOutdated: false,
+      resolvedByLogin: "alice",
+      comments,
+    };
+    const otherThread = { ...thread, id: "other" };
+    const input = {
+      ...validSnapshotInput,
+      conversationComments: comments,
+      reviewThreads: [thread, otherThread],
+    };
+    const fingerprint = computeStateFingerprint(input);
+    expect(
+      computeStateFingerprint({
+        ...input,
+        conversationComments: [...comments].reverse(),
+        reviewThreads: [...input.reviewThreads]
+          .reverse()
+          .map((t) => ({ ...t, comments: [...t.comments].reverse() })),
+      }),
+    ).toBe(fingerprint);
+    for (const change of [
+      { id: "new" },
+      { updatedAt: "2026-11-14T12:01:00Z" },
+      { bodyDigest: "edited" },
+    ]) {
+      expect(
+        computeStateFingerprint({
+          ...input,
+          conversationComments: [{ ...firstComment, ...change }, secondComment],
+        }),
+      ).not.toBe(fingerprint);
+      expect(
+        computeStateFingerprint({
+          ...input,
+          reviewThreads: [
+            { ...thread, comments: [{ ...firstComment, ...change }, secondComment] },
+            otherThread,
+          ],
+        }),
+      ).not.toBe(fingerprint);
+    }
+    for (const change of [
+      { id: "new-thread" },
+      { isResolved: false },
+      { isOutdated: true },
+      { resolvedByLogin: null },
+    ]) {
+      expect(
+        computeStateFingerprint({
+          ...input,
+          reviewThreads: [{ ...thread, ...change }, otherThread],
+        }),
+      ).not.toBe(fingerprint);
+    }
+  });
+
   it("creates and parses a valid review snapshot using createReviewSnapshot", () => {
     const snapshot = createReviewSnapshot(validSnapshotInput);
     expect(snapshot.repository).toBe("owner/repo");

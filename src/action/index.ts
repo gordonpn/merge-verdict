@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
+import { Octokit } from "@octokit/rest";
 import {
   type CollectPullRequestInput,
   createGitHubCollector,
@@ -15,6 +16,12 @@ import {
 import { evaluatePolicy, type PolicyEvaluation, type PolicyVerdict } from "../policy/evaluator.js";
 import { checkIssueLinks } from "../policy/issue-links.js";
 import { evaluateRiskTier, type RiskTierEvaluation } from "../policy/risk-tier.js";
+import {
+  type ChecksClient,
+  createOctokitChecksClient,
+  publishCheckRun,
+  publishErrorCheckRun,
+} from "../publisher/checks-api.js";
 import { type ChecksReport, formatChecksReport } from "../publisher/checks-formatter.js";
 
 /**
@@ -67,6 +74,8 @@ export interface RepositoryCoordinates {
 export interface ActionRuntimeOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly collector?: PullRequestCollector;
+  readonly checksClient?: ChecksClient;
+  readonly createChecksClient?: (token: string) => ChecksClient;
   readonly createCollector?: (token: string) => PullRequestCollector;
   readonly now?: () => Date;
   readonly normalizers?: readonly ReviewerNormalizer[];
@@ -569,6 +578,11 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
     });
   }
 
+  const token = getActionInput("github-token", env) || env.GITHUB_TOKEN?.trim() || "";
+  // Only the runner-provided repository identifies the authenticated publication target.
+  const trustedRepository = parseRepository(env.GITHUB_REPOSITORY);
+  let checksClient: ChecksClient | undefined;
+  let trustedHeadSha: string | null = null;
   let failFast = false;
   let initialPrData: GitHubPullRequestData;
   let config: ReturnType<typeof parseConfig>;
@@ -576,13 +590,30 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
   let collector: PullRequestCollector;
 
   try {
+    if (trustedRepository === null) {
+      throw new Error("No trusted runner repository is available for check publication.");
+    }
+    checksClient =
+      options.checksClient ??
+      (
+        options.createChecksClient ??
+        ((auth: string) => createOctokitChecksClient(new Octokit({ auth })))
+      )(token);
+    trustedHeadSha = await checksClient.getHeadSha({
+      owner: trustedRepository.owner,
+      repo: trustedRepository.repo,
+      pullNumber: pullRequestNumber,
+    });
+    if (!/^[a-fA-F0-9]{40}$/.test(trustedHeadSha)) {
+      trustedHeadSha = null;
+      throw new Error("Authenticated pull request response did not contain a valid head SHA.");
+    }
     failFast = parseBooleanInput(getActionInput("fail-fast", env), false);
     if (configPath !== DEFAULT_CONFIG_FILE_PATH) {
       throw new Error(
         `Unsupported config-path "${configPath}": protected-base collection only reads "${DEFAULT_CONFIG_FILE_PATH}".`,
       );
     }
-    const token = getActionInput("github-token", env) || env.GITHUB_TOKEN?.trim() || "";
     collector = options.collector ?? (options.createCollector ?? createGitHubCollector)(token);
     initialPrData = await collector.collectPullRequest({
       owner: repository.owner,
@@ -595,7 +626,24 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
       ...(options.normalizers ? { normalizers: options.normalizers } : {}),
     });
   } catch (error) {
-    const diagnostic = formatError(error);
+    let diagnostic = formatError(error);
+    if (checksClient !== undefined && trustedRepository !== null && trustedHeadSha !== null) {
+      try {
+        await publishErrorCheckRun(checksClient, {
+          owner: trustedRepository.owner,
+          repo: trustedRepository.repo,
+          pullNumber: pullRequestNumber,
+          headSha: trustedHeadSha,
+          evaluatedAt,
+          errorCode: "PRE_EVALUATION_ERROR",
+          errorMessage: diagnostic,
+        });
+      } catch (publicationError) {
+        diagnostic = sanitizeDiagnostic(
+          `${diagnostic}; Check publication failed: ${formatError(publicationError)}`,
+        );
+      }
+    }
     return failBeforeSnapshot({
       env,
       repository: repository.fullName,
@@ -654,7 +702,7 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
 
   const codeEvidenceSatisfied = options.codeEvidenceSatisfied;
 
-  const evaluation = evaluatePolicy({
+  let evaluation = evaluatePolicy({
     snapshot,
     config,
     finalSnapshot,
@@ -663,6 +711,65 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
     unresolvedThreadIds,
     ...(codeEvidenceSatisfied !== undefined ? { codeEvidenceSatisfied } : {}),
   });
+
+  try {
+    const publication = await publishCheckRun(checksClient, {
+      owner: repository.owner,
+      repo: repository.repo,
+      pullNumber: pullRequestNumber,
+      snapshot,
+      verdict: evaluation.verdict,
+      evaluatedAt,
+      requiredChecks: config.requiredChecks,
+      getLatestStateFingerprint: async () => {
+        if (evaluation.verdict !== "PASS") return finalSnapshot.stateFingerprint;
+        const latest = await collector.collectPullRequest({
+          owner: repository.owner,
+          repo: repository.repo,
+          pullRequestNumber,
+        });
+        if (
+          latest.baseSha !== initialPrData.baseSha ||
+          latest.policyVersion !== initialPrData.policyVersion ||
+          latest.policyContent !== initialPrData.policyContent ||
+          !haveSameStringSet(latest.changedFilePaths, initialPrData.changedFilePaths)
+        ) {
+          return `stale-policy-or-paths:${snapshot.stateFingerprint}`;
+        }
+        return buildReviewSnapshotFromPullRequest(latest, {
+          capturedAt: evaluatedAt,
+          ...(options.normalizers ? { normalizers: options.normalizers } : {}),
+        }).stateFingerprint;
+      },
+    });
+    evaluation = { ...evaluation, verdict: publication.verdict };
+  } catch (error) {
+    let diagnostic = formatError(error);
+    try {
+      await publishErrorCheckRun(checksClient, {
+        owner: repository.owner,
+        repo: repository.repo,
+        pullNumber: pullRequestNumber,
+        headSha: snapshot.headSha,
+        evaluatedAt,
+        errorCode: "PUBLICATION_ERROR",
+        errorMessage: diagnostic,
+      });
+    } catch (invalidationError) {
+      diagnostic = sanitizeDiagnostic(
+        `${diagnostic}; Blocking check publication also failed: ${formatError(invalidationError)}`,
+      );
+    }
+    return failBeforeSnapshot({
+      env,
+      repository: repository.fullName,
+      pullRequestNumber,
+      configPath,
+      evaluatedAt,
+      summary: `ERROR: Check publication failed (${diagnostic}).`,
+      diagnostic,
+    });
+  }
 
   const checksReport = formatChecksReport(snapshot, {
     verdict: evaluation.verdict,

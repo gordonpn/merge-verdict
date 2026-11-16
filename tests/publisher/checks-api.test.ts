@@ -629,6 +629,34 @@ describe("formatPreSnapshotErrorReport and publishErrorCheckRun", () => {
     });
   });
 
+  it.each([true, false])(
+    "blocks the evaluated SHA after head lookup failure, owned=%s",
+    async (owned) => {
+      const client = makeClient([makeExistingRun({ appId: owned ? 999 : 123 })]);
+      client.getHeadSha = vi.fn().mockRejectedValue(new Error("lookup unavailable"));
+      const result = await publishErrorCheckRun(client, {
+        owner: "owner",
+        repo: "repo",
+        pullNumber: 42,
+        headSha,
+        evaluatedAt,
+        errorCode: "API_ERROR",
+        errorMessage: "collection failed",
+      });
+      expect(result).toMatchObject({
+        verdict: "ERROR",
+        headSha,
+        conclusion: "failure",
+        action: owned ? "updated" : "created",
+      });
+      expect(client.listCheckRunsForRef).toHaveBeenCalledWith(
+        expect.objectContaining({ ref: headSha }),
+      );
+      expect(client.updateCheckRun).toHaveBeenCalledTimes(owned ? 1 : 0);
+      expect(client.createCheckRun).toHaveBeenCalledTimes(owned ? 0 : 1);
+    },
+  );
+
   it("transitions pre-snapshot error to STALE when getHeadSha detects a head change and respects ownership guard", async () => {
     const client = makeClient([makeExistingRun({ id: 401, conclusion: "success" })]);
     client.getHeadSha = vi.fn(async () => "newer-head");
