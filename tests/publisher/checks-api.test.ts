@@ -182,7 +182,7 @@ describe("publishCheckRun", () => {
     );
   });
 
-  it("updates the latest owned check run idempotently on repeat runs including PENDING", async () => {
+  it("updates the latest owned check run idempotently on repeat compatible runs", async () => {
     const olderOwned = makeExistingRun({ id: 100 });
     const latestOwned = makeExistingRun({ id: 150 });
     const client = makeClient([olderOwned, latestOwned]);
@@ -216,7 +216,10 @@ describe("publishCheckRun", () => {
       }),
     );
 
-    const pendingResult = await publishCheckRun(client, {
+    const inProgressClient = makeClient([
+      makeExistingRun({ id: 160, status: "in_progress", conclusion: null }),
+    ]);
+    const pendingResult = await publishCheckRun(inProgressClient, {
       owner: "owner",
       repo: "repo",
       pullNumber: 42,
@@ -225,8 +228,118 @@ describe("publishCheckRun", () => {
       evaluatedAt,
       requiredChecks: ["ci"],
     });
-    expect(pendingResult.status).toBe("in_progress");
-    expect(pendingResult.conclusion).toBeNull();
+    expect(pendingResult).toEqual({
+      action: "updated",
+      verdict: "PENDING",
+      headSha,
+      status: "in_progress",
+      conclusion: null,
+      checkRunId: 160,
+      htmlUrl: "https://github.com/owner/repo/runs/160",
+    });
+    expect(inProgressClient.createCheckRun).not.toHaveBeenCalled();
+    expect(inProgressClient.updateCheckRun).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        checkRunId: 160,
+        status: "in_progress",
+        conclusion: null,
+      }),
+    );
+  });
+
+  it.each<{ status: ExistingCheckRun["status"]; conclusion: string | null }>([
+    { status: "completed", conclusion: "success" },
+    { status: "completed", conclusion: "failure" },
+  ])(
+    "creates a fresh check run instead of PATCHing a $status ($conclusion) owned run back to in_progress",
+    async ({ status, conclusion }) => {
+      const completedOwned = makeExistingRun({
+        id: 150,
+        status,
+        conclusion,
+        annotationsCount: 0,
+      });
+      const client = makeClient([completedOwned]);
+      const snapshot = makeSnapshot();
+
+      const result = await publishCheckRun(client, {
+        owner: "owner",
+        repo: "repo",
+        pullNumber: 42,
+        snapshot,
+        verdict: "PENDING",
+        evaluatedAt,
+        requiredChecks: ["ci"],
+      });
+
+      expect(result).toEqual({
+        action: "created",
+        verdict: "PENDING",
+        headSha,
+        status: "in_progress",
+        conclusion: null,
+        checkRunId: 200,
+        htmlUrl: "https://github.com/owner/repo/runs/200",
+      });
+      expect(client.updateCheckRun).not.toHaveBeenCalled();
+      expect(client.createCheckRun).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          name: DEFAULT_CHECK_NAME,
+          headSha,
+          status: "in_progress",
+          conclusion: null,
+          externalId: `${DEFAULT_OWNED_EXTERNAL_ID_PREFIX}${headSha}`,
+          startedAt: evaluatedAt,
+        }),
+      );
+    },
+  );
+
+  it("updates the newer in_progress check run to completed after superseding a completed run", async () => {
+    const completedOwned = makeExistingRun({
+      id: 150,
+      status: "completed",
+      conclusion: "failure",
+      annotationsCount: 0,
+    });
+    const newerInProgressOwned = makeExistingRun({
+      id: 200,
+      status: "in_progress",
+      conclusion: null,
+      annotationsCount: 0,
+    });
+    const client = makeClient([completedOwned, newerInProgressOwned]);
+    const snapshot = makeSnapshot();
+
+    const result = await publishCheckRun(client, {
+      owner: "owner",
+      repo: "repo",
+      pullNumber: 42,
+      snapshot,
+      verdict: "PASS",
+      evaluatedAt,
+      requiredChecks: ["ci"],
+      getLatestStateFingerprint: async () => snapshot.stateFingerprint,
+    });
+
+    expect(result).toEqual({
+      action: "updated",
+      verdict: "PASS",
+      headSha,
+      status: "completed",
+      conclusion: "success",
+      checkRunId: 200,
+      htmlUrl: "https://github.com/owner/repo/runs/200",
+    });
+    expect(client.createCheckRun).not.toHaveBeenCalled();
+    expect(client.updateCheckRun).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        checkRunId: 200,
+        status: "completed",
+        conclusion: "success",
+        completedAt: evaluatedAt,
+      }),
+    );
   });
 
   it("ignores foreign check runs with the same name and creates an owned check run instead", async () => {
