@@ -1,3 +1,4 @@
+import type { GitHubCheckRun, GitHubReviewSubmission } from "../collector/github-collector.js";
 import type { NormalizedFinding } from "../models/finding.js";
 import type {
   ReviewerExecutionRecord,
@@ -9,9 +10,65 @@ import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
 import { stripMarkdownPunctuation } from "./utils.js";
 
 const SOURCERY_LOGINS = new Set(["sourcery-ai", "sourcery-ai[bot]"]);
+const RATE_LIMIT_PATTERNS = [
+  /review budget/i,
+  /diff characters for the last \d+ days/i,
+  /intent=rate_limit_hit/i,
+  /rate limit/i,
+  /review limit/i,
+];
 
 function isSourceryAuthor(login: string | null): boolean {
   return login !== null && SOURCERY_LOGINS.has(login.toLowerCase());
+}
+
+function isRateLimited(
+  checkRun: GitHubCheckRun | undefined,
+  reviews: readonly GitHubReviewSubmission[],
+  input: NormalizerInput,
+): boolean {
+  const hasFreshSuccessCheck =
+    checkRun?.status === "completed" &&
+    checkRun.conclusion === "success" &&
+    checkRun.commitSha === input.headSha;
+  const latestReview = reviews[reviews.length - 1];
+  const hasFreshReview = latestReview?.commitSha === input.headSha;
+
+  if (hasFreshSuccessCheck || hasFreshReview) {
+    return false;
+  }
+
+  if (checkRun && (checkRun.conclusion === "skipped" || checkRun.conclusion === "neutral")) {
+    const textToCheck = `${checkRun.output.title ?? ""} ${checkRun.output.summary ?? ""} ${
+      checkRun.output.text ?? ""
+    }`;
+    if (RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(textToCheck))) {
+      return true;
+    }
+  }
+
+  const checkCompletedAt = checkRun?.completedAt ? Date.parse(checkRun.completedAt) : Number.NaN;
+  const comments = (input.conversationComments ?? []).filter((c) =>
+    isSourceryAuthor(c.authorLogin),
+  );
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const comment = comments[i];
+    if (!comment?.body) {
+      continue;
+    }
+    const timestamp = comment.updatedAt ?? comment.createdAt;
+    if (!Number.isNaN(checkCompletedAt) && timestamp) {
+      const commentTime = Date.parse(timestamp);
+      if (!Number.isNaN(commentTime) && commentTime < checkCompletedAt) {
+        continue;
+      }
+    }
+    if (RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(comment.body ?? ""))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function parseSeverity(body: string): Severity {
@@ -126,8 +183,12 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
   const hasUnresolvedBlockingFindings = findings.some((f) => f.isBlocking && !f.isResolved);
   const isChangesRequested =
     latestReview?.state === "CHANGES_REQUESTED" || hasUnresolvedBlockingFindings;
+  const rateLimited = isRateLimited(checkRun, reviews, input);
 
-  if (!checkRun && reviews.length === 0 && threads.length === 0) {
+  if (rateLimited && (!checkRun || checkRun.commitSha === headSha)) {
+    status = "RATE_LIMITED";
+    verdict = isChangesRequested ? "CHANGES_REQUESTED" : "NONE";
+  } else if (!checkRun && reviews.length === 0 && threads.length === 0) {
     status = "PENDING";
     verdict = "NONE";
   } else if (!isFresh) {
@@ -136,6 +197,9 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
   } else if (checkRun && checkRun.status !== "completed") {
     status = "PENDING";
     verdict = "NONE";
+  } else if (checkRun && checkRun.conclusion === "skipped") {
+    status = "SKIPPED";
+    verdict = isChangesRequested ? "CHANGES_REQUESTED" : "NONE";
   } else if (checkRun && checkRun.conclusion !== "success") {
     status = "FAILED";
     verdict =
