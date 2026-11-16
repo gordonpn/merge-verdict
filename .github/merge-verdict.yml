@@ -1,0 +1,41 @@
+required_checks:
+  - "runner / test"
+  - "runner / coverage"
+  - "CodeQL"
+
+required_reviewers:
+  - coderabbitai
+  - sourcery-ai
+
+allow_advisory_exemptions: true
+rate_limit_timeout_minutes: 30
+
+verification:
+  require_current_head_sha: true
+  require_resolved_threads: true
+  require_successful_ci: true
+  require_code_evidence: false
+  require_issue_links: true
+
+approval:
+  required_check: merge-verdict
+  providers:
+    - none
+  require_verified_commit: true
+
+  risk:
+    low:
+      paths:
+        - "docs/**"
+        - "**/*.md"
+      automated_approval: allowed
+      effort: lite
+
+    high:
+      paths:
+        - ".github/workflows/**"
+        - "src/**"
+        - "scripts/**"
+      automated_approval: additional_review
+      require_human_review: true
+      effort: max
