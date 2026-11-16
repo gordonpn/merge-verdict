@@ -1,5 +1,9 @@
 import type { NormalizedFinding } from "../models/finding.js";
-import type { ReviewerExecutionRecord, ReviewerVerdict } from "../models/reviewer.js";
+import type {
+  ReviewerExecutionRecord,
+  ReviewerStatus,
+  ReviewerVerdict,
+} from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
 import { stripMarkdownPunctuation } from "./utils.js";
@@ -7,6 +11,11 @@ import { stripMarkdownPunctuation } from "./utils.js";
 type RawVerdict = "APPROVE" | "APPROVE WITH MINOR FINDINGS" | "REQUEST CHANGES" | "BLOCK";
 
 const DEEPSEEK_LOGINS = new Set(["github-actions", "github-actions[bot]"]);
+const DEEPSEEK_CHECK_NAMES = new Set([
+  "runner / deepseek-review",
+  "deepseek review",
+  "deepseek-review",
+]);
 
 function isDeepSeekAuthor(login: string | null): boolean {
   return login !== null && DEEPSEEK_LOGINS.has(login.toLowerCase());
@@ -135,64 +144,96 @@ export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecu
       (r) => isDeepSeekAuthor(r.reviewerLogin) && r.body && /##\s*Verdict:/i.test(r.body),
     ) ?? [];
   const review = matchingReviews[matchingReviews.length - 1];
+  const checkRun = input.checkRuns?.find((c) => DEEPSEEK_CHECK_NAMES.has(c.name.toLowerCase()));
+  const checkRunConclusion = checkRun?.conclusion ?? null;
 
-  if (!review?.body) {
-    return {
-      reviewerId: "deepseek-review",
-      reviewerName: "DeepSeek Review",
-      status: "PENDING",
-      evaluatedCommitSha: null,
-      isFresh: false,
-      verdict: "NONE",
-      findings: [],
-      checkRunConclusion: null,
-    };
-  }
+  if (review?.body && review.commitSha === headSha) {
+    const evaluatedCommitSha = review.commitSha;
+    const rawVerdict = extractRawVerdict(review.body);
 
-  const evaluatedCommitSha = review.commitSha;
-  const isFresh = evaluatedCommitSha !== null && evaluatedCommitSha === headSha;
-  const rawVerdict = extractRawVerdict(review.body);
+    if (!rawVerdict) {
+      return {
+        reviewerId: "deepseek-review",
+        reviewerName: "DeepSeek Review",
+        status: "COMPLETED",
+        evaluatedCommitSha,
+        isFresh: true,
+        verdict: "COMMENTED",
+        findings: [],
+        checkRunConclusion,
+      };
+    }
 
-  if (!isFresh) {
-    return {
-      reviewerId: "deepseek-review",
-      reviewerName: "DeepSeek Review",
-      status: "STALE",
-      evaluatedCommitSha,
-      isFresh: false,
-      verdict: "NONE",
-      findings: [],
-      checkRunConclusion: null,
-    };
-  }
+    const findings = parseMaterialFindings(review.body, rawVerdict);
+    const verdict: ReviewerVerdict =
+      rawVerdict === "APPROVE" || rawVerdict === "APPROVE WITH MINOR FINDINGS"
+        ? "APPROVE"
+        : "CHANGES_REQUESTED";
 
-  if (!rawVerdict) {
     return {
       reviewerId: "deepseek-review",
       reviewerName: "DeepSeek Review",
       status: "COMPLETED",
       evaluatedCommitSha,
       isFresh: true,
-      verdict: "COMMENTED",
+      verdict,
+      findings,
+      checkRunConclusion,
+    };
+  }
+
+  if (checkRun) {
+    const evaluatedCommitSha = checkRun.commitSha;
+    const isFresh = evaluatedCommitSha === headSha;
+    let status: ReviewerStatus = "PENDING";
+
+    if (!isFresh) {
+      status = "STALE";
+    } else if (checkRun.status !== "completed") {
+      status = "PENDING";
+    } else if (
+      checkRun.conclusion === "skipped" ||
+      checkRun.conclusion === "neutral" ||
+      checkRun.conclusion === "success"
+    ) {
+      status = "SKIPPED";
+    } else {
+      status = "FAILED";
+    }
+
+    return {
+      reviewerId: "deepseek-review",
+      reviewerName: "DeepSeek Review",
+      status,
+      evaluatedCommitSha,
+      isFresh,
+      verdict: "NONE",
+      findings: [],
+      checkRunConclusion,
+    };
+  }
+
+  if (review?.body) {
+    return {
+      reviewerId: "deepseek-review",
+      reviewerName: "DeepSeek Review",
+      status: "STALE",
+      evaluatedCommitSha: review.commitSha,
+      isFresh: false,
+      verdict: "NONE",
       findings: [],
       checkRunConclusion: null,
     };
   }
 
-  const findings = parseMaterialFindings(review.body, rawVerdict);
-  const verdict: ReviewerVerdict =
-    rawVerdict === "APPROVE" || rawVerdict === "APPROVE WITH MINOR FINDINGS"
-      ? "APPROVE"
-      : "CHANGES_REQUESTED";
-
   return {
     reviewerId: "deepseek-review",
     reviewerName: "DeepSeek Review",
-    status: "COMPLETED",
-    evaluatedCommitSha,
-    isFresh: true,
-    verdict,
-    findings,
+    status: "PENDING",
+    evaluatedCommitSha: null,
+    isFresh: false,
+    verdict: "NONE",
+    findings: [],
     checkRunConclusion: null,
   };
 }

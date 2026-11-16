@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { GitHubReviewSubmission } from "../../src/collector/github-collector.js";
+import type {
+  GitHubCheckRun,
+  GitHubReviewSubmission,
+} from "../../src/collector/github-collector.js";
 import { ReviewerExecutionRecordSchema } from "../../src/models/reviewer.js";
 import { deepSeekNormalizer, normalizeDeepSeekReviewer } from "../../src/normalizers/deepseek.js";
 
@@ -346,5 +349,169 @@ None.`,
     expect(result.status).toBe("COMPLETED");
     expect(result.verdict).toBe("APPROVE");
     expect(result.findings).toHaveLength(0);
+  });
+
+  it.each<NonNullable<GitHubCheckRun["conclusion"]>>(["skipped", "neutral", "success"])(
+    "classifies a completed %s check run on head SHA without a review as SKIPPED instead of PENDING unknown",
+    (conclusion) => {
+      const checkRuns: GitHubCheckRun[] = [
+        {
+          id: 133062762464,
+          name: "runner / deepseek-review",
+          status: "completed",
+          conclusion,
+          commitSha: headSha,
+          startedAt: "2026-11-16T02:58:36Z",
+          completedAt: "2026-11-16T02:58:38Z",
+          detailsUrl: null,
+          output: { title: null, summary: null, text: null },
+        },
+      ];
+
+      const result = normalizeDeepSeekReviewer({
+        headSha,
+        checkRuns,
+        reviewThreads: [],
+        reviews: [],
+        conversationComments: [],
+      });
+
+      expect(result.status).toBe("SKIPPED");
+      expect(result.isFresh).toBe(true);
+      expect(result.evaluatedCommitSha).toBe(headSha);
+      expect(result.verdict).toBe("NONE");
+      expect(result.checkRunConclusion).toBe(conclusion);
+      expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+    },
+  );
+
+  it("classifies an in_progress check run on head SHA as PENDING with head SHA bound", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 133062762465,
+        name: "runner / deepseek-review",
+        status: "in_progress",
+        conclusion: null,
+        commitSha: headSha,
+        startedAt: "2026-11-16T02:58:36Z",
+        completedAt: null,
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+      },
+    ];
+
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("PENDING");
+    expect(result.isFresh).toBe(true);
+    expect(result.evaluatedCommitSha).toBe(headSha);
+    expect(result.verdict).toBe("NONE");
+  });
+
+  it("classifies a failing DeepSeek check run on head SHA without a review as FAILED", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 133062762466,
+        name: "runner / deepseek-review",
+        status: "completed",
+        conclusion: "failure",
+        commitSha: headSha,
+        startedAt: "2026-11-16T02:58:36Z",
+        completedAt: "2026-11-16T02:58:38Z",
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+      },
+    ];
+
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.isFresh).toBe(true);
+    expect(result.evaluatedCommitSha).toBe(headSha);
+    expect(result.verdict).toBe("NONE");
+    expect(result.checkRunConclusion).toBe("failure");
+  });
+
+  it("marks an older commit check run without a fresh review as STALE", () => {
+    const olderSha = "1111111111111111111111111111111111111111";
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 133062762467,
+        name: "runner / deepseek-review",
+        status: "completed",
+        conclusion: "skipped",
+        commitSha: olderSha,
+        startedAt: "2026-11-16T02:58:36Z",
+        completedAt: "2026-11-16T02:58:38Z",
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+      },
+    ];
+
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("STALE");
+    expect(result.isFresh).toBe(false);
+    expect(result.evaluatedCommitSha).toBe(olderSha);
+    expect(result.verdict).toBe("NONE");
+  });
+
+  it("prefers fresh skipped check run over an older commit review", () => {
+    const olderSha = "1111111111111111111111111111111111111111";
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 510,
+        reviewerLogin: "github-actions[bot]",
+        state: "COMMENTED",
+        commitSha: olderSha,
+        submittedAt: "2026-10-01T10:00:00Z",
+        body: "## Verdict: APPROVE\n\n### Material Findings\nNone.",
+        bodyDigest: "d10",
+      },
+    ];
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 133062762468,
+        name: "runner / deepseek-review",
+        status: "completed",
+        conclusion: "skipped",
+        commitSha: headSha,
+        startedAt: "2026-11-16T02:58:36Z",
+        completedAt: "2026-11-16T02:58:38Z",
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+      },
+    ];
+
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("SKIPPED");
+    expect(result.isFresh).toBe(true);
+    expect(result.evaluatedCommitSha).toBe(headSha);
+    expect(result.verdict).toBe("NONE");
   });
 });
