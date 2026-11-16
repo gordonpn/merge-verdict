@@ -323,9 +323,16 @@ function shouldSkipStaleOverwrite(
 }
 
 // GitHub PATCH /check-runs/{id} appends annotations instead of replacing them,
-// so any owned check run that already holds annotations must be superseded by a fresh run.
-function canReuseCheckRun(existing: ExistingCheckRun | undefined): existing is ExistingCheckRun {
-  return existing !== undefined && (existing.annotationsCount ?? 0) === 0;
+// and cannot reopen a completed check run back to in_progress, so both cases
+// must create a fresh check run instead.
+function canReuseCheckRun(
+  existing: ExistingCheckRun | undefined,
+  targetStatus: CheckRunStatus,
+): existing is ExistingCheckRun {
+  if (existing === undefined || (existing.annotationsCount ?? 0) !== 0) {
+    return false;
+  }
+  return !(existing.status === "completed" && targetStatus === "in_progress");
 }
 
 /**
@@ -386,7 +393,7 @@ export async function publishCheckRun(
     firstBatch !== undefined ? { ...report.output, annotations: firstBatch } : { ...report.output };
 
   const externalIdPrefix = client.ownedExternalIdPrefix ?? DEFAULT_OWNED_EXTERNAL_ID_PREFIX;
-  const reusableOwned = canReuseCheckRun(latestOwned) ? latestOwned : undefined;
+  const reusableOwned = canReuseCheckRun(latestOwned, checkState.status) ? latestOwned : undefined;
   let published: PublishedCheckRun;
   if (reusableOwned !== undefined) {
     published = await client.updateCheckRun({
@@ -486,7 +493,7 @@ export async function publishErrorCheckRun(
   const checkState = mapVerdictToCheckState(effectiveVerdict);
 
   const externalIdPrefix = client.ownedExternalIdPrefix ?? DEFAULT_OWNED_EXTERNAL_ID_PREFIX;
-  const reusableOwned = canReuseCheckRun(latestOwned) ? latestOwned : undefined;
+  const reusableOwned = canReuseCheckRun(latestOwned, checkState.status) ? latestOwned : undefined;
   const published =
     reusableOwned !== undefined
       ? await client.updateCheckRun({
