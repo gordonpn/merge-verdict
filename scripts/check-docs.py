@@ -22,7 +22,23 @@ DEFINITION_PATTERN = re.compile(
     r"(?:(?:[ \t]+|\n[ \t]*)(?:\"[^\"\n]*\"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$",
     re.MULTILINE,
 )
-EMOJI_PATTERN = re.compile(r"[\U00010000-\U0010ffff]")
+def emoji_pattern() -> re.Pattern:
+    """Use pinned Unicode data, independent of the host Unicode database."""
+    ranges = []
+    data = Path(__file__).resolve().parent / "unicode" / "emoji-17.0-ranges.txt"
+    for line in data.read_text(encoding="ascii").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        bounds = [int(value, 16) for value in line.split("..")]
+        # ASCII Emoji-property characters are only emoji in a keycap sequence.
+        if bounds[-1] < 128:
+            continue
+        start, end = chr(bounds[0]), chr(bounds[-1])
+        ranges.append(re.escape(start) if start == end else f"{re.escape(start)}-{re.escape(end)}")
+    return re.compile("[" + "".join(ranges) + r"]|[0-9#*]\ufe0f?\u20e3")
+
+
+EMOJI_PATTERN = emoji_pattern()
 EXTERNAL_SCHEMES = {"http", "https", "mailto", "ftp", "ftps", "tel"}
 
 
