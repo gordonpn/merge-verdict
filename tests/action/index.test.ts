@@ -1247,19 +1247,154 @@ describe("runAction end-to-end orchestration", () => {
     );
   });
 
-  it("rejects non-default config-path inputs instead of silently loading .github/merge-verdict.yml", async () => {
-    const collectPullRequest = vi.fn();
+  it("forwards config-path inputs through collector initial, final, and pre-publish collection", async () => {
+    const fixture = createPullRequestFixture();
+    const collectPullRequest = vi.fn().mockResolvedValue(fixture);
     const collector: PullRequestCollector = { collectPullRequest };
 
     const result = await runAction({
       env: baseEnv({ "INPUT_CONFIG-PATH": ".github/custom-policy.yml" }),
       collector,
       now: fixedNow,
+      codeEvidenceSatisfied: true,
     });
 
-    expect(result.verdict).toBe("ERROR");
-    expect(result.summary).toContain("Unsupported config-path");
-    expect(collectPullRequest).not.toHaveBeenCalled();
+    expect(result.verdict).toBe("PASS");
+    expect(collectPullRequest).toHaveBeenCalledTimes(3);
+    for (const call of collectPullRequest.mock.calls) {
+      expect(call[0]).toEqual({
+        owner: "gordonpn",
+        repo: "merge-verdict",
+        pullRequestNumber: 42,
+        configPath: ".github/custom-policy.yml",
+      });
+    }
+  });
+
+  it("forwards collected ancestorCommitShas so Sourcery addressed findings resolve", async () => {
+    const ancestorSha = "6d2d4577402ad953901d058425841f52d2a867fd";
+    const resolvedThread = {
+      id: "PRRT_sourcery_1",
+      isResolved: true,
+      resolvedByLogin: "gordonpn",
+      isOutdated: true,
+      path: "src/index.ts",
+      line: 10,
+      originalLine: 10,
+      comments: [
+        {
+          id: "PRRC_sourcery_1",
+          authorLogin: "sourcery-ai",
+          body: `Medium severity finding.\n\nAddressed in [${ancestorSha}](https://github.com/gordonpn/merge-verdict/commit/${ancestorSha})`,
+          bodyDigest: "digest-sourcery",
+          path: "src/index.ts",
+          line: 10,
+          originalLine: 10,
+          commitSha: ancestorSha,
+          createdAt: "2026-11-14T12:00:00Z",
+          updatedAt: "2026-11-14T12:00:00Z",
+        },
+      ],
+    };
+    const policyWithoutCodeEvidence = [
+      "required_checks:",
+      "  - ci / test",
+      "verification:",
+      "  require_code_evidence: false",
+      "approval:",
+      "  required_check: merge-verdict",
+    ].join("\n");
+
+    const withoutAncestry = await runAction({
+      env: baseEnv(),
+      collector: {
+        collectPullRequest: vi.fn().mockResolvedValue(
+          createPullRequestFixture({
+            ancestorCommitShas: [],
+            policyContent: policyWithoutCodeEvidence,
+            reviewThreads: [resolvedThread],
+          }),
+        ),
+      },
+      now: fixedNow,
+    });
+    expect(withoutAncestry.verdict).toBe("FAIL");
+    expect(withoutAncestry.snapshot?.reviewers["sourcery-ai"]?.findings[0]?.isResolved).toBe(false);
+
+    const withAncestry = await runAction({
+      env: baseEnv(),
+      collector: {
+        collectPullRequest: vi.fn().mockResolvedValue(
+          createPullRequestFixture({
+            ancestorCommitShas: [ancestorSha],
+            policyContent: policyWithoutCodeEvidence,
+            reviewThreads: [resolvedThread],
+          }),
+        ),
+      },
+      now: fixedNow,
+    });
+
+    expect(withAncestry.verdict).toBe("PASS");
+    expect(withAncestry.snapshot?.reviewers["sourcery-ai"]?.findings[0]?.isResolved).toBe(true);
+  });
+
+  it("enforces protected verification.require_issue_links against collected PR body", async () => {
+    const policyWithIssueLinks = [
+      "required_checks:",
+      "  - ci / test",
+      "verification:",
+      "  require_code_evidence: false",
+      "  require_issue_links: true",
+    ].join("\n");
+
+    const missingBodyRun = await runAction({
+      env: baseEnv(),
+      collector: {
+        collectPullRequest: vi
+          .fn()
+          .mockResolvedValue(
+            createPullRequestFixture({ body: null, policyContent: policyWithIssueLinks }),
+          ),
+      },
+      now: fixedNow,
+    });
+    expect(missingBodyRun.verdict).toBe("FAIL");
+    expect(missingBodyRun.evaluation?.reasons).toContainEqual(
+      expect.objectContaining({
+        condition: 8,
+        outcome: "FAIL",
+        code: "REPOSITORY_RULE_UNSATISFIED",
+        subject: "issue-links",
+      }),
+    );
+
+    const linkedBodyRun = await runAction({
+      env: baseEnv(),
+      collector: {
+        collectPullRequest: vi
+          .fn()
+          .mockResolvedValue(
+            createPullRequestFixture({ body: "Refs #72", policyContent: policyWithIssueLinks }),
+          ),
+      },
+      now: fixedNow,
+    });
+    expect(linkedBodyRun.verdict).toBe("PASS");
+
+    const overriddenRun = await runAction({
+      env: baseEnv(),
+      collector: {
+        collectPullRequest: vi
+          .fn()
+          .mockResolvedValue(
+            createPullRequestFixture({ body: null, policyContent: policyWithIssueLinks }),
+          ),
+      },
+      now: fixedNow,
+      requireIssueLink: false,
+    });
+    expect(overriddenRun.verdict).toBe("PASS");
   });
 
   it("returns STALE when base policy or changed files mutate between initial and final collection", async () => {
