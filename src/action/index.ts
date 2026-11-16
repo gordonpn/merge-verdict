@@ -492,6 +492,34 @@ function formatError(error: unknown): string {
   return sanitizeDiagnostic(error instanceof Error ? error.message : String(error));
 }
 
+function buildSnapshot(
+  prData: GitHubPullRequestData,
+  capturedAt: string,
+  normalizers?: readonly ReviewerNormalizer[],
+): ReviewSnapshot {
+  return buildReviewSnapshotFromPullRequest(prData, {
+    capturedAt,
+    ...(normalizers ? { normalizers } : {}),
+    ...(prData.ancestorCommitShas !== undefined
+      ? { ancestorCommitShas: prData.ancestorCommitShas }
+      : {}),
+  });
+}
+
+function hasCollectionDrift(
+  initial: GitHubPullRequestData,
+  next: GitHubPullRequestData,
+  trackBody: boolean,
+): boolean {
+  return (
+    next.baseSha !== initial.baseSha ||
+    next.policyVersion !== initial.policyVersion ||
+    next.policyContent !== initial.policyContent ||
+    !haveSameStringSet(next.changedFilePaths, initial.changedFilePaths) ||
+    (trackBody && (next.body ?? null) !== (initial.body ?? null))
+  );
+}
+
 /**
  * Executes the Merge Verdict GitHub Action workflow entry point.
  */
@@ -588,6 +616,12 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
   let config: ReturnType<typeof parseConfig>;
   let snapshot: ReviewSnapshot;
   let collector: PullRequestCollector;
+  const collectInput: CollectPullRequestInput = {
+    owner: repository.owner,
+    repo: repository.repo,
+    pullRequestNumber,
+    configPath,
+  };
 
   try {
     if (trustedRepository === null) {
@@ -609,22 +643,10 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
       throw new Error("Authenticated pull request response did not contain a valid head SHA.");
     }
     failFast = parseBooleanInput(getActionInput("fail-fast", env), false);
-    if (configPath !== DEFAULT_CONFIG_FILE_PATH) {
-      throw new Error(
-        `Unsupported config-path "${configPath}": protected-base collection only reads "${DEFAULT_CONFIG_FILE_PATH}".`,
-      );
-    }
     collector = options.collector ?? (options.createCollector ?? createGitHubCollector)(token);
-    initialPrData = await collector.collectPullRequest({
-      owner: repository.owner,
-      repo: repository.repo,
-      pullRequestNumber,
-    });
+    initialPrData = await collector.collectPullRequest(collectInput);
     config = parseConfig(initialPrData.policyContent);
-    snapshot = buildReviewSnapshotFromPullRequest(initialPrData, {
-      capturedAt: evaluatedAt,
-      ...(options.normalizers ? { normalizers: options.normalizers } : {}),
-    });
+    snapshot = buildSnapshot(initialPrData, evaluatedAt, options.normalizers);
   } catch (error) {
     let diagnostic = formatError(error);
     if (checksClient !== undefined && trustedRepository !== null && trustedHeadSha !== null) {
@@ -660,6 +682,10 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
     .filter((thread) => !thread.isResolved)
     .map((thread) => thread.id);
 
+  const requireIssueLink =
+    options.requireIssueLink ?? config.verification.requireIssueLinks === true;
+  const trackBodyFreshness = requireIssueLink && options.pullRequestBody === undefined;
+
   const executionErrors: string[] = [];
   let finalSnapshot = {
     headSha: snapshot.headSha,
@@ -667,23 +693,12 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
   };
 
   try {
-    const finalPrData = await collector.collectPullRequest({
-      owner: repository.owner,
-      repo: repository.repo,
-      pullRequestNumber,
-    });
-    const finalReviewSnapshot = buildReviewSnapshotFromPullRequest(finalPrData, {
-      capturedAt: evaluatedAt,
-      ...(options.normalizers ? { normalizers: options.normalizers } : {}),
-    });
-    const baseOrPathsChanged =
-      finalPrData.baseSha !== initialPrData.baseSha ||
-      finalPrData.policyVersion !== initialPrData.policyVersion ||
-      finalPrData.policyContent !== initialPrData.policyContent ||
-      !haveSameStringSet(finalPrData.changedFilePaths, initialPrData.changedFilePaths);
+    const finalPrData = await collector.collectPullRequest(collectInput);
+    const finalReviewSnapshot = buildSnapshot(finalPrData, evaluatedAt, options.normalizers);
+    const collectionDrifted = hasCollectionDrift(initialPrData, finalPrData, trackBodyFreshness);
     finalSnapshot = {
       headSha: finalReviewSnapshot.headSha,
-      stateFingerprint: baseOrPathsChanged
+      stateFingerprint: collectionDrifted
         ? `stale-policy-or-paths:${snapshot.stateFingerprint}`
         : finalReviewSnapshot.stateFingerprint,
     };
@@ -692,8 +707,10 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
   }
 
   const repositoryRules = [...(options.repositoryRules ?? [])];
-  if (options.requireIssueLink && options.pullRequestBody !== undefined) {
-    const issueCheck = checkIssueLinks(options.pullRequestBody);
+  const pullRequestBody =
+    options.pullRequestBody !== undefined ? options.pullRequestBody : (initialPrData.body ?? null);
+  if (requireIssueLink) {
+    const issueCheck = checkIssueLinks(pullRequestBody);
     repositoryRules.push({
       id: "issue-links",
       satisfied: issueCheck.failureMessage === null,
@@ -729,23 +746,11 @@ export async function runAction(options: ActionRuntimeOptions = {}): Promise<Act
       requiredChecks: config.requiredChecks,
       getLatestStateFingerprint: async () => {
         if (evaluation.verdict !== "PASS") return finalSnapshot.stateFingerprint;
-        const latest = await collector.collectPullRequest({
-          owner: repository.owner,
-          repo: repository.repo,
-          pullRequestNumber,
-        });
-        if (
-          latest.baseSha !== initialPrData.baseSha ||
-          latest.policyVersion !== initialPrData.policyVersion ||
-          latest.policyContent !== initialPrData.policyContent ||
-          !haveSameStringSet(latest.changedFilePaths, initialPrData.changedFilePaths)
-        ) {
+        const latest = await collector.collectPullRequest(collectInput);
+        if (hasCollectionDrift(initialPrData, latest, trackBodyFreshness)) {
           return `stale-policy-or-paths:${snapshot.stateFingerprint}`;
         }
-        return buildReviewSnapshotFromPullRequest(latest, {
-          capturedAt: evaluatedAt,
-          ...(options.normalizers ? { normalizers: options.normalizers } : {}),
-        }).stateFingerprint;
+        return buildSnapshot(latest, evaluatedAt, options.normalizers).stateFingerprint;
       },
     });
     evaluation = { ...evaluation, verdict: publication.verdict };
