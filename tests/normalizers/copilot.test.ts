@@ -418,4 +418,111 @@ describe("normalizeCopilotReviewer", () => {
     expect(f4?.title.endsWith("...")).toBe(true);
     expect(f4?.title).toHaveLength(120);
   });
+
+  it("classifies insufficient remaining quota COMMENTED reviews on head SHA as RATE_LIMITED", () => {
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 5914538932,
+        reviewerLogin: "copilot-pull-request-reviewer[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-11-16T02:58:38Z",
+        body: "Copilot was unable to review this pull request because the user who requested the review has insufficient remaining quota.",
+        bodyDigest: "d_quota",
+      },
+    ];
+
+    const result = normalizeCopilotReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("RATE_LIMITED");
+    expect(result.verdict).toBe("NONE");
+    expect(result.isFresh).toBe(true);
+    expect(result.evaluatedCommitSha).toBe(headSha);
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("preserves CHANGES_REQUESTED verdict on RATE_LIMITED when unresolved Copilot threads exist", () => {
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 5914538933,
+        reviewerLogin: "copilot-pull-request-reviewer[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-11-16T02:58:38Z",
+        body: "Copilot was unable to review this pull request because the user who requested the review has insufficient remaining quota.",
+        bodyDigest: "d_quota_2",
+      },
+    ];
+    const reviewThreads: GitHubReviewThread[] = [
+      {
+        id: "copilot_t_unresolved",
+        isResolved: false,
+        resolvedByLogin: null,
+        isOutdated: false,
+        path: "src/index.ts",
+        line: 5,
+        originalLine: 5,
+        comments: [
+          {
+            id: "c_u1",
+            authorLogin: "copilot-pull-request-reviewer[bot]",
+            body: "Unresolved security concern.",
+            bodyDigest: "d_u1",
+            path: "src/index.ts",
+            line: 5,
+            originalLine: 5,
+            commitSha: headSha,
+            createdAt: "2026-11-16T02:50:00Z",
+            updatedAt: "2026-11-16T02:50:00Z",
+          },
+        ],
+      },
+    ];
+
+    const result = normalizeCopilotReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads,
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("RATE_LIMITED");
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("marks stale quota-limit reviews from older commits as STALE rather than RATE_LIMITED", () => {
+    const olderSha = "0000000000000000000000000000000000000000";
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 5914538934,
+        reviewerLogin: "copilot-pull-request-reviewer[bot]",
+        state: "COMMENTED",
+        commitSha: olderSha,
+        submittedAt: "2026-11-16T02:58:38Z",
+        body: "Copilot was unable to review this pull request because the user who requested the review has insufficient remaining quota.",
+        bodyDigest: "d_quota_old",
+      },
+    ];
+
+    const result = normalizeCopilotReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("STALE");
+    expect(result.verdict).toBe("NONE");
+    expect(result.isFresh).toBe(false);
+    expect(result.evaluatedCommitSha).toBe(olderSha);
+  });
 });

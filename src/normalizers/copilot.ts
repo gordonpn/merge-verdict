@@ -1,3 +1,4 @@
+import type { GitHubReviewSubmission } from "../collector/github-collector.js";
 import type { NormalizedFinding } from "../models/finding.js";
 import type {
   ReviewerExecutionRecord,
@@ -13,8 +14,22 @@ const COPILOT_LOGINS = new Set([
   "copilot-pull-request-reviewer",
 ]);
 
+const RATE_LIMIT_PATTERNS = [
+  /insufficient remaining quota/i,
+  /quota (?:limit )?(?:reached|exceeded)/i,
+  /rate limit(?:ed)?/i,
+];
+
 function isCopilotAuthor(login: string | null): boolean {
   return login !== null && COPILOT_LOGINS.has(login.toLowerCase());
+}
+
+function isRateLimitedReview(review: GitHubReviewSubmission | undefined): boolean {
+  if (review?.state !== "COMMENTED" || !review.body) {
+    return false;
+  }
+  const body = review.body;
+  return RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(body));
 }
 
 function extractCopilotTitle(body: string, path: string | null, line: number | null): string {
@@ -118,6 +133,7 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
 
   let status: ReviewerStatus = "PENDING";
   let verdict: ReviewerVerdict = "NONE";
+  const hasUnresolvedBlocking = findings.some((f) => f.isBlocking && !f.isResolved);
 
   if (!latestReview && threads.length === 0) {
     status = "PENDING";
@@ -125,9 +141,11 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
   } else if (evaluatedCommitSha !== null && !isFresh) {
     status = "STALE";
     verdict = "NONE";
+  } else if (isRateLimitedReview(latestReview)) {
+    status = "RATE_LIMITED";
+    verdict = hasUnresolvedBlocking ? "CHANGES_REQUESTED" : "NONE";
   } else {
     status = "COMPLETED";
-    const hasUnresolvedBlocking = findings.some((f) => f.isBlocking && !f.isResolved);
     if (latestReview?.state === "CHANGES_REQUESTED" || hasUnresolvedBlocking) {
       verdict = "CHANGES_REQUESTED";
     } else if (latestReview?.state === "APPROVED") {
