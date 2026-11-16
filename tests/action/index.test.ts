@@ -480,6 +480,75 @@ describe("runAction end-to-end orchestration", () => {
     };
   }
 
+  it.each(["neutral", "skipped"] as const)(
+    "permits a protected policy's explicit %s check conclusion",
+    async (conclusion) => {
+      const original = createPullRequestFixture();
+      const fixture = createPullRequestFixture({
+        policyContent:
+          "required_checks: [ci_test]\npermitted_check_conclusions:\n  ci_test: [" +
+          conclusion +
+          "]",
+        checkRuns: original.checkRuns.map((run) => ({ ...run, name: "ci_test", conclusion })),
+      });
+      const result = await runAction({
+        env: baseEnv(),
+        collector: { collectPullRequest: vi.fn().mockResolvedValue(fixture) },
+        codeEvidenceSatisfied: true,
+      });
+      expect(result.verdict).toBe("PASS");
+    },
+  );
+
+  it.each([
+    [undefined, "MEDIUM", "FAIL"],
+    ["HIGH", "MEDIUM", "PASS"],
+    ["MEDIUM", "MEDIUM", "FAIL"],
+    [undefined, "LOW", "PASS"],
+    ["LOW", "LOW", "FAIL"],
+  ] as const)(
+    "applies protected severity %s to %s findings",
+    async (threshold, severity, verdict) => {
+      const fixture = createPullRequestFixture({
+        policyContent:
+          "allow_advisory_exemptions: true" +
+          (threshold ? `\nblocking_severity_threshold: ${threshold}` : ""),
+      });
+      const result = await runAction({
+        env: baseEnv(),
+        collector: { collectPullRequest: vi.fn().mockResolvedValue(fixture) },
+        codeEvidenceSatisfied: true,
+        normalizers: [
+          {
+            reviewerId: "test",
+            reviewerName: "Test",
+            normalize: ({ headSha }) => ({
+              reviewerId: "test",
+              reviewerName: "Test",
+              status: "COMPLETED",
+              evaluatedCommitSha: headSha,
+              isFresh: true,
+              verdict: "COMMENTED",
+              checkRunConclusion: null,
+              findings: [
+                {
+                  id: "finding",
+                  reviewerId: "test",
+                  title: "Advisory",
+                  description: "",
+                  severity,
+                  isBlocking: false,
+                  isResolved: false,
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      expect(result.verdict).toBe(verdict);
+    },
+  );
+
   it("terminates with exit code 0 and SKIPPED_SELF_EVENT when self-triggered", async () => {
     const collectPullRequest = vi.fn();
     const collector: PullRequestCollector = { collectPullRequest };
