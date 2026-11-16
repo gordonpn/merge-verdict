@@ -73,7 +73,7 @@ This document details:
   - Sections for `Material Findings`, `Unverified Assumptions`, `Missing Verification`, and `Final Challenge`.
 - **Observed Behavior on Reference PRs**:
   - In PR #121, DeepSeek Review ran against commit `6ad1952...` and issued `Verdict: APPROVE WITH MINOR FINDINGS`.
-  - In the reference workflow, DeepSeek Review triggers exclusively on `pull_request: types: [ready_for_review]`. It does not automatically run on subsequent `synchronize` (commit push) events.
+  - In `.github/workflows/deepseek-review.yml`, DeepSeek Review triggers on `pull_request` (`opened` and `ready_for_review` for non-draft same-repository PRs) and on open-PR `issue_comment` (`created`, `edited`) `/review` requests from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts (non-draft PRs only). It does not automatically run on `synchronize` (commit push) events.
 - **Merge Verdict Policy Rule**:
   - The adapter extracts the commit SHA associated with the review (`review.commit_id`).
   - It parses the Markdown heading `## Verdict:` to extract the decision.
@@ -86,7 +86,7 @@ This document details:
   - PR conversation comments with marker `<!-- pr-agent:review:full -->`.
   - Markdown tables detailing ticket compliance (e.g. `Ticket compliance analysis`).
 - **Observed Behavior on Reference PRs**:
-  - Triggers on `ready_for_review` and on comment commands from repository collaborators.
+  - Triggers on `pull_request` (`opened` and `ready_for_review` for non-draft same-repository PRs) and on open-PR `issue_comment` (`created`, `edited`) commands from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts (non-draft PRs only).
 - **Merge Verdict Policy Rule**:
   - The adapter checks whether required ticket compliance sections indicate non-compliance or unresolved concerns.
 

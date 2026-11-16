@@ -23,6 +23,7 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository) ||
         (github.event_name == 'issue_comment' &&
          github.event.issue.pull_request &&
+         github.event.issue.state == 'open' &&
          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)))
     concurrency:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
@@ -32,8 +33,18 @@ jobs:
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     steps:
+      - name: Check PR draft status for comment triggers
+        id: pr_state
+        if: github.event_name == 'issue_comment' && env.DEEPSEEK_API_KEY != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          is_draft="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.draft')"
+          echo "is_draft=${is_draft}" >> "${GITHUB_OUTPUT}"
+
       - name: PR Agent Action
-        if: env.DEEPSEEK_API_KEY != ''
+        if: env.DEEPSEEK_API_KEY != '' && (github.event_name != 'issue_comment' || steps.pr_state.outputs.is_draft == 'false')
         uses: The-PR-Agent/pr-agent@1d01f24f455bb879c1d9c557ad7de3d72dcc7975 # v0.46.0
         env:
           CONFIG.MODEL: "deepseek/deepseek-chat"
