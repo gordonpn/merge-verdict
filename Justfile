@@ -11,6 +11,10 @@ build:
 test-build:
     pnpm run test:build
 
+# Verify existing bundles under the selected runtime without invoking build tooling
+check-runtime:
+    node scripts/check-build.mjs
+
 # Run unit tests
 test:
     pnpm test

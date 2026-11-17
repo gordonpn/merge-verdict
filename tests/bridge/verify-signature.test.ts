@@ -7,7 +7,7 @@ import {
 
 const secret = "webhook secret";
 const payload = '{"message":"hello"}\n';
-const bytes = new TextEncoder().encode(payload).buffer;
+const bytes = Uint8Array.from(new TextEncoder().encode(payload)).buffer;
 const signature = `sha256=${createHmac("sha256", secret).update(payload).digest("hex")}`;
 
 afterEach(() => vi.restoreAllMocks());
@@ -31,7 +31,7 @@ describe("verifyWebhookSignature", () => {
   it("rejects altered bytes, different secrets, and tampered signatures", async () => {
     expect(
       await verifyWebhookSignature(
-        new TextEncoder().encode(payload.trim()).buffer,
+        Uint8Array.from(new TextEncoder().encode(payload.trim())).buffer,
         signature,
         secret,
       ),

@@ -2,6 +2,14 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-15: Validate the minimum runtime separately from build tooling
+
+- Decision: Keep the package runtime at Node.js 22.12.0, limit Node type declarations to the 22.12 series, and run existing standalone bundle checks on exactly 22.12.0 after CI builds with a supported contributor runtime.
+- Rationale: The build tool requires a newer runtime; running it at the package minimum would test an unsupported toolchain rather than library compatibility. Matching declarations prevents newer Node APIs from silently entering source code.
+- Trade-offs: Bundle smoke checks exercise exports and representative operations, not every possible runtime path or hosted GitHub behavior.
+- Rejected alternatives: Raising the package runtime requirement to match tsup, or treating tests on the latest Node 22 release as evidence for 22.12.0.
+- Source: [Runtime compatibility evidence](https://github.com/gordonpn/merge-verdict/issues/94).
+
 ## 2026-11-13: Bounded API retries, rate-limit backoff, and fail-closed pagination in GitHub collector
 
 - Decision: Implement bounded exponential backoff, rate-limit handling, and fail-closed pagination safety caps (maximum 10 pages / 1000 items per collection at page size 100) across GraphQL and REST Octokit PR data collection calls.
