@@ -55,3 +55,14 @@ jobs:
 
       - name: Check documentation
         run: just check-docs
+
+      - name: Build standalone bundles
+        run: just build
+
+      - name: Select minimum supported runtime
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22.12.0
+
+      - name: Verify bundles on minimum runtime
+        run: just check-runtime

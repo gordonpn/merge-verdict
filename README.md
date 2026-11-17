@@ -64,6 +64,10 @@ matching tsup 9's engine requirement. The package runtime requirement remains
 Node.js 22.12.0 or newer; development tool requirements do not change the
 supported runtime of the generated library bundles.
 
+Node type declarations are limited to the 22.12 series to catch accidental use
+of newer APIs. CI builds with a contributor runtime, then runs `just check-runtime`
+on Node.js 22.12.0 to verify the existing standalone bundles without running tsup.
+
 ## Project Status
 
 Merge Verdict is currently in the **foundation and architecture phase**. The architectural specifications, integration models, verification policies, and implementation roadmap have been established. Application implementation will proceed incrementally according to the milestone roadmap.
