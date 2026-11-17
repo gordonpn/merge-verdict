@@ -35,7 +35,7 @@ jobs:
           github.event.comment.body == '/ask' ||
           startsWith(github.event.comment.body, '/ask '))))
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}-${{ github.event_name }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
