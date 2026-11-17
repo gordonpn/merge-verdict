@@ -11,6 +11,8 @@ This document details:
 3. Specific parsing and reconciliation rules for each reviewer integration.
 4. Clear distinctions between verified platform behaviors and working assumptions requiring validation.
 
+For the repository workflows' event, identity, credential, and cancellation boundaries, see the [optional reviewer validation matrix](reviewer-workflow-validation.md).
+
 ## 2. Reference Integrations (Observed from SnapTally)
 
 ### 2.1. CodeRabbit
