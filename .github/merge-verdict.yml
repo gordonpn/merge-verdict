@@ -4,7 +4,7 @@ required_checks:
   - "CodeQL"
 
 required_reviewers:
-  - coderabbitai
+  - deepseek-review
 
 allow_advisory_exemptions: true
 rate_limit_timeout_minutes: 30
