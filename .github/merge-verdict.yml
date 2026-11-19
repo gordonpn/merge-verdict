@@ -4,6 +4,7 @@ required_checks:
   - "CodeQL"
 
 required_reviewers:
+  # Matches deepseekNormalizer.reviewerId in src/normalizers/deepseek.ts; external OSS reviewers remain advisory to avoid quota lockouts.
   - deepseek-review
 
 allow_advisory_exemptions: true
