@@ -75,7 +75,7 @@ For the repository workflows' event, identity, credential, and cancellation boun
   - Sections for `Material Findings`, `Unverified Assumptions`, `Missing Verification`, and `Final Challenge`.
 - **Observed Behavior on Reference PRs**:
   - In PR #121, DeepSeek Review ran against commit `6ad1952...` and issued `Verdict: APPROVE WITH MINOR FINDINGS`.
-  - In `.github/workflows/deepseek-review.yml`, DeepSeek Review triggers on `pull_request` (`opened` and `ready_for_review` for non-draft same-repository PRs) and on open-PR `issue_comment` (`created`, `edited`) `/review` requests from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts (non-draft PRs only). It does not automatically run on `synchronize` (commit push) events.
+  - In `.github/workflows/deepseek-review.yml`, DeepSeek Review is opt-in (`vars.ENABLE_DEEPSEEK_REVIEW == 'true'`) and triggers on `pull_request` (`opened`, `ready_for_review`, and `synchronize` for non-draft same-repository non-bot PRs) and on open-PR `issue_comment` (`created`, `edited`) `/review` requests from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts targeting non-draft same-repository non-bot PRs. When enabled, eligible runs validate `DEEPSEEK_API_KEY` and fail explicitly if it is missing, empty, or whitespace-only.
 - **Merge Verdict Policy Rule**:
   - The adapter extracts the commit SHA associated with the review (`review.commit_id`).
   - It parses the Markdown heading `## Verdict:` to extract the decision.
@@ -88,18 +88,18 @@ For the repository workflows' event, identity, credential, and cancellation boun
   - PR conversation comments with marker `<!-- pr-agent:review:full -->`.
   - Markdown tables detailing ticket compliance (e.g. `Ticket compliance analysis`).
 - **Observed Behavior on Reference PRs**:
-  - Triggers on `pull_request` (`opened` and `ready_for_review` for non-draft same-repository PRs) and on open-PR `issue_comment` (`created`, `edited`) commands from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts (non-draft PRs only).
+  - Opt-in via `vars.ENABLE_PR_AGENT == 'true'`, triggering on `pull_request` (`opened`, `ready_for_review`, and `synchronize` with `HANDLE_PUSH_TRIGGER` running `/review` for non-draft same-repository non-bot PRs) and on open-PR `issue_comment` (`created`, `edited`) leading slash commands (`/review`, `/describe`, `/improve`, `/ask`) from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts targeting non-draft same-repository non-bot PRs. When enabled, eligible runs validate `DEEPSEEK_API_KEY` and fail explicitly if it is missing, empty, or whitespace-only.
 - **Merge Verdict Policy Rule**:
   - The adapter checks whether required ticket compliance sections indicate non-compliance or unresolved concerns.
 
-### 2.6. reviewdog (Actionlint & Biome)
+### 2.6. reviewdog (Actionlint)
 
 - **Identity**: Repository GitHub Actions workflow (`.github/workflows/reviewdog.yml`).
 - **Artifacts Emitted**:
-  - GitHub Check runs named `runner / actionlint` and `runner / biome`.
-  - Optional inline annotations on lint errors.
+  - GitHub Check run named `runner / actionlint` (path-scoped to `.github/workflows/**` and `.github/actionlint.y*ml` changes).
+  - Optional inline annotations on workflow lint errors (Biome checks run in `ci.yml` via `just lint`).
 - **Merge Verdict Policy Rule**:
-  - Handled via standard Check Run verification: both check runs must complete with conclusion `SUCCESS`.
+  - Omit `runner / actionlint` from `required_checks` in `.github/merge-verdict.yml` because `reviewdog.yml` is path-scoped (GitHub does not emit a check run when no workflow or Actionlint files change) and skips on fork PRs. When configured as a required check in repositories without path filtering, it must complete with conclusion `SUCCESS`.
 
 ### 2.7. Continuous Integration and Security Checks
 

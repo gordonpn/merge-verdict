@@ -88,7 +88,7 @@ Transform heterogeneous reviewer outputs collected from GitHub into uniform `Nor
    - Verify that `review.commit_id` matches `pull_request.head.sha`.
    - Parse readiness assessments and inline thread comments.
 5. **`src/normalizers/generic-checks.ts`**:
-   - Ingest CI check runs (`runner / test`, `runner / codeql`, `runner / coverage`, `runner / actionlint`, `runner / biome`).
+   - Ingest CI check runs (`runner / test`, `runner / codeql`, `runner / coverage`, `runner / actionlint`).
    - Map check conclusions to standard pass/fail assertions.
 
 ### Step 2: Deterministic Policy Evaluator (`src/policy/`)
@@ -220,7 +220,7 @@ approval:
       effort: max
 ```
 
-`runner / actionlint` and `runner / biome` are omitted from `required_checks` because `.github/workflows/reviewdog.yml` skips both jobs on fork pull requests (`if: github.event.pull_request.head.repo.full_name == github.repository`), and `evaluatePolicy` treats `skipped` conclusions as `CHECK_FAILED` unless explicitly permitted via runtime `permittedCheckConclusions`. Required linting still runs unconditionally on all pull requests inside `runner / test` via `just lint`.
+`runner / actionlint` is omitted from `required_checks` because `.github/workflows/reviewdog.yml` is path-scoped to workflow and Actionlint configuration files and skips fork pull requests (`if: github.event.pull_request.head.repo.full_name == github.repository`), leaving the check absent on unrelated PRs or `skipped` on forks (`evaluatePolicy` treats `skipped` conclusions as `CHECK_FAILED` unless explicitly permitted via runtime `permittedCheckConclusions`). Required Biome linting runs unconditionally on all pull requests inside `runner / test` via `just lint`.
 
 After initial advisory validation passes, update `approval.providers` to `["github_copilot"]` (or `["github_app"]`) when ready to enable formal PR approval reviews on eligible risk tiers.
 
