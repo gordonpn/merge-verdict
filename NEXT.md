@@ -10,7 +10,7 @@ Snapshot: 2026-11-19 UTC, main at `66595afe1d8468ee2e2f8cfca2de5b762ba5a8ec`. Gi
 
 - Priority: P1. Effort: M. Readiness: in progress; normalizer and workflow gating fixes (PRs #115, #117, #120, #121, #122) and `required_reviewers: [deepseek-review]` in [`.github/merge-verdict.yml`](.github/merge-verdict.yml) (PR #130) are merged on `main`.
 - Reason: Remaining prerequisite for automatic advisory refresh and a second repository trial. ERROR, STALE, PENDING, and repeated publication have dated evidence in the issue; clean PASS awaits live DeepSeek Review execution on an open PR.
-- First action: Run manual `workflow_dispatch` against an open PR with `ENABLE_DEEPSEEK_REVIEW` and `DEEPSEEK_API_KEY` provisioned so `deepseek-review` completes on the exact selected head.
+- First action: With `ENABLE_DEEPSEEK_REVIEW` and `DEEPSEEK_API_KEY` provisioned, post an authorized `/review` comment on the selected open, non-draft PR and wait for DeepSeek Review to complete on its exact head. Then dispatch the Merge Verdict workflow for that PR and inspect the resulting verdict.
 - Done: Record clean PASS, invalid-input summary-only failure, repeat invocation, and sanitized regression evidence without enabling approvals or changing branch protection.
 - Unblocks: [#74](https://github.com/gordonpn/merge-verdict/issues/74) and [#75](https://github.com/gordonpn/merge-verdict/issues/75).
 
@@ -27,11 +27,11 @@ Snapshot: 2026-11-19 UTC, main at `66595afe1d8468ee2e2f8cfca2de5b762ba5a8ec`. Gi
 3. [#78: Optional reviewer origin validation](https://github.com/gordonpn/merge-verdict/issues/78), P2/S: static guard inspection is recorded in [docs/reviewer-workflow-validation.md](docs/reviewer-workflow-validation.md) (PR #124) and gating landed in PR #120; live origin, cancellation, and fork trust-boundary trials remain pending.
 4. [#26: Remaining normalizer boundary support](https://github.com/gordonpn/merge-verdict/issues/26), P2/S: unblocked after PRs #121 and #122; cover multiline diff ranges, deleted or renamed files, and file-level comments without line numbers in `tests/normalizers/boundaries.test.ts`.
 5. [#57: Issue-link product decisions](https://github.com/gordonpn/merge-verdict/issues/57), P1/S: enforcement is wired (`require_issue_links: true`); issue existence, PR targets, repository restrictions, and exemptions need explicit decisions before finalizing.
-6. [#94: Dependency and runtime compatibility](https://github.com/gordonpn/merge-verdict/issues/94) and [#93: Strict coverage gate rollout](https://github.com/gordonpn/merge-verdict/issues/93), P2/XS: minimum-Node bundle verification landed in PR #125; Node 26 types audit, `tsup` 9 Node version alignment, and hosted branch-protection/Codecov baseline enforcement trials remain open.
+6. [#94: Dependency and runtime compatibility](https://github.com/gordonpn/merge-verdict/issues/94) and [#93: Strict coverage gate rollout](https://github.com/gordonpn/merge-verdict/issues/93), P2/XS: minimum-Node bundle verification, Node 22.12 type declarations, and contributor toolchain alignment landed in PR #125. Hosted Action reporting, PR-origin compatibility, and branch-protection/Codecov baseline enforcement trials remain open.
 
 ## Parallel work and blockers
 
-- Independent now: `#132`, `#126`, `#131` (unit/fixture scope; live payloads align with `#127`), `#128`, `#26`, `#57` product decisions, and `#94` types/toolchain audit.
+- Independent now: `#132`, `#126`, `#131` (unit/fixture scope; live payloads align with `#127`), `#128`, `#26`, and `#57` product decisions. Hosted dependency compatibility evidence remains coordinated through `#94` and `#78`.
 - Credential-gated trials: `#73` live PASS, `#127`, and `#78` live runs require configured repository opt-in variables and `DEEPSEEK_API_KEY` without exposing secrets to fork code.
 - After `#73`: `#74` automatic refresh needs race, ownership, cancellation, and fork evidence; `#75` additionally needs a maintainer-selected target repository and remote Action distribution.
 - [#93](https://github.com/gordonpn/merge-verdict/issues/93) and [#76](https://github.com/gordonpn/merge-verdict/issues/76): hosted enforcement trials and branch-protection changes require explicit rollout gates; passing local coverage is insufficient.
