@@ -1,10 +1,12 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   ConfigValidationError,
   createDefaultConfig,
   DEFAULT_CONFIG,
+  DEFAULT_CONFIG_FILE_PATH,
+  DEFAULT_REVIEWER_NORMALIZERS,
   loadConfigFile,
   loadConfigFileSync,
   MergeVerdictConfigSchema,
@@ -585,5 +587,24 @@ rate_limit_timeout_minutes: -10
 
   it("loadConfigFileSync propagates non-ENOENT filesystem errors", () => {
     expect(() => loadConfigFileSync(testDir)).toThrow();
+  });
+});
+
+describe("repository .github/merge-verdict.yml policy", () => {
+  it("registers every required_reviewers entry in DEFAULT_REVIEWER_NORMALIZERS", () => {
+    const configPath = new URL(`../../${DEFAULT_CONFIG_FILE_PATH}`, import.meta.url);
+    const config = parseConfig(readFileSync(configPath, "utf8"));
+    const registeredReviewerIds = new Set(DEFAULT_REVIEWER_NORMALIZERS.map((n) => n.reviewerId));
+
+    const unknownReviewers = config.requiredReviewers.filter(
+      (reviewerId) => !registeredReviewerIds.has(reviewerId),
+    );
+
+    expect(unknownReviewers).toEqual([]);
+  });
+
+  it("still permits arbitrary required_reviewers IDs for external repositories", () => {
+    const config = parseConfig("required_reviewers:\n  - custom-external-reviewer\n");
+    expect(config.requiredReviewers).toEqual(["custom-external-reviewer"]);
   });
 });
