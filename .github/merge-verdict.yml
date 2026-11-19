@@ -5,7 +5,6 @@ required_checks:
 
 required_reviewers:
   - coderabbitai
-  - sourcery-ai
 
 allow_advisory_exemptions: true
 rate_limit_timeout_minutes: 30
