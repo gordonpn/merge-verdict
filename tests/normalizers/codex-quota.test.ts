@@ -104,6 +104,10 @@ describe("Codex quota provenance", () => {
     ],
     ["unclosed fence", "```text\nYou have reached your Codex usage limits for code reviews."],
     [
+      "fence-like code content",
+      "```text\n```still-code\nYou have reached your Codex usage limits for code reviews.\n```",
+    ],
+    [
       "nested fence",
       "````text\n```\nYou have reached your Codex usage limits for code reviews.\n````",
     ],

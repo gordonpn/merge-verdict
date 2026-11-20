@@ -42,7 +42,12 @@ function hasCodexQuotaDiagnostic(body: string): boolean {
   for (const line of prose.split("\n")) {
     const delimiter = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (fence) {
-      if (delimiter && delimiter[0] === fence[0] && delimiter.length >= fence.length) {
+      const closingDelimiter = /^ {0,3}(`{3,}|~{3,})[ \t\r]*$/.exec(line)?.[1];
+      if (
+        closingDelimiter &&
+        closingDelimiter[0] === fence[0] &&
+        closingDelimiter.length >= fence.length
+      ) {
         fence = "";
       }
       continue;
