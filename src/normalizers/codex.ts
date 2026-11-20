@@ -32,6 +32,35 @@ function isCodexAuthor(login: string | null): boolean {
   return login !== null && CODEX_LOGINS.has(login.toLowerCase());
 }
 
+function hasCodexQuotaDiagnostic(body: string): boolean {
+  // State JSON, quoted history and code examples are not current diagnostics.
+  const prose = body
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
+    .replace(/<(pre|code|blockquote)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, "");
+  const lines: string[] = [];
+  let fence = "";
+  for (const line of prose.split("\n")) {
+    const delimiter = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (delimiter && delimiter[0] === fence[0] && delimiter.length >= fence.length) {
+        fence = "";
+      }
+      continue;
+    }
+    if (delimiter) {
+      fence = delimiter;
+      continue;
+    }
+    lines.push(line);
+  }
+  return lines
+    .join("\n")
+    .split(/\n[ \t]*\n/)
+    .some((paragraph) =>
+      /^ {0,3}You have reached your Codex usage limits? for code reviews?\b/i.test(paragraph),
+    );
+}
+
 function parseCodexState(input: NormalizerInput): ParsedCodexState | null {
   const eligibleComments = (input.conversationComments ?? []).filter((c) =>
     isCodexAuthor(c.authorLogin),
@@ -63,9 +92,7 @@ function parseCodexState(input: NormalizerInput): ParsedCodexState | null {
       return parsed.success
         ? {
             state: parsed.data,
-            rateLimited: /You have reached your Codex usage limits? for code reviews?\b/i.test(
-              body,
-            ),
+            rateLimited: hasCodexQuotaDiagnostic(body),
           }
         : null;
     } catch {

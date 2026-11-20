@@ -96,6 +96,66 @@ describe("Codex quota provenance", () => {
     expect(result.isFresh).toBe(false);
   });
 
+  it.each([
+    ["quoted history", "> You have reached your Codex usage limits for code reviews."],
+    [
+      "lazy quote continuation",
+      "> Prior diagnostic:\nYou have reached your Codex usage limits for code reviews.",
+    ],
+    ["unclosed fence", "```text\nYou have reached your Codex usage limits for code reviews."],
+    [
+      "nested fence",
+      "````text\n```\nYou have reached your Codex usage limits for code reviews.\n````",
+    ],
+    [
+      "mismatched fence",
+      "~~~text\n```\nYou have reached your Codex usage limits for code reviews.\n~~~",
+    ],
+    ["fenced code", "```text\nYou have reached your Codex usage limits for code reviews.\n```"],
+    [
+      "tilde fenced code",
+      "~~~text\nYou have reached your Codex usage limits for code reviews.\n~~~",
+    ],
+    ["indented code", "    You have reached your Codex usage limits for code reviews."],
+    ["inline code", "`You have reached your Codex usage limits for code reviews.`"],
+    ["HTML code", "<pre>\nYou have reached your Codex usage limits for code reviews.\n</pre>"],
+    ["HTML comment", "<!--\nYou have reached your Codex usage limits for code reviews.\n-->"],
+    [
+      "historical reference",
+      "Previous run reported: You have reached your Codex usage limits for code reviews.",
+    ],
+  ])("keeps a genuine error FAILED with %s quota text", (_kind, diagnostic) => {
+    const body = `${failedState}\nCurrent execution failed: internal server error.\n\n${diagnostic}`;
+    const result = normalizeCodexReviewer({ headSha, conversationComments: [comment(body)] });
+
+    expect(result).toMatchObject({ status: "FAILED", verdict: "CHANGES_REQUESTED", isFresh: true });
+  });
+
+  it("ignores quota text inside the machine-readable state marker", () => {
+    const body = failedState.replace(
+      '"status":"failed"',
+      '"status":"failed","historical_message":"You have reached your Codex usage limits for code reviews."',
+    );
+    const result = normalizeCodexReviewer({ headSha, conversationComments: [comment(body)] });
+
+    expect(result.status).toBe("FAILED");
+  });
+
+  it.each([undefined, null])("does not bind quota diagnostics to absent or null SHA %s", (sha) => {
+    const body = quotaState.replace(
+      `"commit_sha":"${headSha}",`,
+      sha === null ? '"commit_sha":null,' : "",
+    );
+    const result = normalizeCodexReviewer({ headSha, conversationComments: [comment(body)] });
+
+    expect(result).toMatchObject({
+      status: "FAILED",
+      verdict: "CHANGES_REQUESTED",
+      isFresh: false,
+      evaluatedCommitSha: null,
+    });
+  });
+
   it("preserves blocking state findings during quota exhaustion", () => {
     const body = quotaState.replace(
       '"has_unresolved_findings":false',
