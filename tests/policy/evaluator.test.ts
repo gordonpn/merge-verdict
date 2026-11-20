@@ -340,3 +340,179 @@ it.each([undefined, ["other"], [], ["thread", "thread"]].map((ids) => ({ ids }))
     expect(evaluatePolicy(value).verdict).toBe("FAIL");
   },
 );
+
+describe("rate-limit timeout exemptions", () => {
+  it("exempts RATE_LIMITED reviewer when allowAdvisoryExemptions is true and timeout has elapsed", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.config.rateLimitTimeoutMinutes = 30;
+    value.snapshot.capturedAt = "2026-11-11T00:30:00.000Z";
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00.000Z";
+    reviewer(value).isFresh = false;
+    reviewer(value).verdict = "NONE";
+
+    expect(evaluatePolicy(value)).toMatchObject({
+      verdict: "PASS",
+      reasons: [],
+      exemptedReviewerIds: ["reviewer"],
+    });
+  });
+
+  it("keeps comment-only RATE_LIMITED reviewer without head provenance pending after timeout", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.config.rateLimitTimeoutMinutes = 15;
+    value.snapshot.capturedAt = "2026-11-11T00:20:00Z";
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).evaluatedCommitSha = null;
+    reviewer(value).isFresh = false;
+    reviewer(value).verdict = "NONE";
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00Z";
+
+    expect(evaluatePolicy(value)).toMatchObject({
+      verdict: "PENDING",
+      exemptedReviewerIds: [],
+    });
+  });
+
+  it("stays PENDING just before rateLimitTimeoutMinutes elapses", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.config.rateLimitTimeoutMinutes = 30;
+    value.snapshot.capturedAt = "2026-11-11T00:29:59.999Z";
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00.000Z";
+    reviewer(value).isFresh = false;
+
+    const result = evaluatePolicy(value);
+    expect(result.verdict).toBe("PENDING");
+    expect(result.reasons).toContainEqual({
+      condition: 2,
+      outcome: "PENDING",
+      code: "REVIEWER_INCOMPLETE",
+      subject: "reviewer",
+    });
+  });
+
+  it("stays PENDING when allowAdvisoryExemptions is false even after timeout", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = false;
+    value.config.rateLimitTimeoutMinutes = 30;
+    value.snapshot.capturedAt = "2026-11-11T02:00:00Z";
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00Z";
+
+    expect(evaluatePolicy(value)).toMatchObject({
+      verdict: "PENDING",
+      reasons: [
+        {
+          condition: 2,
+          outcome: "PENDING",
+          code: "REVIEWER_INCOMPLETE",
+          subject: "reviewer",
+        },
+      ],
+    });
+  });
+
+  it.each([undefined, "not-a-timestamp", "2026-11-11T01:00:00Z"])(
+    "stays PENDING for absent, invalid, or future rateLimitedAt (%j)",
+    (rateLimitedAt) => {
+      const value = input();
+      value.config.allowAdvisoryExemptions = true;
+      value.config.rateLimitTimeoutMinutes = 30;
+      value.snapshot.capturedAt = "2026-11-11T00:45:00Z";
+      reviewer(value).status = "RATE_LIMITED";
+      if (rateLimitedAt !== undefined) {
+        reviewer(value).rateLimitedAt = rateLimitedAt;
+      }
+
+      expect(evaluatePolicy(value)).toMatchObject({
+        verdict: "PENDING",
+        reasons: [
+          {
+            condition: 2,
+            outcome: "PENDING",
+            code: "REVIEWER_INCOMPLETE",
+            subject: "reviewer",
+          },
+        ],
+      });
+    },
+  );
+
+  it("stays PENDING when RATE_LIMITED reviewer evaluated an older commit SHA", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.config.rateLimitTimeoutMinutes = 30;
+    value.snapshot.capturedAt = "2026-11-11T01:00:00Z";
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).evaluatedCommitSha = "older-commit";
+    reviewer(value).isFresh = false;
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00Z";
+
+    const result = evaluatePolicy(value);
+    expect(result.verdict).toBe("PENDING");
+    expect(result.reasons.map((reason) => reason.code)).toEqual([
+      "REVIEWER_INCOMPLETE",
+      "REVIEWER_STALE",
+    ]);
+  });
+
+  it.each([0, -10, Number.NaN])(
+    "fails closed when rateLimitTimeoutMinutes is invalid (%s)",
+    (timeout) => {
+      const value = input();
+      value.config.allowAdvisoryExemptions = true;
+      value.config.rateLimitTimeoutMinutes = timeout;
+      value.snapshot.capturedAt = "2026-11-11T01:00:00Z";
+      reviewer(value).status = "RATE_LIMITED";
+      reviewer(value).rateLimitedAt = "2026-11-11T00:00:00Z";
+
+      expect(evaluatePolicy(value).verdict).toBe("PENDING");
+    },
+  );
+
+  it("never waives unresolved blocking findings or CHANGES_REQUESTED on exempted RATE_LIMITED reviewer", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.config.rateLimitTimeoutMinutes = 30;
+    value.snapshot.capturedAt = "2026-11-11T01:00:00Z";
+    value.snapshot.unresolvedThreadCount = 1;
+    value.unresolvedThreadIds = ["thread-1"];
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).isFresh = false;
+    reviewer(value).verdict = "CHANGES_REQUESTED";
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00Z";
+    reviewer(value).findings = [
+      {
+        id: "finding-1",
+        reviewerId: "reviewer",
+        threadId: "thread-1",
+        title: "Security issue",
+        description: "Security issue",
+        severity: "HIGH",
+        isBlocking: true,
+        isResolved: false,
+      },
+    ];
+
+    const result = evaluatePolicy(value);
+    expect(result.verdict).toBe("FAIL");
+    expect(result.reasons).toEqual([
+      {
+        condition: 3,
+        outcome: "FAIL",
+        code: "UNRESOLVED_FINDING",
+        subject: "finding-1",
+      },
+      {
+        condition: 4,
+        outcome: "FAIL",
+        code: "CHANGES_REQUESTED",
+        subject: "reviewer",
+      },
+    ]);
+  });
+});

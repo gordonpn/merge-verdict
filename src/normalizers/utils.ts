@@ -1,3 +1,8 @@
+import { z } from "zod";
+import type { GitHubCheckRun } from "../collector/github-collector.js";
+
+const IsoDatetimeSchema = z.string().datetime();
+
 /**
  * Strips leading and trailing Markdown formatting punctuation and whitespace from a string.
  *
@@ -25,4 +30,24 @@ export function stripMarkdownPunctuation(str: string): string {
     }
   }
   return str.slice(start, end);
+}
+
+/** Returns a valid UTC ISO datetime, or undefined for missing or invalid input. */
+export function parseIsoTimestamp(value: string | null | undefined): string | undefined {
+  return value && IsoDatetimeSchema.safeParse(value).success ? value : undefined;
+}
+
+/** Returns the completion timestamp of a rate-limit check for the current head. */
+export function rateLimitCheckTimestamp(
+  checkRun: GitHubCheckRun | undefined,
+  headSha: string,
+  patterns: readonly RegExp[],
+): string | undefined {
+  if (!checkRun || checkRun.commitSha !== headSha || checkRun.status !== "completed") {
+    return undefined;
+  }
+  const output = [checkRun.output.title, checkRun.output.summary, checkRun.output.text].join(" ");
+  return patterns.some((pattern) => pattern.test(output))
+    ? parseIsoTimestamp(checkRun.completedAt)
+    : undefined;
 }

@@ -50,6 +50,7 @@ export const ReviewerExecutionRecordSchema = z.object({
   isFresh: z.boolean(),
   verdict: ReviewerVerdictSchema,
   summary: z.string().optional(),
+  rateLimitedAt: z.string().datetime().optional(),
   findings: z.array(NormalizedFindingSchema),
   checkRunConclusion: z.string().nullable(),
 });

@@ -540,6 +540,7 @@ describe("normalizeSourceryReviewer", () => {
     expect(skippedQuota.status).toBe("RATE_LIMITED");
     expect(skippedQuota.verdict).toBe("NONE");
     expect(skippedQuota.isFresh).toBe(true);
+    expect(skippedQuota.rateLimitedAt).toBe("2026-11-16T02:58:40Z");
     expect(skippedQuota.checkRunConclusion).toBe("skipped");
 
     const neutralQuota = normalizeSourceryReviewer({
@@ -573,6 +574,7 @@ describe("normalizeSourceryReviewer", () => {
 
     expect(neutralQuota.status).toBe("RATE_LIMITED");
     expect(neutralQuota.verdict).toBe("NONE");
+    expect(neutralQuota.rateLimitedAt).toBeUndefined();
     expect(ReviewerExecutionRecordSchema.safeParse(neutralQuota).success).toBe(true);
   });
 
