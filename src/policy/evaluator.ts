@@ -40,7 +40,9 @@ function isRateLimitExempt(
   if (
     reviewer?.status !== "RATE_LIMITED" ||
     !config.allowAdvisoryExemptions ||
-    !reviewer.rateLimitedAt
+    !reviewer.rateLimitedAt ||
+    reviewer.verdict === "CHANGES_REQUESTED" ||
+    reviewer.findings.some((finding) => finding.isBlocking && !finding.isResolved)
   ) {
     return false;
   }

@@ -144,7 +144,7 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
   } else if (isRateLimitedReview(latestReview)) {
     status = "RATE_LIMITED";
     verdict = hasUnresolvedBlocking ? "CHANGES_REQUESTED" : "NONE";
-    rateLimitedAt = parseIsoTimestamp(latestReview?.submittedAt);
+    rateLimitedAt = isFresh ? parseIsoTimestamp(latestReview?.submittedAt) : undefined;
   } else {
     status = "COMPLETED";
     if (latestReview?.state === "CHANGES_REQUESTED" || hasUnresolvedBlocking) {

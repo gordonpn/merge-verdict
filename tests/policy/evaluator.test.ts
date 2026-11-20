@@ -500,7 +500,14 @@ describe("rate-limit timeout exemptions", () => {
 
     const result = evaluatePolicy(value);
     expect(result.verdict).toBe("FAIL");
+    expect(result.exemptedReviewerIds).toEqual([]);
     expect(result.reasons).toEqual([
+      {
+        condition: 2,
+        outcome: "PENDING",
+        code: "REVIEWER_INCOMPLETE",
+        subject: "reviewer",
+      },
       {
         condition: 3,
         outcome: "FAIL",
@@ -513,6 +520,40 @@ describe("rate-limit timeout exemptions", () => {
         code: "CHANGES_REQUESTED",
         subject: "reviewer",
       },
+      {
+        condition: 5,
+        outcome: "PENDING",
+        code: "REVIEWER_STALE",
+        subject: "reviewer",
+      },
     ]);
+  });
+
+  it("exempts RATE_LIMITED reviewer when only non-blocking resolved/advisory findings exist", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.config.rateLimitTimeoutMinutes = 30;
+    value.snapshot.capturedAt = "2026-11-11T00:35:00Z";
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).isFresh = false;
+    reviewer(value).verdict = "NONE";
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00Z";
+    reviewer(value).findings = [
+      {
+        id: "finding-advisory",
+        reviewerId: "reviewer",
+        threadId: "thread-advisory",
+        title: "Minor note",
+        description: "Minor note",
+        severity: "ADVISORY",
+        isBlocking: false,
+        isResolved: false,
+      },
+    ];
+
+    const result = evaluatePolicy(value);
+    expect(result.verdict).toBe("PASS");
+    expect(result.exemptedReviewerIds).toEqual(["reviewer"]);
+    expect(result.reasons).toEqual([]);
   });
 });

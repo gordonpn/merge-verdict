@@ -47,7 +47,10 @@ export function rateLimitCheckTimestamp(
     return undefined;
   }
   const output = [checkRun.output.title, checkRun.output.summary, checkRun.output.text].join(" ");
-  return patterns.some((pattern) => pattern.test(output))
+  return patterns.some((pattern) => {
+    pattern.lastIndex = 0;
+    return pattern.test(output);
+  })
     ? parseIsoTimestamp(checkRun.completedAt)
     : undefined;
 }
