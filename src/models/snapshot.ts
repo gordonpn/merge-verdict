@@ -104,6 +104,7 @@ export function computeStateFingerprint(input: StateFingerprintInput): string {
       isFresh: rev.isFresh,
       verdict: rev.verdict,
       checkRunConclusion: rev.checkRunConclusion,
+      ...(rev.rateLimitedAt !== undefined ? { rateLimitedAt: rev.rateLimitedAt } : {}),
       findings: sortedFindings,
     };
   });

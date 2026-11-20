@@ -7,7 +7,7 @@ import type {
 } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
-import { stripMarkdownPunctuation } from "./utils.js";
+import { rateLimitCheckTimestamp, stripMarkdownPunctuation } from "./utils.js";
 
 const SOURCERY_LOGINS = new Set(["sourcery-ai", "sourcery-ai[bot]"]);
 const RATE_LIMIT_PATTERNS = [
@@ -184,6 +184,9 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
   const isChangesRequested =
     latestReview?.state === "CHANGES_REQUESTED" || hasUnresolvedBlockingFindings;
   const rateLimited = isRateLimited(checkRun, reviews, input);
+  const rateLimitedAt = rateLimited
+    ? rateLimitCheckTimestamp(checkRun, headSha, RATE_LIMIT_PATTERNS)
+    : undefined;
 
   if (rateLimited && (!checkRun || checkRun.commitSha === headSha)) {
     status = "RATE_LIMITED";
@@ -220,6 +223,7 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
     evaluatedCommitSha,
     isFresh,
     verdict,
+    ...(rateLimitedAt ? { rateLimitedAt } : {}),
     summary: checkRun?.output.summary ?? undefined,
     findings,
     checkRunConclusion: checkRun?.conclusion ?? null,
