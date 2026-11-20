@@ -52,7 +52,14 @@ function extractListItemText(line: string): string | undefined {
 }
 
 function ticketFindings(body: string, commentId: number): NormalizedFinding[] {
-  const section = body.split(/Ticket compliance analysis/i)[1]?.split(/<\/td>|\n## /)[0];
+  // State JSON is a separate artifact, not visible ticket-compliance Markdown.
+  const stateStart = body.indexOf(STATE_MARKER);
+  const stateEnd = stateStart < 0 ? -1 : body.indexOf("-->", stateStart + STATE_MARKER.length);
+  const markdown =
+    stateStart < 0
+      ? body
+      : body.slice(0, stateStart) + (stateEnd < 0 ? "" : body.slice(stateEnd + 3));
+  const section = markdown.split(/Ticket compliance analysis/i)[1]?.split(/<\/td>|\n## /)[0];
   if (!section) return [];
   const findings: NormalizedFinding[] = [];
   let nonCompliant = false;
@@ -62,14 +69,14 @@ function ticketFindings(body: string, commentId: number): NormalizedFinding[] {
       nonCompliant = true;
       continue;
     }
+    const text = extractListItemText(line);
     if (
       /^(?:Compliant requirements|Requires further human verification)/i.test(clean) ||
-      clean.startsWith("[")
+      (text === undefined && clean.startsWith("["))
     ) {
       nonCompliant = false;
       continue;
     }
-    const text = extractListItemText(line);
     if (!nonCompliant || !text || /^(?:none\.?|n\/a)$/i.test(text)) continue;
     findings.push({
       id: `pr-agent-${commentId}-ticket-${findings.length + 1}`,
@@ -148,19 +155,16 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
   if (fresh && state?.last_run.complete === false) status = "PENDING";
   const checkMatchesHead =
     check !== undefined && check.commitSha.toLowerCase() === normalizedHeadSha;
-  if (check && (!fresh || checkMatchesHead)) {
+  if (check && !isStaleComment && (!fresh || checkMatchesHead)) {
     evaluatedCommitSha = check.commitSha;
     if (!checkMatchesHead) status = "STALE";
     else if (check.status !== "completed") status = "PENDING";
-    else if (
-      check.conclusion === "failure" ||
-      check.conclusion === "cancelled" ||
-      check.conclusion === "timed_out" ||
-      check.conclusion === "action_required" ||
-      check.conclusion === null
-    )
-      status = "FAILED";
-    else if (!fresh) status = "SKIPPED";
+    else if (!["success", "neutral", "skipped"].includes(check.conclusion ?? "")) status = "FAILED";
+    else if (!fresh) {
+      // A successful workflow cannot establish missing review provenance.
+      status = comment ? "PENDING" : "SKIPPED";
+      if (comment) evaluatedCommitSha = null;
+    }
   }
   return {
     reviewerId: "pr-agent",

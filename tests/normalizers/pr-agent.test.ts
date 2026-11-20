@@ -67,6 +67,91 @@ function stateComment(complete = true, findingState = "ACTIVE"): string {
 }
 
 describe("PR-Agent normalization", () => {
+  it("retains link-prefixed and following non-compliance bullets", () => {
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [
+        comment(`${stateComment(true, "RESOLVED")}
+Ticket compliance analysis
+Non-compliant requirements:
+- [src/file.ts](https://example.com) misses a requirement
+- Another missing requirement`),
+      ],
+    });
+    expect(result.findings.filter((finding) => finding.isBlocking)).toHaveLength(2);
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+  });
+  it.each(["stale", "unknown", ""])(
+    "fails closed on unsupported completed conclusion %s",
+    (conclusion) => {
+      const result = normalizePrAgentReviewer({
+        headSha,
+        conversationComments: [comment(stateComment(true, "RESOLVED"))],
+        checkRuns: [check({ conclusion })],
+      });
+      expect(result.status).toBe("FAILED");
+      expect(result.verdict).not.toBe("APPROVE");
+    },
+  );
+  it("keeps explicit stale review provenance despite a successful current check", () => {
+    const oldSha = "1111111111111111111111111111111111111111";
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [comment(stateComment().replace(headSha, oldSha))],
+      checkRuns: [check()],
+    });
+    expect(result).toMatchObject({
+      status: "STALE",
+      evaluatedCommitSha: oldSha,
+      isFresh: false,
+      findings: [],
+    });
+  });
+  it("does not parse state finding text as a ticket section", () => {
+    const body =
+      stateComment().replace("Unresolved concern", "Ticket compliance analysis") +
+      "\nNon-compliant requirements:\n- Outside any ticket section";
+    const result = normalizePrAgentReviewer({ headSha, conversationComments: [comment(body)] });
+    expect(result.findings).toHaveLength(1);
+  });
+  it("keeps unknown review provenance pending after successful workflow completion", () => {
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [comment(fixture("pr-133.md"))],
+      checkRuns: [check()],
+    });
+    expect(result).toMatchObject({
+      status: "PENDING",
+      evaluatedCommitSha: null,
+      isFresh: false,
+      verdict: "CHANGES_REQUESTED",
+    });
+  });
+  it("ignores an older check when the review itself proves the current head", () => {
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [comment(stateComment(true, "RESOLVED"))],
+      checkRuns: [
+        check({ commitSha: "1111111111111111111111111111111111111111", conclusion: "failure" }),
+      ],
+    });
+    expect(result).toMatchObject({
+      status: "COMPLETED",
+      evaluatedCommitSha: headSha,
+      isFresh: true,
+      verdict: "APPROVE",
+    });
+  });
+  it("does not recover approval from a malformed state via a valid Markdown header", () => {
+    const result = normalizePrAgentReviewer({
+      headSha,
+      repository: "fixture-owner/merge-verdict",
+      conversationComments: [
+        comment(`${fixture("pr-134.md")}\n<!-- pr-agent-review-state:v1 {broken -->`),
+      ],
+    });
+    expect(result).toMatchObject({ status: "PENDING", evaluatedCommitSha: null, isFresh: false });
+  });
   it("captures live ticket non-compliance with explicit repository-bound SHA", () => {
     const result = normalizePrAgentReviewer({
       headSha,
