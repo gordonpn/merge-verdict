@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "last_run": {
+    "head_sha": "1111111111111111111111111111111111111111",
+    "complete": true,
+    "kind": "full"
+  },
+  "findings": [
+    {
+      "finding_id": "finding-1",
+      "body": "Unresolved concern",
+      "state": "ACTIVE",
+      "path": "src/file.ts",
+      "line_start": 4
+    }
+  ]
+}
