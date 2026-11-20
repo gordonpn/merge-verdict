@@ -91,6 +91,12 @@ For the repository workflows' event, identity, credential, and cancellation boun
   - Opt-in via `vars.ENABLE_PR_AGENT == 'true'`, triggering on `pull_request` (`opened`, `ready_for_review`, and `synchronize` with `HANDLE_PUSH_TRIGGER` running `/review` for non-draft same-repository non-bot PRs) and on open-PR `issue_comment` (`created`, `edited`) leading slash commands (`/review`, `/describe`, `/improve`, `/ask`) from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts targeting non-draft same-repository non-bot PRs. When enabled, eligible runs validate `DEEPSEEK_API_KEY` and fail explicitly if it is missing, empty, or whitespace-only.
 - **Merge Verdict Policy Rule**:
   - The adapter checks whether required ticket compliance sections indicate non-compliance or unresolved concerns.
+  - Non-compliant requirement bullets become HIGH blocking findings. Compliant and human-verification sections do not become findings. Structured finding states RESOLVED and FIXED clear a concern; other states remain unresolved.
+  - A repository-bound full commit header or valid v1 state establishes review provenance. Unknown provenance retains concerns as PENDING, never APPROVE. A malformed state marker cannot fall back to a header to imply that omitted structured findings are resolved.
+  - A proven older review stays STALE with its own SHA and no carried findings, even when a current workflow succeeds. An older workflow cannot override a proven current review. Current pending or unsuccessful checks block a current review; unsupported completed conclusions, including null, fail closed.
+  - A successful workflow without a review is SKIPPED, not approval. A successful workflow with an unprovenanced review leaves that review PENDING. Consumers must inspect status and verdict together with freshness.
+  - Attribution assumes repository workflows protect comments posted as github-actions or github-actions[bot] with PR-Agent markers. This shared login and marker combination is not cryptographic proof of origin; quoted output can collide. Exact known check names are intentional; renamed jobs require an explicit adapter update.
+  - Captured fixtures prove the supported formats, not every future PR-Agent template. Workflow execution, credentials, and end-to-end replay remain tracked separately in #127, #72, and #12.
 
 ### 2.6. reviewdog (Actionlint)
 
