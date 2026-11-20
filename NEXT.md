@@ -2,7 +2,7 @@
 
 Repository: [gordonpn/merge-verdict](https://github.com/gordonpn/merge-verdict)
 
-Snapshot: 2026-11-19 UTC, main at `fa14a2d`. GitHub Issues remain authoritative. The scan found 27 open issues and zero open PRs after PRs #133 and #134 merged. Later changes require a fresh query.
+Snapshot: 2026-11-20 UTC, main at `fa14a2db37dfea567bfdc7d7cce913ea13aef146`. GitHub Issues remain authoritative. There are 27 open issues (down from 28 after PR #133 closed #132; PR #134 referenced #71 and #73 without closing an issue) and 7 Dependabot PRs (#136 through #142) alongside this queue refresh PR (#135). Later changes require a fresh query.
 
 ## NOW
 
@@ -14,13 +14,13 @@ Snapshot: 2026-11-19 UTC, main at `fa14a2d`. GitHub Issues remain authoritative.
 - Done: Record clean PASS, invalid-input summary-only failure, repeat invocation, and sanitized regression evidence without enabling approvals or changing branch protection.
 - Unblocks: [#74](https://github.com/gordonpn/merge-verdict/issues/74) and [#75](https://github.com/gordonpn/merge-verdict/issues/75).
 
-### Independent code and normalizer items ready now
+### Active independent implementation tracks (no open PR yet)
 
-1. [#126: Distinguish Codex review quota failures](https://github.com/gordonpn/merge-verdict/issues/126), P2/S, IN PROGRESS: normalize commit-bound quota evidence without inferring revision identity from timestamps. SHA-less notices require a separate provenance decision.
-2. [#131: Implement PR-Agent review and ticket compliance adapter](https://github.com/gordonpn/merge-verdict/issues/131), P2/M, IN PROGRESS: normalize captured PR-Agent output with explicit commit provenance and preserve unresolved ticket concerns. Independent of Codex normalization.
-3. [#128: Evaluate rate limit timeout exemptions](https://github.com/gordonpn/merge-verdict/issues/128), P2/S, IN PROGRESS: evaluate verified rate-limit duration using protected-base policy and explicit evaluation time. Preserve blocking findings, stale evidence, and active rate limits. Optional provenance fields must remain compatible with the other independent PRs.
+1. [#126: Distinguish Codex review quota failures](https://github.com/gordonpn/merge-verdict/issues/126), P2/S, IN PROGRESS (local branch `fix/issue-126-codex-quota`): normalize commit-bound quota evidence without inferring revision identity from timestamps. SHA-less notices require a separate provenance decision.
+2. [#131: Implement PR-Agent review and ticket compliance adapter](https://github.com/gordonpn/merge-verdict/issues/131), P2/M, IN PROGRESS (local branch `feat/issue-131-pr-agent-normalizer`): normalize captured PR-Agent output with explicit commit provenance and preserve unresolved ticket concerns. Independent of Codex normalization.
+3. [#128: Evaluate rate limit timeout exemptions](https://github.com/gordonpn/merge-verdict/issues/128), P2/S, IN PROGRESS (local branch `feat/issue-128-rate-limit-timeout`): evaluate verified rate-limit duration using protected-base policy and explicit evaluation time. Preserve blocking findings, stale evidence, and active rate limits, keeping optional `rateLimitedAt` fields additive and backward-compatible.
 
-Repository reviewer-ID verification is complete in PR #133. The three implementation tracks above use separate branches from this main revision and target main directly.
+Repository reviewer-ID verification is complete in PR #133. Each active implementation track uses a separate branch from `fa14a2db37dfea567bfdc7d7cce913ea13aef146` and targets `main` directly with disjoint file ownership.
 
 ## NEXT
 
