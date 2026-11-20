@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../../src/models/config.js";
 import type { ReviewSnapshot } from "../../src/models/snapshot.js";
+import { normalizeCopilotReviewer } from "../../src/normalizers/copilot.js";
 import { evaluatePolicy, type PolicyEvaluationInput } from "../../src/policy/evaluator.js";
 
 type Fixture = { -readonly [K in keyof PolicyEvaluationInput]: PolicyEvaluationInput[K] };
@@ -342,6 +343,93 @@ it.each([undefined, ["other"], [], ["thread", "thread"]].map((ids) => ({ ids }))
 );
 
 describe("rate-limit timeout exemptions", () => {
+  it("ages tool-produced Copilot evidence on an unchanged head and resets after a new head", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.config.requiredReviewers = ["copilot"];
+    value.snapshot.capturedAt = "2026-11-11T03:00:00Z";
+    const review = {
+      id: 1,
+      reviewerLogin: "copilot-pull-request-reviewer[bot]",
+      state: "COMMENTED",
+      commitSha: "head",
+      submittedAt: "2026-11-11T00:00:00Z",
+      body: "Copilot was unable to review this pull request because the user who requested the review has insufficient remaining quota.",
+      bodyDigest: "quota",
+    };
+    const normalize = () =>
+      normalizeCopilotReviewer({
+        headSha: value.snapshot.headSha,
+        checkRuns: [],
+        reviewThreads: [],
+        reviews: [review],
+        conversationComments: [],
+      });
+    value.snapshot.reviewers = { copilot: normalize() };
+    expect(evaluatePolicy(value)).toMatchObject({
+      verdict: "PASS",
+      exemptedReviewerIds: ["copilot"],
+    });
+
+    value.snapshot.headSha = "new-head";
+    value.finalSnapshot.headSha = "new-head";
+    check(value).commitSha = "new-head";
+    value.snapshot.reviewers = { copilot: normalize() };
+    expect(value.snapshot.reviewers.copilot).toMatchObject({
+      status: "STALE",
+      evaluatedCommitSha: "head",
+    });
+    expect(value.snapshot.reviewers.copilot?.rateLimitedAt).toBeUndefined();
+    expect(evaluatePolicy(value)).toMatchObject({ verdict: "PENDING", exemptedReviewerIds: [] });
+
+    review.commitSha = "new-head";
+    review.submittedAt = "2026-11-11T03:00:00Z";
+    value.snapshot.reviewers = { copilot: normalize() };
+    expect(value.snapshot.reviewers.copilot).toMatchObject({
+      status: "RATE_LIMITED",
+      isFresh: true,
+      rateLimitedAt: review.submittedAt,
+    });
+    expect(evaluatePolicy(value)).toMatchObject({ verdict: "PENDING", exemptedReviewerIds: [] });
+    value.snapshot.capturedAt = "2026-11-11T03:30:00Z";
+    expect(evaluatePolicy(value)).toMatchObject({
+      verdict: "PASS",
+      exemptedReviewerIds: ["copilot"],
+    });
+  });
+
+  it("reports only eligible required IDs in sorted deduplicated order with either freshness flag", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.config.requiredReviewers = ["z", "a", "waiting", "z"];
+    value.snapshot.capturedAt = "2026-11-11T03:00:00Z";
+    const eligible = {
+      ...reviewer(value),
+      status: "RATE_LIMITED" as const,
+      verdict: "COMMENTED" as const,
+      rateLimitedAt: "2026-11-11T00:00:00Z",
+    };
+    value.snapshot.reviewers = {
+      z: { ...eligible, reviewerId: "z", isFresh: false },
+      a: { ...eligible, reviewerId: "a", isFresh: true },
+      waiting: { ...eligible, reviewerId: "waiting", rateLimitedAt: "2026-11-11T02:59:00Z" },
+      optional: { ...eligible, reviewerId: "optional" },
+    };
+    expect(evaluatePolicy(value)).toMatchObject({
+      verdict: "PENDING",
+      exemptedReviewerIds: ["a", "z"],
+    });
+  });
+
+  it("fails closed for an invalid capture time", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.snapshot.capturedAt = "invalid";
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00Z";
+    expect(evaluatePolicy(value)).toMatchObject({ verdict: "PENDING", exemptedReviewerIds: [] });
+  });
+
   it("exempts RATE_LIMITED reviewer when allowAdvisoryExemptions is true and timeout has elapsed", () => {
     const value = input();
     value.config.allowAdvisoryExemptions = true;
@@ -473,6 +561,32 @@ describe("rate-limit timeout exemptions", () => {
       expect(evaluatePolicy(value).verdict).toBe("PENDING");
     },
   );
+
+  it.each(["finding", "decision"] as const)("preserves an independent blocking %s", (blocker) => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.snapshot.capturedAt = "2026-11-11T01:00:00Z";
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00Z";
+    reviewer(value).verdict = blocker === "decision" ? "CHANGES_REQUESTED" : "NONE";
+    reviewer(value).findings = [
+      {
+        id: "blocking",
+        reviewerId: "reviewer",
+        title: "Issue",
+        description: "Issue",
+        severity: "HIGH",
+        isBlocking: true,
+        isResolved: blocker === "decision",
+      },
+    ];
+    const result = evaluatePolicy(value);
+    expect(result.verdict).toBe("FAIL");
+    expect(result.exemptedReviewerIds).toEqual([]);
+    expect(result.reasons.map((reason) => reason.code)).toContain(
+      blocker === "decision" ? "CHANGES_REQUESTED" : "UNRESOLVED_FINDING",
+    );
+  });
 
   it("never waives unresolved blocking findings or CHANGES_REQUESTED on exempted RATE_LIMITED reviewer", () => {
     const value = input();

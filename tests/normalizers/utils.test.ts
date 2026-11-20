@@ -33,6 +33,20 @@ describe("parseIsoTimestamp", () => {
 describe("rateLimitCheckTimestamp", () => {
   const patterns = [/review limit/i] as const;
 
+  it.each([/review limit/gi, /review limit/iy])(
+    "matches repeatedly without mutating frozen caller patterns (%s)",
+    (pattern) => {
+      pattern.lastIndex = 7;
+      Object.freeze(pattern);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        expect(rateLimitCheckTimestamp(makeCheckRun(), "head-sha", [pattern])).toBe(
+          "2026-11-19T12:00:00Z",
+        );
+        expect(pattern.lastIndex).toBe(7);
+      }
+    },
+  );
+
   it("returns undefined for missing, stale, or incomplete check runs", () => {
     expect(rateLimitCheckTimestamp(undefined, "head-sha", patterns)).toBeUndefined();
     expect(
