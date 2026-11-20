@@ -37,6 +37,20 @@ function parseState(body: string): z.infer<typeof StateSchema> | undefined {
   }
 }
 
+function extractListItemText(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+    const text = trimmed.slice(2).trim();
+    return text.length > 0 ? text : undefined;
+  }
+  const dotIndex = trimmed.indexOf(". ");
+  if (dotIndex > 0 && dotIndex <= 3 && /^\d+$/.test(trimmed.slice(0, dotIndex))) {
+    const text = trimmed.slice(dotIndex + 2).trim();
+    return text.length > 0 ? text : undefined;
+  }
+  return undefined;
+}
+
 function ticketFindings(body: string, commentId: number): NormalizedFinding[] {
   const section = body.split(/Ticket compliance analysis/i)[1]?.split(/<\/td>|\n## /)[0];
   if (!section) return [];
@@ -55,7 +69,7 @@ function ticketFindings(body: string, commentId: number): NormalizedFinding[] {
       nonCompliant = false;
       continue;
     }
-    const text = line.trim().match(/^(?:[-*]|\d+\.)\s+(.+)$/)?.[1];
+    const text = extractListItemText(line);
     if (!nonCompliant || !text || /^(?:none\.?|n\/a)$/i.test(text)) continue;
     findings.push({
       id: `pr-agent-${commentId}-ticket-${findings.length + 1}`,
@@ -103,13 +117,15 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
       ? header[2]
       : undefined;
   const sha = body.includes(STATE_MARKER) ? state?.last_run.head_sha : headerSha;
-  const fresh = sha === input.headSha;
+  const normalizedHeadSha = input.headSha.toLowerCase();
+  const fresh = sha !== undefined && sha.toLowerCase() === normalizedHeadSha;
   const isStaleComment = sha !== undefined && !fresh;
   const findings: NormalizedFinding[] =
     comment && !isStaleComment ? ticketFindings(body, comment.id) : [];
   if (!isStaleComment) {
     for (const finding of state?.findings ?? []) {
-      const resolved = finding.state === "RESOLVED" || finding.state === "FIXED";
+      const normalizedState = finding.state.toUpperCase();
+      const resolved = normalizedState === "RESOLVED" || normalizedState === "FIXED";
       findings.push({
         id: `pr-agent-${finding.finding_id}`,
         reviewerId: "pr-agent",
@@ -130,9 +146,11 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
   let status: ReviewerStatus = sha ? (fresh ? "COMPLETED" : "STALE") : "PENDING";
   let evaluatedCommitSha = sha ?? null;
   if (fresh && state?.last_run.complete === false) status = "PENDING";
-  if (check && (!fresh || check.commitSha === input.headSha)) {
+  const checkMatchesHead =
+    check !== undefined && check.commitSha.toLowerCase() === normalizedHeadSha;
+  if (check && (!fresh || checkMatchesHead)) {
     evaluatedCommitSha = check.commitSha;
-    if (check.commitSha !== input.headSha) status = "STALE";
+    if (!checkMatchesHead) status = "STALE";
     else if (check.status !== "completed") status = "PENDING";
     else if (
       check.conclusion === "failure" ||
@@ -149,7 +167,7 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
     reviewerName: "PR-Agent",
     status,
     evaluatedCommitSha,
-    isFresh: evaluatedCommitSha === input.headSha,
+    isFresh: evaluatedCommitSha !== null && evaluatedCommitSha.toLowerCase() === normalizedHeadSha,
     verdict:
       status === "STALE"
         ? "NONE"

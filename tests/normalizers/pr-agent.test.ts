@@ -285,4 +285,32 @@ describe("PR-Agent normalization", () => {
     expect(result.findings[0]?.filePath).toBeUndefined();
     expect(result.findings[0]?.lineNumber).toBeUndefined();
   });
+
+  it("extracts numbered items, skips empty bullet lines, and compares hex SHAs and states case-insensitively", () => {
+    const commentBody = [
+      "<!-- pr-agent:review:full -->",
+      "<!-- pr-agent-review-state:v1",
+      JSON.stringify({
+        schema_version: 1,
+        last_run: { head_sha: headSha.toUpperCase(), complete: true },
+        findings: [{ finding_id: "lower", body: "Resolved finding", state: "resolved" }],
+      }),
+      "-->",
+      "Ticket compliance analysis",
+      "Non-compliant requirements:",
+      "*    ",
+      "1.    ",
+      "1. Numbered compliance item",
+    ].join("\n");
+
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [comment(commentBody)],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.isFresh).toBe(true);
+    expect(result.findings.find((f) => f.id === "pr-agent-lower")?.isResolved).toBe(true);
+    expect(result.findings.find((f) => f.description === "Numbered compliance item")).toBeDefined();
+  });
 });
