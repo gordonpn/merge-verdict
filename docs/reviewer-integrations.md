@@ -48,6 +48,15 @@ For the repository workflows' event, identity, credential, and cancellation boun
 
 ### 2.3. OpenAI / ChatGPT Codex Connector
 
+A failed state artifact containing the connector's explicit quota-exhaustion notice is
+classified `RATE_LIMITED` only when its `code_review.commit_sha` matches the PR head.
+Unresolved findings still produce `CHANGES_REQUESTED`. A separate quota notice without
+revision provenance cannot explain a SHA-bearing failure and leaves it `FAILED`.
+Timestamp proximity alone does not establish that two artifacts describe the same run.
+Only explicit diagnostic prose using the captured connector wording is recognized;
+quoted history, code examples and state JSON text cannot classify a failure as quota exhaustion.
+Unknown diagnostic wording remains `FAILED` until its meaning is verified.
+
 - **Identity**: Connected GitHub App (`chatgpt-codex-connector`, `chatgpt-codex-connector[bot]`).
 - **Artifacts Emitted**:
   - Inline review comments formatted with severity badges: `P2 Badge` (`<!-- codex-code-review-finding:v1 -->`).
