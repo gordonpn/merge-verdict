@@ -87,6 +87,18 @@ describe("Codex quota provenance", () => {
     });
   });
 
+  it.each([
+    ["a single newline after the marker", `${failedState.trimEnd()}\n${quotaNotice}`],
+    [
+      "removed code followed by a blank line",
+      `${failedState}\n\`\`\`text\nexample\n\`\`\`\n\n${quotaNotice}`,
+    ],
+  ])("recognizes an explicit quota diagnostic after %s", (_kind, body) => {
+    const result = normalizeCodexReviewer({ headSha, conversationComments: [comment(body)] });
+
+    expect(result).toMatchObject({ status: "RATE_LIMITED", verdict: "NONE", isFresh: true });
+  });
+
   it.each(["older", "missing"])("preserves SHA freshness for %s provenance", (kind) => {
     const body = quotaState.replace(headSha, kind === "older" ? "a".repeat(40) : "");
 

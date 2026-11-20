@@ -61,6 +61,7 @@ function hasCodexQuotaDiagnostic(body: string): boolean {
   return lines
     .join("\n")
     .split(/\n[ \t]*\n/)
+    .map((paragraph) => paragraph.replace(/^(?:[ \t\r]*\n)+/, ""))
     .some((paragraph) =>
       /^ {0,3}You have reached your Codex usage limits? for code reviews?\b/i.test(paragraph),
     );
