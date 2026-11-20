@@ -23,11 +23,16 @@ const CodexReviewStateSchema = z.object({
 });
 type CodexReviewStateJson = z.infer<typeof CodexReviewStateSchema>;
 
+interface ParsedCodexState {
+  readonly state: CodexReviewStateJson;
+  readonly rateLimited: boolean;
+}
+
 function isCodexAuthor(login: string | null): boolean {
   return login !== null && CODEX_LOGINS.has(login.toLowerCase());
 }
 
-function parseCodexState(input: NormalizerInput): CodexReviewStateJson | null {
+function parseCodexState(input: NormalizerInput): ParsedCodexState | null {
   const eligibleComments = (input.conversationComments ?? []).filter((c) =>
     isCodexAuthor(c.authorLogin),
   );
@@ -55,7 +60,14 @@ function parseCodexState(input: NormalizerInput): CodexReviewStateJson | null {
     const jsonStr = body.slice(openBrace, commentClose).trim();
     try {
       const parsed = CodexReviewStateSchema.safeParse(JSON.parse(jsonStr));
-      return parsed.success ? parsed.data : null;
+      return parsed.success
+        ? {
+            state: parsed.data,
+            rateLimited: /You have reached your Codex usage limits? for code reviews?\b/i.test(
+              body,
+            ),
+          }
+        : null;
     } catch {
       return null;
     }
@@ -104,7 +116,8 @@ function extractCodexTitle(body: string, path: string | null, line: number | nul
  */
 export function normalizeCodexReviewer(input: NormalizerInput): ReviewerExecutionRecord {
   const { headSha } = input;
-  const stateJson = parseCodexState(input);
+  const parsedState = parseCodexState(input);
+  const stateJson = parsedState?.state;
   const threads =
     input.reviewThreads?.filter((t) => {
       const firstComment = t.comments[0];
@@ -162,8 +175,15 @@ export function normalizeCodexReviewer(input: NormalizerInput): ReviewerExecutio
     status = "PENDING";
     verdict = "NONE";
   } else if (stateJson?.code_review?.status === "failed") {
-    status = "FAILED";
-    verdict = "CHANGES_REQUESTED";
+    // Quota diagnostics must share the SHA-bearing state artifact.
+    const rateLimited = isFresh && parsedState?.rateLimited === true;
+    status = rateLimited ? "RATE_LIMITED" : "FAILED";
+    verdict =
+      rateLimited &&
+      stateJson.code_review.has_unresolved_findings !== true &&
+      !findings.some((finding) => finding.isBlocking && !finding.isResolved)
+        ? "NONE"
+        : "CHANGES_REQUESTED";
   } else if (stateJson?.code_review?.status === "completed") {
     status = "COMPLETED";
     const hasUnresolvedFindings =

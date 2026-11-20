@@ -2,6 +2,14 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-19: Require revision provenance for Codex quota classification
+
+- Decision: Classify quota exhaustion only when the explicit Codex diagnostic shares a failed machine-readable state artifact bound to the current head SHA. Preserve blocking findings and stale-state precedence.
+- Rationale: The observed quota-only conversation notice carries no commit identity. Pairing it with another artifact by timestamp can associate an older quota event with a genuine current execution error.
+- Trade-offs: The observed separate notice continues to yield `FAILED` until the connector provides revision-bound evidence. The adapter accurately handles a combined diagnostic without inventing a completed review.
+- Rejected alternatives: A time window joining independent summary and quota comments, or assuming all failed Codex runs after a quota notice are rate limited.
+- Source: [Codex quota classification](https://github.com/gordonpn/merge-verdict/issues/126).
+
 ## 2026-11-15: Validate the minimum runtime separately from build tooling
 
 - Decision: Keep the package runtime at Node.js 22.12.0, limit Node type declarations to the 22.12 series, and run existing standalone bundle checks on exactly 22.12.0 after CI builds with a supported contributor runtime.
