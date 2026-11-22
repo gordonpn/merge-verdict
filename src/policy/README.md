@@ -1,5 +1,7 @@
 # Deterministic policy evaluation
 
+Consumers that cache verdicts by evidence fingerprint must stop doing so: timeout deadlines require reevaluation even when the evidence fingerprint is unchanged.
+
 `evaluatePolicy` consumes normalized `ReviewSnapshot` and `MergeVerdictConfig` values. It performs no network access, normalization, risk matching, semantic inference, or publication. Import it from `src/policy/index.ts`.
 
 The caller must load configuration and evaluator options from the protected base revision, validate incoming domain values, and pass a final freshly collected head SHA and state fingerprint. The fingerprint must cover all relevant review events, including new comments on unchanged commits. The evaluator compares the supplied identities; it cannot establish that collection was complete or atomic.

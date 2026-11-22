@@ -101,6 +101,13 @@ describe("evaluatePolicy decision matrix", () => {
     expect(
       [before, atDeadline, after].map((snapshot) => snapshot.reviewers.reviewer?.status),
     ).toEqual(["RATE_LIMITED", "RATE_LIMITED", "RATE_LIMITED"]);
+    expect(
+      evaluatePolicy({
+        ...value,
+        snapshot: atDeadline,
+        finalSnapshot: { ...finalSnapshot, stateFingerprint: "changed-evidence" },
+      }).verdict,
+    ).toBe("STALE");
   });
   it("passes reconciled evidence without claiming approval eligibility", () => {
     expect(evaluatePolicy(input())).toMatchObject({
