@@ -79,7 +79,7 @@ export function extractZipEntryText(
     if (currentName !== entryName) {
       continue;
     }
-    if ((flags & 0x0009) !== 0 || uncompressedSize > maxOutputBytes) {
+    if ((flags & 0x0001) !== 0 || uncompressedSize > maxOutputBytes) {
       return null;
     }
     if (

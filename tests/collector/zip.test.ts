@@ -83,6 +83,19 @@ describe("extractZipEntryText", () => {
     expect(extractZipEntryText(zip, "pr-agent-provenance.json", 4096)).toBe('{"ok":true}\n');
   });
 
+  it("reads streaming artifacts with ZIP data-descriptor flag bit 3 (0x0008)", () => {
+    const zip = createSingleEntryZip(
+      "pr-agent-provenance.json",
+      Buffer.from('{"streaming":true}', "utf8"),
+      { compressionMethod: 8, flags: 0x0008 },
+    );
+    // Simulate actions/upload-artifact local header where sizes are zeroed in favor of central dir.
+    zip.writeUInt32LE(0, 18);
+    zip.writeUInt32LE(0, 22);
+
+    expect(extractZipEntryText(zip, "pr-agent-provenance.json", 4096)).toBe('{"streaming":true}');
+  });
+
   it("finds the target entry in multi-entry archives and rejects truncated headers", () => {
     const multi = createZipArchive([
       { name: "first.txt", content: Buffer.from("skip", "utf8") },
