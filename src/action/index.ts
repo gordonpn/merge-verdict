@@ -119,6 +119,14 @@ function isSelfBotLogin(login: string | undefined | null): boolean {
   return SELF_BOT_ACTORS.some((bot) => bot.toLowerCase() === normalized);
 }
 
+function isBotLogin(login: string | undefined | null): boolean {
+  if (!login) {
+    return false;
+  }
+  const normalized = login.trim().toLowerCase();
+  return isSelfBotLogin(normalized) || normalized.endsWith("[bot]");
+}
+
 /**
  * Reads a GitHub Actions input from environment variables without external dependencies.
  * Supports both hyphenated (`INPUT_GITHUB-TOKEN`) and underscored (`INPUT_GITHUB_TOKEN`) forms.
@@ -251,8 +259,12 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
   if (eventName === "issue_comment" || eventName === "pull_request_review_comment") {
     const action = typeof payload?.action === "string" ? payload.action.trim().toLowerCase() : "";
     const commentLogin = getNestedString(asRecord(payload?.comment), "user", "login");
+    const senderLogin = getNestedString(payload, "sender", "login");
+    const isHumanActor =
+      actor.length > 0 && !isBotLogin(actor) && (senderLogin === "" || !isBotLogin(senderLogin));
     // Allow human edits or deletions of bot-authored comments (e.g. PR-Agent summaries) to refresh.
-    if (action !== "edited" && action !== "deleted" && isSelfBotLogin(commentLogin)) {
+    const isHumanRefresh = (action === "edited" || action === "deleted") && isHumanActor;
+    if (isSelfBotLogin(commentLogin) && !isHumanRefresh) {
       return {
         skipped: true,
         reason: `Ignored ${eventName} event authored by "${commentLogin}".`,
