@@ -4,10 +4,14 @@ import { z } from "zod";
 import type {
   GitHubCheckRun,
   GitHubConversationComment,
+  GitHubPullRequestData,
 } from "../../src/collector/github-collector.js";
 import { CHECK_RUN_CONCLUSIONS } from "../../src/models/check-run.js";
+import { createDefaultConfig } from "../../src/models/config.js";
 import { ReviewerExecutionRecordSchema } from "../../src/models/reviewer.js";
+import { buildReviewSnapshotFromPullRequest } from "../../src/normalizers/index.js";
 import { normalizePrAgentReviewer, prAgentNormalizer } from "../../src/normalizers/pr-agent.js";
+import { evaluatePolicy } from "../../src/policy/evaluator.js";
 
 const headSha = "f938eb23b9b6d7c9d48f9c439b02b36803f989a3";
 function fixture(name: string): string {
@@ -398,4 +402,338 @@ Non-compliant requirements:
     expect(result.findings.find((f) => f.id === "pr-agent-lower")?.isResolved).toBe(true);
     expect(result.findings.find((f) => f.description === "Numbered compliance item")).toBeDefined();
   });
+
+  it("prefers the latest proven-current comment over a newer stale-SHA comment edited later", () => {
+    const oldSha = "1111111111111111111111111111111111111111";
+    const currentComment = comment(
+      `${stateComment(true, "ACTIVE").replace(headSha, headSha.toUpperCase())}\nTicket compliance analysis\nNon-compliant requirements:\n- Current head concern`,
+      { id: 10, createdAt: "2026-11-19T10:00:00Z", updatedAt: "2026-11-19T10:05:00Z" },
+    );
+    const newerStaleComment = comment(stateComment(true, "RESOLVED").replace(headSha, oldSha), {
+      id: 11,
+      createdAt: "2026-11-19T09:00:00Z",
+      updatedAt: "2026-11-20T12:00:00Z",
+    });
+
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [newerStaleComment, currentComment],
+    });
+
+    expect(result).toMatchObject({
+      status: "COMPLETED",
+      evaluatedCommitSha: headSha,
+      isFresh: true,
+      verdict: "CHANGES_REQUESTED",
+    });
+    expect(result.findings.map((finding) => finding.id)).toEqual([
+      "pr-agent-10-ticket-1",
+      "pr-agent-finding-1",
+    ]);
+  });
+
+  it("keeps conservative PENDING handling for a newer SHA-less comment when no proven-current comment exists", () => {
+    const oldSha = "1111111111111111111111111111111111111111";
+    const olderStaleComment = comment(stateComment(true, "RESOLVED").replace(headSha, oldSha), {
+      id: 10,
+      updatedAt: "2026-11-19T10:00:00Z",
+    });
+    const newerShaLessComment = comment(fixture("pr-133.md"), {
+      id: 11,
+      updatedAt: "2026-11-20T12:00:00Z",
+    });
+
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [olderStaleComment, newerShaLessComment],
+    });
+
+    expect(result).toMatchObject({
+      status: "PENDING",
+      evaluatedCommitSha: null,
+      isFresh: false,
+      verdict: "CHANGES_REQUESTED",
+    });
+    expect(result.findings.map((finding) => finding.description)).toEqual([
+      "Set required_reviewers to [deepseek-review] in .github/merge-verdict.yml (not part of this PR's diff; may have been done in a prior PR).",
+    ]);
+  });
+
+  it("parses literal --> inside state JSON strings without truncating or leaking into ticket findings", () => {
+    const body = [
+      "<!-- pr-agent:review:full -->",
+      "<!-- pr-agent-review-state:v1",
+      JSON.stringify({
+        schema_version: 1,
+        last_run: { head_sha: headSha, complete: true },
+        findings: [
+          {
+            finding_id: "arrow-finding",
+            body: 'Check arrow a --> b and "quoted --> tail"\nTicket compliance analysis\nNon-compliant requirements:\n- Must not leak from state',
+            path: "src/normalizers/pr-agent.ts",
+            line_start: 29,
+            state: "ACTIVE",
+          },
+        ],
+      }),
+      "-->",
+      "Ticket compliance analysis",
+      "Non-compliant requirements:",
+      "- Explicit markdown non-compliance",
+    ].join("\n");
+
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [comment(body)],
+    });
+
+    expect(result).toMatchObject({
+      status: "COMPLETED",
+      evaluatedCommitSha: headSha,
+      isFresh: true,
+      verdict: "CHANGES_REQUESTED",
+    });
+    expect(result.findings.map((finding) => finding.id)).toEqual([
+      "pr-agent-1-ticket-1",
+      "pr-agent-arrow-finding",
+    ]);
+    expect(result.findings[1]?.description).toContain("a --> b");
+  });
+
+  it.each([
+    '<!-- pr-agent-review-state:v1 {"schema_version":1,"last_run":{"head_sha":"f938eb23b9b6d7c9d48f9c439b02b36803f989a3","complete":true},"findings":[{"finding_id":"f1","body":"a --> b","state":"RESOLVED"}]}',
+    '<!-- pr-agent-review-state:v1 {"schema_version":1,"last_run":{"head_sha":"f938eb23b9b6d7c9d48f9c439b02b36803f989a3","complete":true},"findings":[]} trailing -->',
+    '<!-- pr-agent-review-state:v1 {"schema_version":1,"findings":[{"body":"a --> b"}] broken -->',
+    "<!-- pr-agent-review-state:v1 {not-json} -->",
+    "<!-- pr-agent-review-state:v1 not-json -->",
+  ])(
+    "fails closed on malformed or unclosed state tail %s without recovering approval via header",
+    (malformedTail) => {
+      const body = [
+        "<!-- pr-agent:review:full -->",
+        `#### (Review updated until commit https://github.com/fixture-owner/merge-verdict/commit/${headSha})`,
+        malformedTail,
+      ].join("\n");
+
+      const result = normalizePrAgentReviewer({
+        headSha,
+        repository: "fixture-owner/merge-verdict",
+        conversationComments: [comment(body)],
+        checkRuns: [check()],
+      });
+
+      expect(result).toMatchObject({
+        status: "PENDING",
+        evaluatedCommitSha: null,
+        isFresh: false,
+        verdict: "NONE",
+      });
+    },
+  );
+
+  it("bounds ticket compliance across multi-cell tables, sibling headings, and wrapped references", () => {
+    const result = normalizePrAgentReviewer({
+      headSha,
+      repository: "fixture-owner/merge-verdict",
+      conversationComments: [comment(fixture("synthetic-ticket-boundaries.md"))],
+    });
+
+    expect(result).toMatchObject({
+      status: "COMPLETED",
+      evaluatedCommitSha: headSha,
+      isFresh: true,
+      verdict: "CHANGES_REQUESTED",
+    });
+    expect(result.findings.map((finding) => finding.description)).toEqual([
+      "Handle wrapped reference for [127](https://github.com/fixture-owner/merge-verdict/issues/127) and [131](https://github.com/fixture-owner/merge-verdict/issues/131)",
+      "[148](https://github.com/fixture-owner/merge-verdict/issues/148) / [127](https://github.com/fixture-owner/merge-verdict/issues/127): retain explicit multi-ticket compliance bullet",
+    ]);
+  });
+
+  it("stops ticket compliance at sibling ## headings without an HTML table", () => {
+    const body = [
+      "<!-- pr-agent:review:full -->",
+      `#### (Review updated until commit https://github.com/fixture-owner/merge-verdict/commit/${headSha})`,
+      "## Ticket compliance analysis",
+      "Non-compliant requirements:",
+      "- Keep first section bullet",
+      "## Recommended focus areas",
+      "Non-compliant requirements:",
+      "- Ignore sibling heading bullet",
+    ].join("\n");
+
+    const result = normalizePrAgentReviewer({
+      headSha,
+      repository: "fixture-owner/merge-verdict",
+      conversationComments: [comment(body)],
+    });
+
+    expect(result.findings.map((finding) => finding.description)).toEqual([
+      "Keep first section bullet",
+    ]);
+  });
+
+  it("retains multi-ticket non-compliance and ACTIVE state findings from captured PR #154 fixture", () => {
+    const pr154Sha = "43adf935e4009a5e864b26f36ee56669c672ad26";
+    const result = normalizePrAgentReviewer({
+      headSha: pr154Sha,
+      repository: "fixture-owner/merge-verdict",
+      conversationComments: [comment(fixture("pr-154-multi-ticket.md"))],
+      checkRuns: [check({ commitSha: pr154Sha })],
+    });
+
+    expect(result).toMatchObject({
+      status: "PENDING",
+      evaluatedCommitSha: pr154Sha,
+      isFresh: true,
+      verdict: "CHANGES_REQUESTED",
+    });
+    const ticketItems = result.findings.filter((f) => f.severity === "HIGH");
+    const stateActiveItems = result.findings.filter(
+      (f) => f.severity === "MEDIUM" && !f.isResolved,
+    );
+    const stateResolvedItems = result.findings.filter(
+      (f) => f.severity === "MEDIUM" && f.isResolved,
+    );
+    expect(ticketItems).toHaveLength(10);
+    expect(stateActiveItems).toHaveLength(2);
+    expect(stateResolvedItems).toHaveLength(1);
+  });
+
+  it("fails closed when a completed PR-Agent check has null conclusion", () => {
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [comment(stateComment(true, "RESOLVED"))],
+      checkRuns: [check({ status: "completed", conclusion: null })],
+    });
+
+    expect(result).toMatchObject({
+      status: "FAILED",
+      evaluatedCommitSha: headSha,
+      isFresh: true,
+      verdict: "NONE",
+      checkRunConclusion: null,
+    });
+  });
+
+  function makePrData(overrides: Partial<GitHubPullRequestData>): GitHubPullRequestData {
+    return {
+      repository: "fixture-owner/merge-verdict",
+      pullRequestNumber: 148,
+      headSha,
+      baseSha: "0".repeat(40),
+      headRef: "fix/issue-148",
+      baseRef: "main",
+      isFork: false,
+      isDraft: false,
+      mergeable: true,
+      authorLogin: "contributor",
+      evaluationSha: headSha,
+      policyVersion: "1",
+      changedFilePaths: [],
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [],
+      checkRuns: [],
+      commitStatuses: [],
+      ancestorCommitShas: [],
+      policyContent: "",
+      ...overrides,
+    };
+  }
+
+  it("canonicalizes uppercase 40-char hex SHAs across snapshot normalization and policy evaluation", () => {
+    const upperHead = headSha.toUpperCase();
+    const config = createDefaultConfig();
+    config.requiredChecks = [];
+    config.requiredReviewers = ["pr-agent"];
+
+    const snapshot = buildReviewSnapshotFromPullRequest(
+      makePrData({
+        headSha: upperHead,
+        evaluationSha: upperHead,
+        conversationComments: [comment(stateComment(true, "RESOLVED"))],
+        checkRuns: [check({ commitSha: upperHead, conclusion: "success" })],
+      }),
+      { capturedAt: "2026-11-22T00:00:00Z" },
+    );
+
+    expect(snapshot.reviewers["pr-agent"]?.evaluatedCommitSha).toBe(headSha);
+    expect(snapshot.reviewers["pr-agent"]?.isFresh).toBe(true);
+
+    const evaluation = evaluatePolicy({
+      snapshot,
+      config,
+      finalSnapshot: { headSha, stateFingerprint: snapshot.stateFingerprint },
+      executionErrors: [],
+      repositoryRules: [],
+      codeEvidenceSatisfied: true,
+    });
+
+    expect(evaluation.verdict).toBe("PASS");
+    expect(evaluation.reasons).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: "FAILED from null conclusion",
+      comments: [comment(stateComment(true, "RESOLVED"))],
+      checks: [check({ status: "completed", conclusion: null })],
+      expectedReviewerStatus: "FAILED",
+      expectedPolicyVerdict: "ERROR",
+    },
+    {
+      name: "PENDING from malformed state tail",
+      comments: [
+        comment(
+          `<!-- pr-agent:review:full -->\n#### (Review updated until commit https://github.com/fixture-owner/merge-verdict/commit/${headSha})\n<!-- pr-agent-review-state:v1 {"schema_version":1`,
+        ),
+      ],
+      checks: [check({ status: "completed", conclusion: "success" })],
+      expectedReviewerStatus: "PENDING",
+      expectedPolicyVerdict: "PENDING",
+    },
+    {
+      name: "SKIPPED from check success without comment",
+      comments: [],
+      checks: [check({ status: "completed", conclusion: "success" })],
+      expectedReviewerStatus: "SKIPPED",
+      expectedPolicyVerdict: "PENDING",
+    },
+    {
+      name: "STALE from old check and old review",
+      comments: [comment(stateComment(true, "RESOLVED").replace(headSha, "1".repeat(40)))],
+      checks: [check({ commitSha: "1".repeat(40), status: "completed", conclusion: "success" })],
+      expectedReviewerStatus: "STALE",
+      expectedPolicyVerdict: "PENDING",
+    },
+  ])(
+    "never satisfies required-reviewer completion for $name",
+    ({ comments, checks, expectedReviewerStatus, expectedPolicyVerdict }) => {
+      const config = createDefaultConfig();
+      config.requiredChecks = [];
+      config.requiredReviewers = ["pr-agent"];
+
+      const snapshot = buildReviewSnapshotFromPullRequest(
+        makePrData({
+          conversationComments: comments,
+          checkRuns: checks,
+        }),
+        { capturedAt: "2026-11-22T00:00:00Z" },
+      );
+
+      expect(snapshot.reviewers["pr-agent"]?.status).toBe(expectedReviewerStatus);
+
+      const evaluation = evaluatePolicy({
+        snapshot,
+        config,
+        finalSnapshot: { headSha, stateFingerprint: snapshot.stateFingerprint },
+        executionErrors: [],
+        repositoryRules: [],
+        codeEvidenceSatisfied: true,
+      });
+
+      expect(evaluation.verdict).toBe(expectedPolicyVerdict);
+    },
+  );
 });

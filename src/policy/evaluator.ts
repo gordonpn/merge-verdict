@@ -1,6 +1,6 @@
 import type { MergeVerdictConfig } from "../models/config.js";
 import type { ReviewerExecutionRecord } from "../models/reviewer.js";
-import type { ReviewSnapshot } from "../models/snapshot.js";
+import { canonicalizeCommitSha, type ReviewSnapshot } from "../models/snapshot.js";
 
 export type PolicyVerdict = "PASS" | "PENDING" | "FAIL" | "STALE" | "ERROR";
 export interface PolicyReason {
@@ -32,6 +32,14 @@ function ownValue<T>(record: Readonly<Record<string, T>> | undefined, key: strin
   return record && Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
+function sameCommitSha(left: string | null | undefined, right: string): boolean {
+  return (
+    left !== null &&
+    left !== undefined &&
+    canonicalizeCommitSha(left) === canonicalizeCommitSha(right)
+  );
+}
+
 function isRateLimitExempt(
   reviewer: ReviewerExecutionRecord | undefined,
   snapshot: ReviewSnapshot,
@@ -46,7 +54,7 @@ function isRateLimitExempt(
   ) {
     return false;
   }
-  if (reviewer.evaluatedCommitSha !== snapshot.headSha) {
+  if (!sameCommitSha(reviewer.evaluatedCommitSha, snapshot.headSha)) {
     return false;
   }
   if (!Number.isFinite(config.rateLimitTimeoutMinutes) || config.rateLimitTimeoutMinutes <= 0) {
@@ -80,7 +88,7 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
   };
   for (const name of [...new Set(config.requiredChecks)].sort()) {
     const run = ownValue(snapshot.checkRuns, name);
-    if (!run || run.commitSha !== snapshot.headSha) {
+    if (!run || !sameCommitSha(run.commitSha, snapshot.headSha)) {
       add(1, "PENDING", "CHECK_MISSING_OR_STALE", name);
     } else if (run.status !== "completed") {
       add(1, "PENDING", "CHECK_INCOMPLETE", name);
@@ -149,14 +157,14 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
       reviewer &&
       !exemptedReviewerSet.has(id) &&
       (!reviewer.isFresh ||
-        reviewer.evaluatedCommitSha !== snapshot.headSha ||
+        !sameCommitSha(reviewer.evaluatedCommitSha, snapshot.headSha) ||
         reviewer.status === "STALE")
     ) {
       add(5, "PENDING", "REVIEWER_STALE", id);
     }
   }
   if (
-    input.finalSnapshot.headSha !== snapshot.headSha ||
+    !sameCommitSha(input.finalSnapshot.headSha, snapshot.headSha) ||
     input.finalSnapshot.stateFingerprint !== snapshot.stateFingerprint
   ) {
     add(6, "STALE", "SNAPSHOT_CHANGED", snapshot.headSha);
