@@ -77,15 +77,17 @@ jobs:
         run: |
           HEAD_SHA="${PR_HEAD_SHA:-}"
           if [ -z "${HEAD_SHA}" ]; then
-            HEAD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
-          fi
-          if [ -z "${HEAD_SHA}" ]; then
-            echo "::error::Could not resolve PR head SHA before PR-Agent execution."
-            exit 1
+            HEAD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha' 2>/dev/null || true)"
           fi
           STARTED_AT="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.run_started_at // .created_at' 2>/dev/null || true)"
           if [ -z "${STARTED_AT}" ]; then
             STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          fi
+          if [ -z "${HEAD_SHA}" ]; then
+            echo "::warning::Could not resolve PR head SHA before PR-Agent execution; skipping provenance upload."
+            echo "head_sha=" >> "${GITHUB_OUTPUT}"
+            echo "started_at=${STARTED_AT}" >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
           {
             echo "head_sha=$(printf '%s' "${HEAD_SHA}" | tr '[:upper:]' '[:lower:]')"
@@ -112,7 +114,7 @@ jobs:
 
       - name: Record review provenance
         id: provenance
-        if: (github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true') && steps.pr_agent.outcome == 'success'
+        if: (github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true') && steps.pr_agent.outcome == 'success' && steps.target_meta.outputs.head_sha != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
@@ -126,12 +128,13 @@ jobs:
                     ((.user.login // "") | ascii_downcase) as $login
                     | ($login == "github-actions" or $login == "github-actions[bot]")
                     and ((.body // "") | (contains("<!-- pr-agent:review:full -->") or contains("<!-- pr-agent-review-state:v1")))
+                    and ((.updated_at // .created_at) >= $started_at)
                     and (
                       ((.body // "") | ascii_downcase | contains("\"head_sha\":\"" + $sha + "\""))
                       or ((.body // "") | ascii_downcase | contains(("https://github.com/" + $repo + "/commit/" + $sha) | ascii_downcase))
                     )
                   ))
-                | sort_by([((.updated_at // .created_at) >= $started_at), (.updated_at // .created_at), .id])
+                | sort_by([(.updated_at // .created_at), .id])
                 | last // empty
               ' > "${RUNNER_TEMP}/pr-agent-comment.json"
           if [ ! -s "${RUNNER_TEMP}/pr-agent-comment.json" ]; then

@@ -219,14 +219,22 @@ async function readRunProvenanceArtifact(
     return { evidence: null, hasCandidateArtifact: false };
   }
 
-  const downloadResponse = await retry("download_pr_agent_provenance_artifact", () =>
-    rest.rest.actions.downloadArtifact({
-      owner,
-      repo,
-      artifact_id: provenanceArtifact.id,
-      archive_format: "zip",
-    }),
-  );
+  let downloadResponse: Awaited<ReturnType<typeof rest.rest.actions.downloadArtifact>>;
+  try {
+    downloadResponse = await retry("download_pr_agent_provenance_artifact", () =>
+      rest.rest.actions.downloadArtifact({
+        owner,
+        repo,
+        artifact_id: provenanceArtifact.id,
+        archive_format: "zip",
+      }),
+    );
+  } catch (error) {
+    if (extractStatusCode(error) === 410) {
+      return { evidence: null, hasCandidateArtifact: true };
+    }
+    throw error;
+  }
 
   const archiveBytes = toUint8Array(downloadResponse.data);
   if (!archiveBytes) {
@@ -307,7 +315,6 @@ export async function collectPrAgentProvenance(
     if (inspectedRunIds.has(runId)) {
       continue;
     }
-    inspectedRunIds.add(runId);
 
     try {
       const { data: run } = await retry("get_pr_agent_workflow_run", () =>
@@ -318,6 +325,7 @@ export async function collectPrAgentProvenance(
         run.status === "completed" &&
         run.repository.full_name.toLowerCase() === expectedRepository
       ) {
+        inspectedRunIds.add(run.id);
         const result = await readRunProvenanceArtifact(
           rest,
           retry,

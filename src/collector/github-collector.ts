@@ -816,7 +816,7 @@ export class GitHubCollector {
             owner,
             repo,
             pullRequestNumber,
-            headSha: evaluationSha,
+            headSha: pullRequest.head.sha,
             checkRunUrls: prAgentCheckRunUrls,
             commentDigests: prAgentCommentDigests,
           })

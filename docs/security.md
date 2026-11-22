@@ -55,6 +55,7 @@ When using a dedicated GitHub App to generate installation access tokens, the Ap
 | `Commit Statuses` | Read-Only    | Read external commit status evidence; no legacy status publishing fallback.                                 |
 | `Contents`        | Read-Only    | Read base-branch policy content.                                                                            |
 | `Issues`          | Read-Only    | Read top-level PR conversation comments.                                                                    |
+| `Actions`         | Read-Only    | Retrieve PR-Agent workflow runs and download provenance artifacts when provenance verification is enabled.  |
 | `Metadata`        | Read-Only    | Default requirement for all GitHub Apps to query repository structure.                                      |
 
 Permissions such as `Administration`, `Workflows`, `Secrets`, or `Repository contents (write)` are strictly prohibited.
