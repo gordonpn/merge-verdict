@@ -2,42 +2,36 @@
 
 Repository: [gordonpn/merge-verdict](https://github.com/gordonpn/merge-verdict)
 
-Snapshot: 2026-11-20 UTC, main at `fa14a2db37dfea567bfdc7d7cce913ea13aef146`. GitHub Issues remain authoritative. There are 27 open issues (down from 28 after PR #133 closed #132; PR #134 referenced #71 and #73 without closing an issue) and 7 Dependabot PRs (#136 through #142) alongside this queue refresh PR (#135). Later changes require a fresh query.
+Snapshot: 2026-11-22 UTC, main at `575d24b`. GitHub Issues remain authoritative. The scan found 29 open issues and one open PR, [#154](https://github.com/gordonpn/merge-verdict/pull/154). PRs #144, #149 and #153 are merged. This is a dated snapshot; later changes require a fresh query.
 
 ## NOW
 
-### [#73: Complete the first manual advisory validation](https://github.com/gordonpn/merge-verdict/issues/73)
+### [#155: Parse subsection findings under DeepSeek Material Findings](https://github.com/gordonpn/merge-verdict/issues/155)
 
-- Priority: P1. Effort: M. Readiness: in progress; normalizer and workflow gating fixes (PRs #115, #117, #120, #121, #122) and `required_reviewers: [deepseek-review]` in [`.github/merge-verdict.yml`](.github/merge-verdict.yml) (PR #130) are merged on `main`.
-- Reason: Remaining prerequisite for automatic advisory refresh and a second repository trial. ERROR, STALE, PENDING, and repeated publication have dated evidence in the issue; clean PASS awaits live DeepSeek Review execution on an open PR.
-- First action: With `ENABLE_DEEPSEEK_REVIEW` and `DEEPSEEK_API_KEY` provisioned, post an authorized `/review` comment on the selected open, non-draft PR and wait for DeepSeek Review to complete on its exact head. Then dispatch the Merge Verdict workflow for that PR and inspect the resulting verdict.
-- Done: Record clean PASS, invalid-input summary-only failure, repeat invocation, and sanitized regression evidence without enabling approvals or changing branch protection.
-- Unblocks: [#74](https://github.com/gordonpn/merge-verdict/issues/74) and [#75](https://github.com/gordonpn/merge-verdict/issues/75).
-
-### Active independent implementation tracks (no open PR yet)
-
-1. [#126: Distinguish Codex review quota failures](https://github.com/gordonpn/merge-verdict/issues/126), P2/S, IN PROGRESS (local branch `fix/issue-126-codex-quota`): normalize commit-bound quota evidence without inferring revision identity from timestamps. SHA-less notices require a separate provenance decision.
-2. [#131: Implement PR-Agent review and ticket compliance adapter](https://github.com/gordonpn/merge-verdict/issues/131), P2/M, IN PROGRESS (local branch `feat/issue-131-pr-agent-normalizer`): normalize captured PR-Agent output with explicit commit provenance and preserve unresolved ticket concerns. Independent of Codex normalization.
-3. [#128: Evaluate rate limit timeout exemptions](https://github.com/gordonpn/merge-verdict/issues/128), P2/S, IN PROGRESS (local branch `feat/issue-128-rate-limit-timeout`): evaluate verified rate-limit duration using protected-base policy and explicit evaluation time. Preserve blocking findings, stale evidence, and active rate limits, keeping optional `rateLimitedAt` fields additive and backward-compatible.
-
-Repository reviewer-ID verification is complete in PR #133. Each active implementation track uses a separate branch from `fa14a2db37dfea567bfdc7d7cce913ea13aef146` and targets `main` directly with disjoint file ownership.
+- Priority: P2. Effort: XS. Readiness: ready, implementation in progress on an isolated branch from this main revision.
+- Reason: The live reviewer emits numbered subsection findings that the existing parser omits. Verdict heading support is merged, so this is the next bounded correctness fix.
+- First action: Reproduce the captured subsection format with a failing fixture test, then preserve findings and section boundaries.
+- Done: Supported subsection findings retain severity and blocking behavior, unrelated sections stay excluded, and repository tests, coverage and review gates pass.
+- Unblocks: More accurate advisory validation in [#73](https://github.com/gordonpn/merge-verdict/issues/73).
 
 ## NEXT
 
-1. [#127: Live validation of credential-backed PR-Agent and DeepSeek Review execution](https://github.com/gordonpn/merge-verdict/issues/127), P2/S: verify `deepseek-review.yml` and `pr-agent.yml` with `ENABLE_*` variables and `DEEPSEEK_API_KEY`, exercise slash commands (`/review`, `/describe`, `/improve`, `/ask`), and reconcile hard credential checks.
-2. [#78: Optional reviewer origin validation](https://github.com/gordonpn/merge-verdict/issues/78), P2/S: static guard inspection is recorded in [docs/reviewer-workflow-validation.md](docs/reviewer-workflow-validation.md) (PR #124) and gating landed in PR #120; live origin, cancellation, and fork trust-boundary trials remain pending.
-3. [#26: Remaining normalizer boundary support](https://github.com/gordonpn/merge-verdict/issues/26), P2/S: unblocked after PRs #121 and #122; cover multiline diff ranges, deleted or renamed files, and file-level comments without line numbers in `tests/normalizers/boundaries.test.ts`.
-4. [#57: Issue-link product decisions](https://github.com/gordonpn/merge-verdict/issues/57), P1/S: enforcement is wired (`require_issue_links: true`); issue existence, PR targets, repository restrictions, and exemptions need explicit decisions before finalizing.
-5. [#94: Dependency and runtime compatibility](https://github.com/gordonpn/merge-verdict/issues/94) and [#93: Strict coverage gate rollout](https://github.com/gordonpn/merge-verdict/issues/93), P2/XS: minimum-Node bundle verification, Node 22.12 type declarations, and contributor toolchain alignment landed in PR #125. Hosted Action reporting, PR-origin compatibility, and branch-protection/Codecov baseline enforcement trials remain open.
+1. [#150: Clarify timeout fingerprint visibility](https://github.com/gordonpn/merge-verdict/issues/150), P2/XS, ready and in progress independently: verify time-dependent policy evaluation against unchanged evidence fingerprints, document refresh requirements, and correct the regex comment. Do not add speculative storage or timers.
+2. [#156: Align Biome schema with the locked CLI](https://github.com/gordonpn/merge-verdict/issues/156), P3/XS, ready and in progress independently: remove the reproducible schema-version diagnostic without changing dependencies or lint rules.
+3. [#73: Complete manual advisory validation](https://github.com/gordonpn/merge-verdict/issues/73), P1/M, remaining live evidence: FAIL reports are captured, but clean PASS, repeat owned-run updates, invalid-input behavior and sanitized evidence still need a coherent acceptance record. Do not treat successful runner jobs as a passing policy verdict.
+4. [#148: PR-Agent format and producer-state hardening](https://github.com/gordonpn/merge-verdict/issues/148), priority and effort need bounded classification: first investigate persistent ACTIVE findings referring to removed code or superseded issue scope. Specify producer lifecycle and provenance before changing normalization; do not delete findings or weaken the merge gate.
+5. [#151: Codex comment/fence ordering and malformed HTML contract](https://github.com/gordonpn/merge-verdict/issues/151), P3/XS, investigation ready: define canonical recovery behavior before implementing another parser change. Existing strict-stack recovery intentionally fails closed.
 
 ## Parallel work and blockers
 
-- Independent implementation tracks: `#126`, `#131`, and `#128`. Additional decision work can proceed for `#57` and the remaining `#26` range/rename contract. Hosted reviewer validation in `#127` and `#78` can collect evidence alongside these changes without expanding their code scope.
-- Credential-gated trials: `#73` live PASS, `#127`, and `#78` live runs require configured repository opt-in variables and `DEEPSEEK_API_KEY` without exposing secrets to fork code.
-- After `#73`: `#74` automatic refresh needs race, ownership, cancellation, and fork evidence; `#75` additionally needs a maintainer-selected target repository and remote Action distribution.
-- [#93](https://github.com/gordonpn/merge-verdict/issues/93) and [#76](https://github.com/gordonpn/merge-verdict/issues/76): hosted enforcement trials and branch-protection changes require explicit rollout gates; passing local coverage is insufficient.
-- [#13](https://github.com/gordonpn/merge-verdict/issues/13) and [#14](https://github.com/gordonpn/merge-verdict/issues/14) retain distribution and approval lifecycle scope; the first advisory run does not complete those issues.
+- Independent implementation: #155, #150 and #156 use separate branches from this main revision and target main directly. No stacked PRs or shared implementation files are required.
+- Independent investigation: #148 producer-state lifecycle, #151 parsing contract, and [#57](https://github.com/gordonpn/merge-verdict/issues/57) issue-link product decisions can proceed without widening those implementation PRs.
+- [#154](https://github.com/gordonpn/merge-verdict/pull/154) covers bounded automatic trigger wiring for [#74](https://github.com/gordonpn/merge-verdict/issues/74). Hold rollout claims pending live race, fork-isolation, obsolete-publication and recovery evidence. Fork-review routing and thread-only refresh remain deferred; cancellation stays disabled.
+- [#26](https://github.com/gordonpn/merge-verdict/issues/26) needs a range/rename metadata contract and explicit coverage verification. Its complete acceptance criteria are broader than adding a few boundary tests.
+- [#127](https://github.com/gordonpn/merge-verdict/issues/127) and [#78](https://github.com/gordonpn/merge-verdict/issues/78) retain credential-backed origin and cancellation trials. Prior successful reviewer jobs do not complete the whole event matrix.
+- [#75](https://github.com/gordonpn/merge-verdict/issues/75) requires a maintainer-selected target repository and reconciliation of its old Node 22 distribution requirement with the merged Node 24 baseline before installation work.
+- [#94](https://github.com/gordonpn/merge-verdict/issues/94), [#93](https://github.com/gordonpn/merge-verdict/issues/93), and [#76](https://github.com/gordonpn/merge-verdict/issues/76) retain hosted compatibility, coverage-enforcement and production-gate acceptance. No branch-protection or approval rollout is implied by local tests.
 
 ## LATER
 
-See the [advisory rollout epic](https://github.com/gordonpn/merge-verdict/issues/71) and [open GitHub backlog](https://github.com/gordonpn/merge-verdict/issues?q=is%3Aissue+is%3Aopen) for deferred App identity (`#4`), configurable approvals (`#36`), webhook relay (`#5`, `#29`, `#30`), semantic LLM escalation (`#6`, `#31`), and evidence specification (`#38`, `#39`) work. Recorded reactivation conditions remain in force.
+See the [advisory rollout epic](https://github.com/gordonpn/merge-verdict/issues/71) and [open GitHub backlog](https://github.com/gordonpn/merge-verdict/issues?q=is%3Aissue+is%3Aopen). App identity, webhook relay, configurable approvals, semantic escalation and evidence-specification work retain their existing reactivation conditions.
