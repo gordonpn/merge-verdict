@@ -67,6 +67,27 @@ jobs:
             exit 1
           fi
 
+      - name: Capture review target metadata
+        id: target_meta
+        if: github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          HEAD_SHA="${PR_HEAD_SHA:-}"
+          if [ -z "${HEAD_SHA}" ]; then
+            HEAD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          fi
+          if [ -z "${HEAD_SHA}" ]; then
+            echo "::error::Could not resolve PR head SHA before PR-Agent execution."
+            exit 1
+          fi
+          {
+            echo "head_sha=$(printf '%s' "${HEAD_SHA}" | tr '[:upper:]' '[:lower:]')"
+            echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: PR Agent Action
         id: pr_agent
         if: github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true'
@@ -91,15 +112,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ steps.target_meta.outputs.head_sha }}
+          STARTED_AT: ${{ steps.target_meta.outputs.started_at }}
         run: |
-          HEAD_SHA="${PR_HEAD_SHA:-}"
-          if [ -z "${HEAD_SHA}" ]; then
-            HEAD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
-          fi
-          HEAD_SHA="$(printf '%s' "${HEAD_SHA}" | tr '[:upper:]' '[:lower:]')"
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-            | jq -c -s --arg sha "${HEAD_SHA}" --arg repo "${GITHUB_REPOSITORY}" '
+            | jq -c -s --arg sha "${HEAD_SHA}" --arg repo "${GITHUB_REPOSITORY}" --arg started_at "${STARTED_AT}" '
                 add
                 | map(select(
                     ((.user.login // "") | ascii_downcase) as $login
@@ -110,7 +127,7 @@ jobs:
                       or ((.body // "") | ascii_downcase | contains(("https://github.com/" + $repo + "/commit/" + $sha) | ascii_downcase))
                     )
                   ))
-                | sort_by([(.updated_at // .created_at), .id])
+                | sort_by([((.updated_at // .created_at) >= $started_at), (.updated_at // .created_at), .id])
                 | last // empty
               ' > "${RUNNER_TEMP}/pr-agent-comment.json"
           if [ ! -s "${RUNNER_TEMP}/pr-agent-comment.json" ]; then
