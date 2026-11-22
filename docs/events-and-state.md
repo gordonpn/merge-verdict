@@ -18,7 +18,6 @@ The following events are directly supported by GitHub Actions workflows and will
 | PR conversation comment created, edited, deleted | `issue_comment: [created, edited, deleted]`                                      | Captures bot summary comments, deletions, and developer commands.                                                                                                                                        |
 | External CI check run completed                  | `check_run: [completed]`                                                         | Fires when third-party GitHub Apps (e.g. CodeRabbit, Sourcery) complete a check run.                                                                                                                     |
 | CI workflow completed                            | `workflow_run: [completed]`                                                      | Fires when parent `GITHUB_TOKEN` Actions workflows (CI, Coverage, CodeQL, DeepSeek, PR-Agent) finish.                                                                                                    |
-| Merge queue checks requested                     | `merge_group: [checks_requested]`                                                | Evaluates the synthetic merge commit SHA for the queued merge group.                                                                                                                                     |
 | Manual or dispatch trigger                       | `workflow_dispatch`, `repository_dispatch`                                       | Enables manual re-verification or bridge-initiated verification.                                                                                                                                         |
 
 ### 1.2. The Thread-Resolution Gap: `pull_request_review_thread`
@@ -126,11 +125,11 @@ To eliminate this window:
 
 ### 3.5. Synthetic Merge Commits and Merge Queues
 
-When repositories adopt GitHub Merge Queues:
+Merge queue execution is not implemented by the current workflow. The following describes the required integration before adopting GitHub Merge Queues:
 
 - GitHub evaluates pull requests by generating a synthetic test-merge commit (`refs/pull/{number}/merge` or temporary queue ref) combining the PR branch with current `main`.
 - Workflows triggered by `merge_group` evaluate this synthetic merge commit SHA rather than the PR branch head SHA.
-- Merge Verdict binds its snapshot verification and status check to the corresponding target SHA (PR head SHA for standard pull requests, merge queue SHA for `merge_group` executions).
+- The integration must bind snapshot verification and status publication to the synthetic merge group SHA rather than the PR head SHA. Adding a trigger alone does not provide this contract.
 
 ## 4. State Transitions and Verdict Lifecycle
 
