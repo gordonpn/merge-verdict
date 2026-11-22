@@ -87,6 +87,7 @@ Unknown diagnostic wording remains `FAILED` until its meaning is verified.
   - In `.github/workflows/deepseek-review.yml`, DeepSeek Review is opt-in (`vars.ENABLE_DEEPSEEK_REVIEW == 'true'`) and triggers on `pull_request` (`opened`, `ready_for_review`, and `synchronize` for non-draft same-repository non-bot PRs) and on open-PR `issue_comment` (`created`, `edited`) `/review` requests from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts targeting non-draft same-repository non-bot PRs. When enabled, eligible runs validate `DEEPSEEK_API_KEY` and fail explicitly if it is missing, empty, or whitespace-only.
 - **Merge Verdict Policy Rule**:
   - The adapter extracts the commit SHA associated with the review (`review.commit_id`).
+  - Material findings support bullets, numbered lists, and numbered level-three subsections within the material findings section. Subsection descriptions retain their supporting text and nested bullets. Parsing stops at sibling sections or non-finding level-three headings. Finding severity and blocking state follow the overall verdict.
   - It parses the Markdown heading `## Verdict:` to extract the decision.
   - If the review commit does not match the latest head commit, or if the verdict is `REQUEST CHANGES` or `BLOCK`, verification fails.
 
