@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { GitHubConversationComment } from "../collector/github-collector.js";
 import type { NormalizedFinding } from "../models/finding.js";
 import type { ReviewerExecutionRecord, ReviewerStatus } from "../models/reviewer.js";
+import { canonicalizeCommitSha } from "../models/snapshot.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
 import { stripMarkdownPunctuation } from "./utils.js";
 
@@ -11,7 +12,13 @@ const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
 const STATE_MARKER = "<!-- pr-agent-review-state:v1";
 const StateSchema = z.object({
   schema_version: z.literal(1),
-  last_run: z.object({ head_sha: z.string().regex(/^[a-f0-9]{40}$/i), complete: z.boolean() }),
+  last_run: z.object({
+    head_sha: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/i)
+      .transform((sha) => canonicalizeCommitSha(sha)),
+    complete: z.boolean(),
+  }),
   findings: z.array(
     z.object({
       finding_id: z.string().min(1),
@@ -23,17 +30,110 @@ const StateSchema = z.object({
   ),
 });
 
-function parseState(body: string): z.infer<typeof StateSchema> | undefined {
+interface StateCommentSpan {
+  readonly start: number;
+  readonly commentEnd: number | undefined;
+  readonly state: z.infer<typeof StateSchema> | undefined;
+}
+
+interface AnalyzedPrAgentComment {
+  readonly comment: GitHubConversationComment;
+  readonly body: string;
+  readonly stateSpan: StateCommentSpan | undefined;
+  readonly state: z.infer<typeof StateSchema> | undefined;
+  readonly sha: string | undefined;
+  readonly fresh: boolean;
+}
+
+function skipAsciiWhitespace(text: string, index: number): number {
+  let cursor = index;
+  while (cursor < text.length && /\s/.test(text[cursor] ?? "")) {
+    cursor++;
+  }
+  return cursor;
+}
+
+function scanJsonObjectEnd(
+  text: string,
+  jsonStart: number,
+): { readonly jsonEnd?: number; readonly fallbackEnd?: number } {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = jsonStart; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return { jsonEnd: i + 1 };
+      }
+    } else if (text.startsWith("-->", i)) {
+      return { fallbackEnd: i + 3 };
+    }
+  }
+
+  return {};
+}
+
+function scanStateComment(body: string): StateCommentSpan | undefined {
   const start = body.indexOf(STATE_MARKER);
   if (start < 0) return undefined;
-  const end = body.indexOf("-->", start + STATE_MARKER.length);
-  if (end < 0) return undefined;
+  const cursor = skipAsciiWhitespace(body, start + STATE_MARKER.length);
+  if (body[cursor] !== "{") {
+    const closeIndex = body.indexOf("-->", cursor);
+    return {
+      start,
+      commentEnd: closeIndex >= 0 ? closeIndex + 3 : undefined,
+      state: undefined,
+    };
+  }
+
+  const { jsonEnd, fallbackEnd } = scanJsonObjectEnd(body, cursor);
+  if (jsonEnd === undefined) {
+    return { start, commentEnd: fallbackEnd, state: undefined };
+  }
+
+  const afterJson = skipAsciiWhitespace(body, jsonEnd);
+  if (!body.startsWith("-->", afterJson)) {
+    const closeIndex = body.indexOf("-->", afterJson);
+    return {
+      start,
+      commentEnd: closeIndex >= 0 ? closeIndex + 3 : undefined,
+      state: undefined,
+    };
+  }
+
   try {
-    const value: unknown = JSON.parse(body.slice(start + STATE_MARKER.length, end));
+    const value: unknown = JSON.parse(body.slice(cursor, jsonEnd));
     const parsed = StateSchema.safeParse(value);
-    return parsed.success ? parsed.data : undefined;
+    return {
+      start,
+      commentEnd: afterJson + 3,
+      state: parsed.success ? parsed.data : undefined,
+    };
   } catch {
-    return undefined;
+    return {
+      start,
+      commentEnd: afterJson + 3,
+      state: undefined,
+    };
   }
 }
 
@@ -51,49 +151,112 @@ function extractListItemText(line: string): string | undefined {
   return undefined;
 }
 
-function ticketFindings(body: string, commentId: number): NormalizedFinding[] {
+function ticketFindings(
+  body: string,
+  commentId: number,
+  stateSpan: StateCommentSpan | undefined,
+): NormalizedFinding[] {
   // State JSON is a separate artifact, not visible ticket-compliance Markdown.
-  const stateStart = body.indexOf(STATE_MARKER);
-  const stateEnd = stateStart < 0 ? -1 : body.indexOf("-->", stateStart + STATE_MARKER.length);
   const markdown =
-    stateStart < 0
+    stateSpan === undefined
       ? body
-      : body.slice(0, stateStart) + (stateEnd < 0 ? "" : body.slice(stateEnd + 3));
-  const section = markdown.split(/Ticket compliance analysis/i)[1]?.split(/<\/td>|\n## /)[0];
+      : body.slice(0, stateSpan.start) +
+        (stateSpan.commentEnd === undefined ? "" : body.slice(stateSpan.commentEnd));
+  const afterHeading = markdown.split(/Ticket compliance analysis/i)[1];
+  if (!afterHeading) return [];
+  const section = afterHeading.split(/<\/td\s*>|<\/table\s*>|\r?\n[ \t]*## /i)[0];
   if (!section) return [];
-  const findings: NormalizedFinding[] = [];
+
+  const items: string[] = [];
   let nonCompliant = false;
-  for (const line of section.split("\n")) {
+  let inItem = false;
+
+  for (const line of section.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      inItem = false;
+      continue;
+    }
+
     const clean = stripMarkdownPunctuation(line).trim();
     if (/^Non-compliant requirements:?$/i.test(clean)) {
       nonCompliant = true;
+      inItem = false;
       continue;
     }
-    const text = extractListItemText(line);
-    if (
-      /^(?:Compliant requirements|Requires further human verification)/i.test(clean) ||
-      (text === undefined && clean.startsWith("["))
-    ) {
+    if (/^(?:Compliant requirements|Requires further human verification)\b:?/i.test(clean)) {
       nonCompliant = false;
+      inItem = false;
       continue;
     }
-    if (!nonCompliant || !text || /^(?:none\.?|n\/a)$/i.test(text)) continue;
-    findings.push({
-      id: `pr-agent-${commentId}-ticket-${findings.length + 1}`,
-      reviewerId: "pr-agent",
-      title: text.slice(0, 120),
-      description: text,
-      severity: "HIGH",
-      isBlocking: true,
-      isResolved: false,
-    });
+
+    const text = extractListItemText(line);
+    if (text !== undefined) {
+      if (!nonCompliant || /^(?:none\.?|n\/a)$/i.test(text)) {
+        inItem = false;
+        continue;
+      }
+      items.push(text);
+      inItem = true;
+      continue;
+    }
+
+    const isTicketHeading =
+      trimmed.startsWith("**[") ||
+      /^#{1,6}\s+\[/.test(trimmed) ||
+      /^\[[^\]]+\]\([^)]+\)\s*[-:]\s*(?:PR Code Verified|Partially compliant|Not compliant|Compliant)/i.test(
+        clean,
+      ) ||
+      (!inItem && clean.startsWith("["));
+    if (isTicketHeading) {
+      nonCompliant = false;
+      inItem = false;
+      continue;
+    }
+
+    if (nonCompliant && inItem) {
+      const lastIndex = items.length - 1;
+      if (lastIndex >= 0) {
+        items[lastIndex] = `${items[lastIndex]} ${trimmed}`;
+      }
+    }
   }
-  return findings;
+
+  return items.map((description, index) => ({
+    id: `pr-agent-${commentId}-ticket-${index + 1}`,
+    reviewerId: "pr-agent",
+    title: description.slice(0, 120),
+    description,
+    severity: "HIGH",
+    isBlocking: true,
+    isResolved: false,
+  }));
 }
 
 function commentTime(comment: GitHubConversationComment): number {
   const parsed = Date.parse(comment.updatedAt ?? comment.createdAt);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function analyzeComment(
+  comment: GitHubConversationComment,
+  repository: string | undefined,
+  normalizedHeadSha: string,
+): AnalyzedPrAgentComment {
+  const body = comment.body ?? "";
+  const stateSpan = scanStateComment(body);
+  const state = stateSpan?.state;
+  const header = body.match(
+    /Review updated until commit\s+https:\/\/github\.com\/([^\s/]+\/[^\s/]+)\/commit\/([a-f0-9]{40})\b/i,
+  );
+  const headerSha =
+    header?.[1] && repository && header[1].toLowerCase() === repository.toLowerCase()
+      ? canonicalizeCommitSha(header[2] ?? "")
+      : undefined;
+  const sha = body.includes(STATE_MARKER) ? state?.last_run.head_sha : headerSha;
+  const fresh = sha !== undefined && sha === normalizedHeadSha;
+
+  return { comment, body, stateSpan, state, sha, fresh };
 }
 
 /**
@@ -103,32 +266,32 @@ function commentTime(comment: GitHubConversationComment): number {
  * @returns Normalized reviewer execution record for PR-Agent.
  */
 export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecutionRecord {
-  const comment = input.conversationComments
-    ?.filter(
+  const normalizedHeadSha = canonicalizeCommitSha(input.headSha);
+  const candidates = (input.conversationComments ?? [])
+    .filter(
       (c) =>
         c.authorLogin !== null &&
         PR_AGENT_LOGINS.has(c.authorLogin.toLowerCase()) &&
         (c.body?.includes(REVIEW_MARKER) || c.body?.includes(STATE_MARKER)),
     )
-    .sort((a, b) => commentTime(b) - commentTime(a) || b.id - a.id)[0];
+    .sort((a, b) => commentTime(b) - commentTime(a) || b.id - a.id)
+    .map((c) => analyzeComment(c, input.repository, normalizedHeadSha));
+
+  const selected = candidates.find((c) => c.fresh) ?? candidates[0];
+  const comment = selected?.comment;
+  const body = selected?.body ?? "";
+  const stateSpan = selected?.stateSpan;
+  const state = selected?.state;
+  const sha = selected?.sha;
+  const fresh = selected?.fresh ?? false;
+  const isStaleComment = sha !== undefined && !fresh;
+
   const check = input.checkRuns
     ?.filter((c) => PR_AGENT_CHECK_NAMES.has(c.name.toLowerCase()))
     .sort((a, b) => b.id - a.id)[0];
-  const body = comment?.body ?? "";
-  const state = parseState(body);
-  const header = body.match(
-    /Review updated until commit\s+https:\/\/github\.com\/([^\s/]+\/[^\s/]+)\/commit\/([a-f0-9]{40})\b/i,
-  );
-  const headerSha =
-    header?.[1] && input.repository && header[1].toLowerCase() === input.repository.toLowerCase()
-      ? header[2]
-      : undefined;
-  const sha = body.includes(STATE_MARKER) ? state?.last_run.head_sha : headerSha;
-  const normalizedHeadSha = input.headSha.toLowerCase();
-  const fresh = sha !== undefined && sha.toLowerCase() === normalizedHeadSha;
-  const isStaleComment = sha !== undefined && !fresh;
+
   const findings: NormalizedFinding[] =
-    comment && !isStaleComment ? ticketFindings(body, comment.id) : [];
+    comment && !isStaleComment ? ticketFindings(body, comment.id, stateSpan) : [];
   if (!isStaleComment) {
     for (const finding of state?.findings ?? []) {
       const normalizedState = finding.state.toUpperCase();
@@ -150,13 +313,14 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
       });
     }
   }
+
   let status: ReviewerStatus = sha ? (fresh ? "COMPLETED" : "STALE") : "PENDING";
   let evaluatedCommitSha = sha ?? null;
   if (fresh && state?.last_run.complete === false) status = "PENDING";
   const checkMatchesHead =
-    check !== undefined && check.commitSha.toLowerCase() === normalizedHeadSha;
+    check !== undefined && canonicalizeCommitSha(check.commitSha) === normalizedHeadSha;
   if (check && !isStaleComment && (!fresh || checkMatchesHead)) {
-    evaluatedCommitSha = check.commitSha;
+    evaluatedCommitSha = canonicalizeCommitSha(check.commitSha);
     if (!checkMatchesHead) status = "STALE";
     else if (check.status !== "completed") status = "PENDING";
     else if (!["success", "neutral", "skipped"].includes(check.conclusion ?? "")) status = "FAILED";
@@ -166,12 +330,15 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
       if (comment) evaluatedCommitSha = null;
     }
   }
+
   return {
     reviewerId: "pr-agent",
     reviewerName: "PR-Agent",
     status,
     evaluatedCommitSha,
-    isFresh: evaluatedCommitSha !== null && evaluatedCommitSha.toLowerCase() === normalizedHeadSha,
+    isFresh:
+      evaluatedCommitSha !== null &&
+      canonicalizeCommitSha(evaluatedCommitSha) === normalizedHeadSha,
     verdict:
       status === "STALE"
         ? "NONE"
