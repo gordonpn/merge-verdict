@@ -316,6 +316,61 @@ None.`,
 
     expect(prefixWordHeading.status).toBe("PENDING");
     expect(prefixWordHeading.verdict).toBe("NONE");
+
+    const proseAfterHeadingWithKeywords = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 517,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:07:00Z",
+          body: "## Verdict\n\nPlease do not block this PR; see request changes notes below.",
+          bodyDigest: "d17",
+        },
+      ],
+    });
+
+    expect(proseAfterHeadingWithKeywords.status).toBe("COMPLETED");
+    expect(proseAfterHeadingWithKeywords.verdict).toBe("COMMENTED");
+
+    const singleLineRequestChanges = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 518,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:08:00Z",
+          body: "## Verdict **REQUEST CHANGES**\r\n\r\n### Material Findings\r\n* Fix guard.",
+          bodyDigest: "d18",
+        },
+      ],
+    });
+
+    expect(singleLineRequestChanges.status).toBe("COMPLETED");
+    expect(singleLineRequestChanges.verdict).toBe("CHANGES_REQUESTED");
+
+    const crlfMultilineBlock = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 519,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:09:00Z",
+          body: "## Verdict:\r\n\r\n**BLOCK**\r\n\r\n### Material Findings\r\n* Unsafe boundary.",
+          bodyDigest: "d19",
+        },
+      ],
+    });
+
+    expect(crlfMultilineBlock.status).toBe("COMPLETED");
+    expect(crlfMultilineBlock.verdict).toBe("CHANGES_REQUESTED");
+    expect(crlfMultilineBlock.findings[0]?.severity).toBe("BLOCKER");
   });
 
   it("parses BLOCK verdict with BLOCKER severity", () => {

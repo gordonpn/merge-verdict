@@ -19,7 +19,7 @@ const DEEPSEEK_CHECK_NAMES = new Set([
 // Avoid /g on module-level patterns; selection and extraction stay stateless.
 const VERDICT_HEADING_PRESENT =
   /##\s*Verdict\b(?::|[ \t]*(?:\r?\n|$)|[ \t]+[*_`~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)\b)/i;
-// Extract only the heading line or first non-empty line after it so prose never supplies a verdict.
+// Extract the heading line or first non-empty line; extractRawVerdict only accepts start-anchored verdict tokens.
 const VERDICT_HEADING_VALUE = /##\s*Verdict\b:?[ \t]*(?:\r?\n[ \t]*)*([^\n\r]+)/i;
 
 function isDeepSeekAuthor(login: string | null): boolean {
@@ -32,10 +32,10 @@ function extractRawVerdict(body: string): RawVerdict | null {
     return null;
   }
   const clean = stripMarkdownPunctuation(match[1].replaceAll("_", " ")).toUpperCase();
-  if (/\bBLOCK\b/.test(clean)) {
+  if (/^BLOCK\b/.test(clean)) {
     return "BLOCK";
   }
-  if (/\bREQUEST CHANGES\b/.test(clean)) {
+  if (/^REQUEST CHANGES\b/.test(clean)) {
     return "REQUEST CHANGES";
   }
   if (/^APPROVE WITH MINOR FINDINGS\b/.test(clean)) {
