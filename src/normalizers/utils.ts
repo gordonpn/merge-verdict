@@ -47,7 +47,7 @@ export function rateLimitCheckTimestamp(
     return undefined;
   }
   const output = [checkRun.output.title, checkRun.output.summary, checkRun.output.text].join(" ");
-  // Match from the start without changing caller-owned global or sticky regex state.
+  // Reset lastIndex without changing caller-owned global or sticky regex state.
   return patterns.some((pattern) => new RegExp(pattern.source, pattern.flags).test(output))
     ? parseIsoTimestamp(checkRun.completedAt)
     : undefined;
