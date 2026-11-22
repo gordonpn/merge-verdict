@@ -4,6 +4,8 @@ Repository: [gordonpn/merge-verdict](https://github.com/gordonpn/merge-verdict)
 
 Snapshot: 2026-11-22 UTC, main at `575d24b`. GitHub Issues remain authoritative. The scan found 29 open issues and one open PR, [#154](https://github.com/gordonpn/merge-verdict/pull/154). PRs #144, #149 and #153 are merged. This is a dated snapshot; later changes require a fresh query.
 
+Delivery after that initial scan: [#161](https://github.com/gordonpn/merge-verdict/pull/161) implements #155, [#160](https://github.com/gordonpn/merge-verdict/pull/160) addresses #150, and [#158](https://github.com/gordonpn/merge-verdict/pull/158) addresses #156. They remain pending human review and merge; the issue list below is a subset of the backlog at the initial checkpoint.
+
 ## NOW
 
 ### [#155: Parse subsection findings under DeepSeek Material Findings](https://github.com/gordonpn/merge-verdict/issues/155)
