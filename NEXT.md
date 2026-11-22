@@ -34,4 +34,6 @@ Snapshot: 2026-11-22 UTC, main at `575d24b`. GitHub Issues remain authoritative.
 
 ## LATER
 
+The DeepSeek subsection implementation discovered existing fenced-heading and description-fidelity limits, tracked separately in [#162](https://github.com/gordonpn/merge-verdict/issues/162). Do not expand the observed-format fix to implement a general Markdown parser.
+
 See the [advisory rollout epic](https://github.com/gordonpn/merge-verdict/issues/71) and [open GitHub backlog](https://github.com/gordonpn/merge-verdict/issues?q=is%3Aissue+is%3Aopen). App identity, webhook relay, configurable approvals, semantic escalation and evidence-specification work retain their existing reactivation conditions.
