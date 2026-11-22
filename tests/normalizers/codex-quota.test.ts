@@ -97,6 +97,14 @@ describe("Codex quota provenance", () => {
       "removed code without a surrounding blank line",
       `${failedState}\nDiagnostic context:\n\`\`\`text\nexample\n\`\`\`\n${quotaNotice}`,
     ],
+    [
+      "fenced code containing an unclosed HTML tag",
+      `${failedState}\n\`\`\`html\n<blockquote>example\n\`\`\`\n${quotaNotice}`,
+    ],
+    [
+      "self-closing and stray closing excluded HTML tags",
+      `${failedState}\n<code/></blockquote>\n\n${quotaNotice}`,
+    ],
   ])("recognizes an explicit quota diagnostic after %s", (_kind, body) => {
     const result = normalizeCodexReviewer({ headSha, conversationComments: [comment(body)] });
 
@@ -146,6 +154,18 @@ describe("Codex quota provenance", () => {
     [
       "nested HTML pre inside blockquote",
       "<blockquote><pre>Earlier run</pre>\n\nYou have reached your Codex usage limits for code reviews.\n</blockquote>",
+    ],
+    [
+      "misnested HTML closing tag inside blockquote",
+      "<blockquote><pre>Earlier run</blockquote>\n\nYou have reached your Codex usage limits for code reviews.",
+    ],
+    [
+      "unclosed HTML pre block",
+      "<pre>\nYou have reached your Codex usage limits for code reviews.",
+    ],
+    [
+      "self-closing HTML tag inside excluded pre block",
+      "<pre><code/>\nYou have reached your Codex usage limits for code reviews.\n</pre>",
     ],
     ["HTML comment", "<!--\nYou have reached your Codex usage limits for code reviews.\n-->"],
     [

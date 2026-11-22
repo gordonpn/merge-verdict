@@ -32,6 +32,33 @@ function isCodexAuthor(login: string | null): boolean {
   return login !== null && CODEX_LOGINS.has(login.toLowerCase());
 }
 
+function stripFencedCodeBlocks(text: string): string {
+  const lines: string[] = [];
+  let fence = "";
+  for (const line of text.split("\n")) {
+    const delimiter = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      const closingDelimiter = /^ {0,3}(`{3,}|~{3,})[ \t\r]*$/.exec(line)?.[1];
+      if (
+        closingDelimiter &&
+        closingDelimiter[0] === fence[0] &&
+        closingDelimiter.length >= fence.length
+      ) {
+        fence = "";
+        // Preserve paragraph separation between prose before and after a removed fence.
+        lines.push("");
+      }
+      continue;
+    }
+    if (delimiter) {
+      fence = delimiter;
+      continue;
+    }
+    lines.push(line);
+  }
+  return lines.join("\n");
+}
+
 function stripExcludedHtmlElements(text: string): string {
   const tagPattern = /<(\/?)(pre|code|blockquote)\b[^>]*>/gi;
   const stack: string[] = [];
@@ -44,6 +71,13 @@ function stripExcludedHtmlElements(text: string): string {
     const tagName = (match[2] ?? "").toLowerCase();
 
     if (!isClosing) {
+      if (/\/\s*>$/.test(match[0])) {
+        if (stack.length === 0) {
+          output += text.slice(cursor, index);
+          cursor = index + match[0].length;
+        }
+        continue;
+      }
       if (stack.length === 0) {
         output += text.slice(cursor, index);
       }
@@ -51,19 +85,15 @@ function stripExcludedHtmlElements(text: string): string {
       continue;
     }
 
-    if (stack.length === 0) {
-      continue;
-    }
-    const openIndex = stack.lastIndexOf(tagName);
-    if (openIndex === -1) {
-      continue;
-    }
-    stack.length = openIndex;
-    if (stack.length === 0) {
-      cursor = index + match[0].length;
+    if (stack.at(-1) === tagName) {
+      stack.pop();
+      if (stack.length === 0) {
+        cursor = index + match[0].length;
+      }
     }
   }
 
+  // Unterminated excluded tags intentionally discard trailing text to EOF.
   if (stack.length === 0) {
     output += text.slice(cursor);
   }
@@ -71,33 +101,10 @@ function stripExcludedHtmlElements(text: string): string {
 }
 
 function hasCodexQuotaDiagnostic(body: string): boolean {
-  // State JSON, quoted history and code examples are not current diagnostics.
-  const prose = stripExcludedHtmlElements(body.replace(/<!--[\s\S]*?(?:-->|$)/g, ""));
-  const lines: string[] = [];
-  let fence = "";
-  for (const line of prose.split("\n")) {
-    const delimiter = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (fence) {
-      const closingDelimiter = /^ {0,3}(`{3,}|~{3,})[ \t\r]*$/.exec(line)?.[1];
-      if (
-        closingDelimiter &&
-        closingDelimiter[0] === fence[0] &&
-        closingDelimiter.length >= fence.length
-      ) {
-        fence = "";
-        // A CommonMark closing fence terminates the block cleanly between paragraphs.
-        lines.push("");
-      }
-      continue;
-    }
-    if (delimiter) {
-      fence = delimiter;
-      continue;
-    }
-    lines.push(line);
-  }
-  return lines
-    .join("\n")
+  // Strip fenced examples before HTML tags/comments so tag-like code examples never swallow prose.
+  const withoutFences = stripFencedCodeBlocks(body);
+  const prose = stripExcludedHtmlElements(withoutFences.replace(/<!--[\s\S]*?(?:-->|$)/g, ""));
+  return prose
     .split(/\n[ \t]*\n/)
     .map((paragraph) => paragraph.replace(/^(?:[ \t\r]*\n)+/, ""))
     .some((paragraph) =>
