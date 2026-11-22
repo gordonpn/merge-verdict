@@ -461,6 +461,18 @@ describe("isSelfTriggeredEvent loop prevention", () => {
         },
       }).skipped,
     ).toBe(true);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "github-actions[bot]",
+        payload: {
+          action: "deleted",
+          sender: { login: "github-actions[bot]" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(true);
   });
 
   it("skips check_run events for the merge-verdict check run", () => {
@@ -473,6 +485,27 @@ describe("isSelfTriggeredEvent loop prevention", () => {
     });
     expect(result.skipped).toBe(true);
     expect(result.reason).toContain("merge-verdict");
+  });
+
+  it("skips workflow_run events for merge-verdict while allowing parent CI workflows", () => {
+    const selfRun = isSelfTriggeredEvent({
+      eventName: "workflow_run",
+      actor: "octocat",
+      payload: {
+        workflow_run: { name: "merge-verdict" },
+      },
+    });
+    expect(selfRun.skipped).toBe(true);
+    expect(selfRun.reason).toContain("merge-verdict");
+
+    const parentCiRun = isSelfTriggeredEvent({
+      eventName: "workflow_run",
+      actor: "octocat",
+      payload: {
+        workflow_run: { name: "ci" },
+      },
+    });
+    expect(parentCiRun.skipped).toBe(false);
   });
 
   it("allows human-triggered workflow_dispatch and third-party check_run events", () => {

@@ -225,6 +225,17 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
     }
   }
 
+  if (eventName === "workflow_run") {
+    const workflowRun = asRecord(payload?.workflow_run);
+    const workflowName = typeof workflowRun?.name === "string" ? workflowRun.name.trim() : "";
+    if (workflowName.toLowerCase() === "merge-verdict") {
+      return {
+        skipped: true,
+        reason: `Ignored workflow_run event for self workflow "${workflowName}".`,
+      };
+    }
+  }
+
   if (eventName === "pull_request_review") {
     const reviewLogin = getNestedString(asRecord(payload?.review), "user", "login");
     if (isSelfBotLogin(reviewLogin)) {

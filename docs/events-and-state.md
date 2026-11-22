@@ -45,18 +45,21 @@ Without concurrency protection, this generates 11 concurrent workflow executions
 
 ### 2.1. Actions Concurrency Groups
 
-Merge Verdict serializes evaluations per pull request in workflow concurrency groups:
+Merge Verdict serializes evaluations per pull request in a job-level concurrency group:
 
 ```yaml
-concurrency:
-  group: merge-verdict-${{ inputs.pull_request_number || github.event.pull_request.number || github.event.issue.number || github.event.check_run.pull_requests[0].number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
-  cancel-in-progress: false
+jobs:
+  evaluate:
+    concurrency:
+      group: merge-verdict-${{ inputs.pull_request_number || github.event.pull_request.number || github.event.issue.number || github.event.check_run.pull_requests[0].number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+      cancel-in-progress: false
 ```
 
 **Behavior**:
 
 - Workflows are isolated per pull request.
-- During the advisory rollout (`cancel-in-progress: false`), incoming events queue behind any active run for the same PR so a fresh run evaluates once the active check publication finishes without mid-publication cancellation. Active cancellation (`cancel-in-progress: true`) requires live cancellation recovery validation first.
+- Because `concurrency` is scoped to `jobs.evaluate`, events rejected by `jobs.evaluate.if` (bot actors, fork review events, non-PR comments, self checks, and empty or multi-PR runs) are skipped before entering the concurrency group and cannot replace a pending refresh.
+- During the advisory rollout (`cancel-in-progress: false`), incoming eligible events queue behind any active run for the same PR so a fresh run evaluates once the active check publication finishes without mid-publication cancellation. Active cancellation (`cancel-in-progress: true`) requires live cancellation recovery validation first.
 
 ### 2.2. Self-Triggering Loop Prevention
 
