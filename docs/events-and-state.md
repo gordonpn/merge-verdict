@@ -10,16 +10,16 @@ However, GitHub Actions and GitHub Webhooks do not have identical event coverage
 
 The following events are directly supported by GitHub Actions workflows and will trigger the Merge Verdict verification workflow:
 
-| Lifecycle Event                                | Workflow Trigger Configuration                                    | Trigger Payload Details                                                             |
-| ---------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| PR opened, updated, reopened                   | `pull_request: [opened, synchronize, reopened, ready_for_review]` | Provides target `pull_request.head.sha`.                                            |
-| PR review submitted, edited, dismissed         | `pull_request_review: [submitted, edited, dismissed]`             | Contains reviewer identity, state (`APPROVED`, `CHANGES_REQUESTED`), and commit ID. |
-| Inline review comment created, edited, deleted | `pull_request_review_comment: [created, edited, deleted]`         | Contains comment body and diff position.                                            |
-| PR conversation comment created, edited        | `issue_comment: [created, edited]`                                | Captures bot summary comments and developer commands.                               |
-| External CI check run completed                | `check_run: [completed]`                                          | Fires when third-party tools (e.g. CodeRabbit, CodeQL) complete a check run.        |
-| CI workflow completed                          | `workflow_run: [completed]`                                       | Fires when a specific parent workflow (e.g. `ci.yml`) finishes.                     |
-| Merge queue checks requested                   | `merge_group: [checks_requested]`                                 | Evaluates the synthetic merge commit SHA for the queued merge group.                |
-| Manual or dispatch trigger                     | `workflow_dispatch`, `repository_dispatch`                        | Enables manual re-verification or bridge-initiated verification.                    |
+| Lifecycle Event                                  | Workflow Trigger Configuration                                                   | Trigger Payload Details                                                                                                                     |
+| ------------------------------------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR opened, updated, reopened, edited             | `pull_request_target: [opened, synchronize, reopened, ready_for_review, edited]` | Runs on the trusted default branch with `checks: write` and evaluates `pull_request.head.sha` via API.                                      |
+| PR review submitted, edited, dismissed           | `pull_request_review: [submitted, edited, dismissed]`                            | Contains reviewer identity, state (`APPROVED`, `CHANGES_REQUESTED`), and commit ID; always check out the trusted default branch explicitly. |
+| Inline review comment created, edited, deleted   | `pull_request_review_comment: [created, edited, deleted]`                        | Contains comment body and diff position; always check out the trusted default branch explicitly.                                            |
+| PR conversation comment created, edited, deleted | `issue_comment: [created, edited, deleted]`                                      | Captures bot summary comments, deletions, and developer commands.                                                                           |
+| External CI check run completed                  | `check_run: [completed]`                                                         | Fires when third-party GitHub Apps (e.g. CodeRabbit, Sourcery) complete a check run.                                                        |
+| CI workflow completed                            | `workflow_run: [completed]`                                                      | Fires when parent `GITHUB_TOKEN` Actions workflows (CI, Coverage, CodeQL, DeepSeek, PR-Agent) finish.                                       |
+| Merge queue checks requested                     | `merge_group: [checks_requested]`                                                | Evaluates the synthetic merge commit SHA for the queued merge group.                                                                        |
+| Manual or dispatch trigger                       | `workflow_dispatch`, `repository_dispatch`                                       | Enables manual re-verification or bridge-initiated verification.                                                                            |
 
 ### 1.2. The Thread-Resolution Gap: `pull_request_review_thread`
 
@@ -46,19 +46,18 @@ Without concurrency protection, this generates 11 concurrent workflow executions
 
 ### 2.1. Actions Concurrency Groups
 
-Merge Verdict mandates concurrency groups with active cancellation in workflow definitions:
+Merge Verdict serializes evaluations per pull request in workflow concurrency groups:
 
 ```yaml
 concurrency:
-  group: merge-verdict-${{ inputs.pr_number || github.event.client_payload.pr_number || github.event.pull_request.number || github.event.issue.number || github.event.merge_group.head_sha || github.ref }}
-  cancel-in-progress: true
+  group: merge-verdict-${{ inputs.pull_request_number || github.event.pull_request.number || github.event.issue.number || github.event.check_run.pull_requests[0].number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+  cancel-in-progress: false
 ```
 
 **Behavior**:
 
 - Workflows are isolated per pull request.
-- When a new event arrives for a PR, any currently running verification workflow for that PR is immediately cancelled.
-- Only the latest evaluation run executes to completion.
+- During the advisory rollout (`cancel-in-progress: false`), incoming events queue behind any active run for the same PR so a fresh run evaluates once the active check publication finishes without mid-publication cancellation. Active cancellation (`cancel-in-progress: true`) requires live cancellation recovery validation first.
 
 ### 2.2. Self-Triggering Loop Prevention
 

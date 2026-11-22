@@ -330,6 +330,18 @@ describe("repository and pull request number extraction", () => {
 
     expect(
       extractPullRequestNumber(undefined, {
+        workflow_run: { pull_requests: [{ number: 88 }] },
+      }),
+    ).toBe(88);
+
+    expect(
+      extractPullRequestNumber(undefined, {
+        workflow_run: { pull_requests: [{ number: 88 }, { number: 89 }] },
+      }),
+    ).toBeNull();
+
+    expect(
+      extractPullRequestNumber(undefined, {
         check_run: { pull_requests: [{}] },
       }),
     ).toBeNull();

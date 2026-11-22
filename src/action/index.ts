@@ -354,11 +354,13 @@ export function extractPullRequestNumber(
     return parsePositiveSafeInteger(issue.number);
   }
 
-  const checkRun = asRecord(payload.check_run);
-  if (Array.isArray(checkRun?.pull_requests) && checkRun.pull_requests.length === 1) {
-    const firstPr = asRecord(checkRun.pull_requests[0]);
-    if (firstPr?.number !== undefined && firstPr.number !== null) {
-      return parsePositiveSafeInteger(firstPr.number);
+  for (const runKey of ["check_run", "workflow_run"] as const) {
+    const runRecord = asRecord(payload[runKey]);
+    if (Array.isArray(runRecord?.pull_requests) && runRecord.pull_requests.length === 1) {
+      const firstPr = asRecord(runRecord.pull_requests[0]);
+      if (firstPr?.number !== undefined && firstPr.number !== null) {
+        return parsePositiveSafeInteger(firstPr.number);
+      }
     }
   }
 
