@@ -16,6 +16,7 @@ const DEEPSEEK_CHECK_NAMES = new Set([
   "deepseek review",
   "deepseek-review",
 ]);
+const NUMBERED_FINDING_HEADING = /^###[^\S\r\n]+\d+\.[^\S\r\n]+(\S[^\r\n]*)$/;
 const VERDICT_TOKEN_LOOKAHEAD = String.raw`[*_\x60~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)(?![A-Za-z0-9])`;
 const QUALIFIED_VERDICT_PREFIX = String.raw`##\s*Verdict\b(?::|[ \t]*(?:\r?\n[ \t]*)+(?=${VERDICT_TOKEN_LOOKAHEAD})|[ \t]+(?=${VERDICT_TOKEN_LOOKAHEAD}))`;
 // Avoid /g on module-level patterns; selection and extraction stay stateless.
@@ -70,7 +71,7 @@ function extractMaterialFindingsSection(body: string): string | null {
       }
       continue;
     }
-    if (trimmed.startsWith("##") || trimmed.startsWith("###")) {
+    if (/^#{2,3}\s/.test(trimmed) && !NUMBERED_FINDING_HEADING.test(trimmed)) {
       break;
     }
     sectionLines.push(trimmed);
@@ -100,14 +101,27 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
   }
 
   const lines = sectionText.split("\n");
+  const entries: [string, ...string[]][] = [];
+  let subsection: [string, ...string[]] | undefined;
+  for (const line of lines) {
+    const heading = line.match(NUMBERED_FINDING_HEADING)?.[1];
+    if (heading) {
+      subsection = [heading];
+      entries.push(subsection);
+      continue;
+    }
+    if (subsection) {
+      if (line.trim()) subsection.push(line);
+      continue;
+    }
+    const bullet = parseBulletLine(line);
+    if (bullet) entries.push([bullet]);
+  }
   const findings: NormalizedFinding[] = [];
   let index = 1;
 
-  for (const line of lines) {
-    const findingText = parseBulletLine(line);
-    if (!findingText) {
-      continue;
-    }
+  for (const entry of entries) {
+    const findingText = entry[0];
     if (findingText.toLowerCase() === "none." || findingText.toLowerCase() === "none") {
       continue;
     }
@@ -130,7 +144,7 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
       id: `deepseek_finding_${index++}`,
       reviewerId: "deepseek-review",
       title: findingText.length > 120 ? `${findingText.slice(0, 117)}...` : findingText,
-      description: findingText,
+      description: entry.join("\n"),
       severity,
       isBlocking,
       isResolved: !isBlocking,

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type {
   GitHubCheckRun,
@@ -8,6 +9,83 @@ import { deepSeekNormalizer, normalizeDeepSeekReviewer } from "../../src/normali
 
 describe("normalizeDeepSeekReviewer", () => {
   const headSha = "6ad1952e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c";
+
+  function makeSubsectionReview(verdict: string, boundary: string): GitHubReviewSubmission {
+    const body = readFileSync(
+      new URL("../fixtures/deepseek/subsection-findings.md", import.meta.url),
+      "utf8",
+    )
+      .replace("{{verdict}}", verdict)
+      .replace("{{boundary}}", boundary);
+    return {
+      id: 600,
+      reviewerLogin: "github-actions[bot]",
+      state: "COMMENTED",
+      commitSha: headSha,
+      submittedAt: "2026-11-22T04:00:00Z",
+      body,
+      bodyDigest: "subsections",
+    };
+  }
+
+  it.each([
+    ["APPROVE", "MEDIUM", false],
+    ["APPROVE WITH MINOR FINDINGS", "LOW", false],
+    ["REQUEST CHANGES", "HIGH", true],
+    ["BLOCK", "BLOCKER", true],
+  ] as const)(
+    "preserves %s severity rules for subsection findings",
+    (verdict, severity, blocking) => {
+      const review = makeSubsectionReview(verdict, "## Missing Verification");
+
+      const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+      expect(result.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual([
+        [severity, blocking, !blocking],
+        [severity, blocking, !blocking],
+      ]);
+      expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+    },
+  );
+
+  it.each([" ", "\u00a0", "\u3000"])("handles long %j prefixes and Unicode titles", (spacing) => {
+    const body = readFileSync(
+      new URL("../fixtures/deepseek/whitespace-heading.md", import.meta.url),
+      "utf8",
+    ).replace("{{spacing}}", spacing.repeat(30_000));
+    const review = {
+      ...makeSubsectionReview("REQUEST CHANGES", "## Missing Verification"),
+      body,
+    };
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.findings.map((finding) => finding.title)).toEqual([
+      "Retain the finding\u2028and its detail",
+    ]);
+  });
+
+  it.each(["## Unverified Assumptions", "### Unverified Assumptions", "### Missing Verification"])(
+    "extracts subsection findings and stops at %s",
+    (boundary) => {
+      const review = makeSubsectionReview("REQUEST CHANGES", boundary);
+
+      const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+      expect(result.findings.map((f) => f.title)).toEqual([
+        "MEDIUM - Missing boundary guard",
+        "LOW - Clarify the diagnostic",
+      ]);
+      expect(result.findings.map((f) => f.description)).toEqual([
+        "MEDIUM - Missing boundary guard\nThe input crosses a trust boundary without validation.\n#### Verification detail\n- Reject malformed input.\n- Preserve the error result.",
+        "LOW - Clarify the diagnostic\nDescribe the rejected input without exposing its value.",
+      ]);
+      expect(result.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual([
+        ["HIGH", true, false],
+        ["HIGH", true, false],
+      ]);
+    },
+  );
 
   it("exports adapter object matching ReviewerNormalizer interface", () => {
     expect(deepSeekNormalizer.reviewerId).toBe("deepseek-review");

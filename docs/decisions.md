@@ -2,6 +2,13 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-22: Preserve verdict severity while reading DeepSeek subsections
+
+- Decision: Recognize numbered level-three material finding headings and keep each heading's supporting text together. Apply the adapter's existing verdict-derived severity and blocking rules.
+- Rationale: Live reviewer output uses subsections where the collector previously returned no findings. Preserving the severity contract limits the change to recovering those findings and maintains existing policy behavior.
+- Rejected alternatives: Inferring severity from arbitrary heading text would introduce a new interpretation contract beyond the observed parsing failure.
+- Source: [DeepSeek subsection parsing](https://github.com/gordonpn/merge-verdict/issues/155).
+
 ## 2026-11-21: Standardize runtime and build baseline on Node.js 24 LTS
 
 - Decision: Raise the package and build runtime baseline to Node.js 24 LTS (`>=24.11.0`, matching `tsup` 9's Node 24 floor), track `@types/node` on the `24.x` line while ignoring `>=25.0.0` in Dependabot, target `node24` in `tsup`, run CI/action workflows on Node.js 24, and run `just check-runtime` on `24.11.0` to verify standalone bundles at the declared floor. Supersedes the 2026-11-15 decision.
