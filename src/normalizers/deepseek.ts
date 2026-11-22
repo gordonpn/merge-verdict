@@ -143,7 +143,10 @@ export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecu
   const { headSha } = input;
   const matchingReviews =
     input.reviews?.filter(
-      (r) => isDeepSeekAuthor(r.reviewerLogin) && r.body && VERDICT_HEADING_PRESENT.test(r.body),
+      (r) =>
+        isDeepSeekAuthor(r.reviewerLogin) &&
+        r.body &&
+        (VERDICT_HEADING_PRESENT.test(r.body) || extractRawVerdict(r.body) !== null),
     ) ?? [];
   const review = matchingReviews[matchingReviews.length - 1];
   const checkRun = input.checkRuns?.find((c) => DEEPSEEK_CHECK_NAMES.has(c.name.toLowerCase()));

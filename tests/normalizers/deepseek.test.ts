@@ -225,6 +225,43 @@ None.`,
     expect(approveMinor.status).toBe("COMPLETED");
     expect(approveMinor.verdict).toBe("APPROVE");
     expect(approveMinor.findings).toHaveLength(0);
+
+    const singleLineNoColon = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 512,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:02:00Z",
+          body: "## Verdict **BLOCK**\n\n### Material Findings\n* Critical finding.",
+          bodyDigest: "d12",
+        },
+      ],
+    });
+
+    expect(singleLineNoColon.status).toBe("COMPLETED");
+    expect(singleLineNoColon.verdict).toBe("CHANGES_REQUESTED");
+    expect(singleLineNoColon.findings[0]?.severity).toBe("BLOCKER");
+
+    const headingWithoutValue = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 513,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:03:00Z",
+          body: "## Verdict\n",
+          bodyDigest: "d13",
+        },
+      ],
+    });
+
+    expect(headingWithoutValue.status).toBe("COMPLETED");
+    expect(headingWithoutValue.verdict).toBe("COMMENTED");
   });
 
   it("parses BLOCK verdict with BLOCKER severity", () => {
