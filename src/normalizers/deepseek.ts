@@ -16,13 +16,15 @@ const DEEPSEEK_CHECK_NAMES = new Set([
   "deepseek review",
   "deepseek-review",
 ]);
+const VERDICT_HEADING_PRESENT = /##\s*Verdict\b(?::|[ \t]*(?:\r?\n|$))/i;
+const VERDICT_HEADING_VALUE = /##\s*Verdict\b:?[ \t]*(?:\r?\n[ \t]*)*([^\n\r]+)/i;
 
 function isDeepSeekAuthor(login: string | null): boolean {
   return login !== null && DEEPSEEK_LOGINS.has(login.toLowerCase());
 }
 
 function extractRawVerdict(body: string): RawVerdict | null {
-  const match = body.match(/##\s*Verdict:\s*([^\n\r]+)/i);
+  const match = body.match(VERDICT_HEADING_VALUE);
   if (!match?.[1]) {
     return null;
   }
@@ -141,7 +143,7 @@ export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecu
   const { headSha } = input;
   const matchingReviews =
     input.reviews?.filter(
-      (r) => isDeepSeekAuthor(r.reviewerLogin) && r.body && /##\s*Verdict:/i.test(r.body),
+      (r) => isDeepSeekAuthor(r.reviewerLogin) && r.body && VERDICT_HEADING_PRESENT.test(r.body),
     ) ?? [];
   const review = matchingReviews[matchingReviews.length - 1];
   const checkRun = input.checkRuns?.find((c) => DEEPSEEK_CHECK_NAMES.has(c.name.toLowerCase()));

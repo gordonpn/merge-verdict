@@ -178,6 +178,55 @@ None.`,
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
 
+  it("parses multiline Verdict headings without a colon", () => {
+    const requestChanges = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 510,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:00:00Z",
+          body: `## Verdict
+
+**REQUEST CHANGES**
+
+### Material Findings
+* Missing boundary guard.`,
+          bodyDigest: "d10",
+        },
+      ],
+    });
+
+    expect(requestChanges.status).toBe("COMPLETED");
+    expect(requestChanges.isFresh).toBe(true);
+    expect(requestChanges.verdict).toBe("CHANGES_REQUESTED");
+    expect(requestChanges.findings).toHaveLength(1);
+    expect(requestChanges.findings[0]?.isBlocking).toBe(true);
+
+    const approveMinor = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 511,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:01:00Z",
+          body: `## Verdict:
+
+**APPROVE WITH MINOR FINDINGS**`,
+          bodyDigest: "d11",
+        },
+      ],
+    });
+
+    expect(approveMinor.status).toBe("COMPLETED");
+    expect(approveMinor.verdict).toBe("APPROVE");
+    expect(approveMinor.findings).toHaveLength(0);
+  });
+
   it("parses BLOCK verdict with BLOCKER severity", () => {
     const reviews: GitHubReviewSubmission[] = [
       {
