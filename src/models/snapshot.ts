@@ -51,6 +51,18 @@ export interface StateFingerprintInput {
   readonly checkRuns: Readonly<Record<string, z.infer<typeof CheckRunRecordSchema>>>;
 }
 
+const HEX_SHA_40 = /^[a-f0-9]{40}$/i;
+
+/**
+ * Canonicalizes a 40-character hexadecimal Git commit SHA to lowercase.
+ *
+ * @param sha Commit SHA or synthetic identifier.
+ * @returns Lowercase SHA when valid 40-character hex; otherwise returns input unchanged.
+ */
+export function canonicalizeCommitSha(sha: string): string {
+  return HEX_SHA_40.test(sha) ? sha.toLowerCase() : sha;
+}
+
 function compareCodeUnits(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }

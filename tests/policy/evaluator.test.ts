@@ -670,4 +670,19 @@ describe("rate-limit timeout exemptions", () => {
     expect(result.exemptedReviewerIds).toEqual(["reviewer"]);
     expect(result.reasons).toEqual([]);
   });
+
+  it("canonicalizes 40-char hex SHAs case-insensitively across checks, reviewers, and final snapshot", () => {
+    const upperSha = "A".repeat(40);
+    const lowerSha = "a".repeat(40);
+    const value = input();
+    value.snapshot.headSha = upperSha;
+    check(value).commitSha = lowerSha;
+    reviewer(value).evaluatedCommitSha = lowerSha;
+    value.finalSnapshot.headSha = lowerSha;
+
+    const result = evaluatePolicy(value);
+
+    expect(result.verdict).toBe("PASS");
+    expect(result.reasons).toEqual([]);
+  });
 });
