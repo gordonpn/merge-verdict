@@ -760,7 +760,7 @@ Non-compliant requirements:
           createdAt: "2026-11-22T09:05:00Z",
         }),
       ],
-      checkRuns: [check({ appSlug: "github-actions", checkSuiteId: 9001 })],
+      checkRuns: [check({ appSlug: "github-actions" })],
       prAgentProvenance: {
         status: "verified",
         workflowPath: ".github/workflows/pr-agent.yml",

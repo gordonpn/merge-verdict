@@ -193,7 +193,6 @@ export interface GitHubCheckRun {
   readonly commitSha: string;
   readonly detailsUrl: string | null;
   readonly appSlug?: string | null;
-  readonly checkSuiteId?: number | null;
   readonly output: {
     readonly title: string | null;
     readonly summary: string | null;
@@ -776,7 +775,6 @@ export class GitHubCollector {
       commitSha: check.head_sha,
       detailsUrl: check.html_url ?? null,
       appSlug: check.app?.slug ?? null,
-      checkSuiteId: check.check_suite?.id ?? null,
       output: {
         title: check.output.title ?? null,
         summary: check.output.summary ?? null,

@@ -81,11 +81,6 @@ function extractStatusCode(error: unknown): number | null {
   return null;
 }
 
-function isPermissionDenied(error: unknown): boolean {
-  const status = extractStatusCode(error);
-  return status === 401 || status === 403;
-}
-
 function handleOptionalWorkflowError(error: unknown): boolean {
   const status = extractStatusCode(error);
   if (status === 401 || status === 403) {
@@ -207,6 +202,14 @@ async function readRunProvenanceArtifact(
   };
 }
 
+function runTimestampMs(run: {
+  readonly updated_at?: string;
+  readonly created_at?: string;
+}): number {
+  const parsed = Date.parse(run.updated_at ?? run.created_at ?? "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 /**
  * Collects authenticated GitHub Actions workflow-run and artifact provenance for PR-Agent.
  *
@@ -220,81 +223,94 @@ export async function collectPrAgentProvenance(
   const canonicalHeadSha = canonicalizeCommitSha(input.headSha);
   const expectedRepository = `${owner}/${repo}`.toLowerCase();
   const inspectedRunIds = new Set<number>();
-  const candidateRunIds: number[] = [];
+  interface CandidateWorkflowRun {
+    readonly id: number;
+    readonly headShaMatches: boolean;
+    readonly timestampMs: number;
+  }
+  const candidateRuns: CandidateWorkflowRun[] = [];
   let fallbackUnavailable = false;
 
-  try {
-    for (const detailsUrl of checkRunUrls) {
-      const runId = extractActionsRunId(detailsUrl);
-      if (runId === null || inspectedRunIds.has(runId)) {
-        continue;
-      }
-      inspectedRunIds.add(runId);
-
-      try {
-        const { data: run } = await retry("get_pr_agent_workflow_run", () =>
-          rest.rest.actions.getWorkflowRun({ owner, repo, run_id: runId }),
-        );
-        if (
-          run.path === PR_AGENT_WORKFLOW_PATH &&
-          run.status === "completed" &&
-          run.repository.full_name.toLowerCase() === expectedRepository
-        ) {
-          const verified = await readRunProvenanceArtifact(
-            rest,
-            retry,
-            owner,
-            repo,
-            pullRequestNumber,
-            canonicalHeadSha,
-            run.id,
-          );
-          if (verified) {
-            return verified;
-          }
-        }
-      } catch (error) {
-        if (handleOptionalWorkflowError(error)) {
-          fallbackUnavailable = true;
-        }
-      }
+  for (const detailsUrl of checkRunUrls) {
+    const runId = extractActionsRunId(detailsUrl);
+    if (runId === null || inspectedRunIds.has(runId)) {
+      continue;
     }
+    inspectedRunIds.add(runId);
 
-    let listWorkflowRunsDenied = false;
     try {
-      const { data: workflowRuns } = await retry("list_pr_agent_workflow_runs", () =>
-        rest.rest.actions.listWorkflowRuns({
+      const { data: run } = await retry("get_pr_agent_workflow_run", () =>
+        rest.rest.actions.getWorkflowRun({ owner, repo, run_id: runId }),
+      );
+      if (
+        run.path === PR_AGENT_WORKFLOW_PATH &&
+        run.status === "completed" &&
+        run.repository.full_name.toLowerCase() === expectedRepository
+      ) {
+        const verified = await readRunProvenanceArtifact(
+          rest,
+          retry,
           owner,
           repo,
-          workflow_id: "pr-agent.yml",
-          status: "completed",
-          per_page: 20,
-        }),
-      );
-
-      for (const run of Array.isArray(workflowRuns?.workflow_runs)
-        ? workflowRuns.workflow_runs
-        : []) {
-        if (
-          run.path === PR_AGENT_WORKFLOW_PATH &&
-          run.repository.full_name.toLowerCase() === expectedRepository &&
-          !inspectedRunIds.has(run.id)
-        ) {
-          inspectedRunIds.add(run.id);
-          candidateRunIds.push(run.id);
+          pullRequestNumber,
+          canonicalHeadSha,
+          run.id,
+        );
+        if (verified) {
+          return verified;
         }
       }
     } catch (error) {
       if (handleOptionalWorkflowError(error)) {
-        listWorkflowRunsDenied = true;
+        fallbackUnavailable = true;
       }
     }
+  }
 
-    if (listWorkflowRunsDenied) {
+  try {
+    const { data: workflowRuns } = await retry("list_pr_agent_workflow_runs", () =>
+      rest.rest.actions.listWorkflowRuns({
+        owner,
+        repo,
+        workflow_id: "pr-agent.yml",
+        status: "completed",
+        per_page: 20,
+      }),
+    );
+
+    for (const run of Array.isArray(workflowRuns?.workflow_runs)
+      ? workflowRuns.workflow_runs
+      : []) {
+      if (
+        run.path === PR_AGENT_WORKFLOW_PATH &&
+        run.repository.full_name.toLowerCase() === expectedRepository &&
+        !inspectedRunIds.has(run.id)
+      ) {
+        inspectedRunIds.add(run.id);
+        candidateRuns.push({
+          id: run.id,
+          headShaMatches:
+            typeof run.head_sha === "string" &&
+            canonicalizeCommitSha(run.head_sha) === canonicalHeadSha,
+          timestampMs: runTimestampMs(run),
+        });
+      }
+    }
+  } catch (error) {
+    if (handleOptionalWorkflowError(error)) {
       return unavailableProvenance();
     }
+  }
 
-    for (const runId of candidateRunIds.slice(0, MAX_WORKFLOW_RUNS_TO_INSPECT)) {
+  candidateRuns.sort(
+    (a, b) =>
+      b.timestampMs - a.timestampMs ||
+      Number(b.headShaMatches) - Number(a.headShaMatches) ||
+      b.id - a.id,
+  );
+
+  for (const candidate of candidateRuns.slice(0, MAX_WORKFLOW_RUNS_TO_INSPECT)) {
+    try {
       const verified = await readRunProvenanceArtifact(
         rest,
         retry,
@@ -302,21 +318,20 @@ export async function collectPrAgentProvenance(
         repo,
         pullRequestNumber,
         canonicalHeadSha,
-        runId,
+        candidate.id,
       );
       if (verified) {
         return verified;
       }
+    } catch (error) {
+      if (handleOptionalWorkflowError(error)) {
+        fallbackUnavailable = true;
+      }
     }
+  }
 
-    if (fallbackUnavailable) {
-      return unavailableProvenance();
-    }
-  } catch (error) {
-    if (isPermissionDenied(error)) {
-      return unavailableProvenance();
-    }
-    throw error;
+  if (fallbackUnavailable) {
+    return unavailableProvenance();
   }
 
   return unverifiedProvenance();

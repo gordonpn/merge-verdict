@@ -1253,7 +1253,6 @@ describe("historical finding provenance", () => {
     expect(collected.checkRuns[0]).toMatchObject({
       name: "runner / pr-agent",
       appSlug: "github-actions",
-      checkSuiteId: 8801,
     });
     expect(collected.prAgentProvenance).toEqual({
       status: "verified",
