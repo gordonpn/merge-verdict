@@ -791,17 +791,20 @@ export class GitHubCollector {
       .filter((check) => isTrustedPrAgentCheckRun(check))
       .map((check) => check.detailsUrl);
 
-    const hasPrAgentActivity =
-      prAgentCheckRunUrls.length > 0 ||
-      comments.some((comment) => {
-        const login = comment.user?.login?.toLowerCase();
-        const commentBody = comment.body ?? "";
-        return (
-          (login === "github-actions" || login === "github-actions[bot]") &&
-          (commentBody.includes("<!-- pr-agent:review:full -->") ||
-            commentBody.includes("<!-- pr-agent-review-state:v1"))
-        );
-      });
+    const prAgentCommentDigests = new Map<number, string>();
+    for (const comment of comments) {
+      const login = comment.user?.login?.toLowerCase();
+      const commentBody = comment.body ?? "";
+      if (
+        (login === "github-actions" || login === "github-actions[bot]") &&
+        (commentBody.includes("<!-- pr-agent:review:full -->") ||
+          commentBody.includes("<!-- pr-agent-review-state:v1"))
+      ) {
+        prAgentCommentDigests.set(comment.id, digestBody(commentBody));
+      }
+    }
+
+    const hasPrAgentActivity = prAgentCheckRunUrls.length > 0 || prAgentCommentDigests.size > 0;
 
     const collectProvenance =
       input.collectPrAgentProvenance ?? this.defaultCollectPrAgentProvenance;
@@ -815,6 +818,7 @@ export class GitHubCollector {
             pullRequestNumber,
             headSha: evaluationSha,
             checkRunUrls: prAgentCheckRunUrls,
+            commentDigests: prAgentCommentDigests,
           })
         : undefined;
 

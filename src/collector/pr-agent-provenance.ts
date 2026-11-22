@@ -7,9 +7,13 @@ import { extractZipEntryText } from "./zip.js";
 
 const PR_AGENT_WORKFLOW_PATH = ".github/workflows/pr-agent.yml";
 const PR_AGENT_ARTIFACT_NAME = "pr-agent-review-provenance";
+const PR_AGENT_ARTIFACT_PREFIX = `${PR_AGENT_ARTIFACT_NAME}-pr-`;
 const PR_AGENT_ARTIFACT_ENTRY = "pr-agent-provenance.json";
 const MAX_PROVENANCE_BYTES = 64 * 1024;
 const MAX_WORKFLOW_RUNS_TO_INSPECT = 5;
+const MAX_WORKFLOW_RUN_PAGES = 3;
+const WORKFLOW_RUNS_PER_PAGE = 100;
+const MAX_CANDIDATE_RUN_SCANS = 25;
 
 export const PR_AGENT_CHECK_NAMES: ReadonlySet<string> = new Set([
   "runner / pr-agent",
@@ -65,6 +69,7 @@ export interface CollectPrAgentProvenanceInput {
   readonly pullRequestNumber: number;
   readonly headSha: string;
   readonly checkRunUrls: readonly (string | null)[];
+  readonly commentDigests?: ReadonlyMap<number, string>;
 }
 
 function unavailableProvenance(): PrAgentProvenanceEvidence {
@@ -148,6 +153,43 @@ export function digestCommentBody(body: string): string {
   return createHash("sha256").update(body).digest("hex");
 }
 
+function orderCheckRunIdsDesc(checkRunUrls: readonly (string | null)[]): number[] {
+  const uniqueIds = new Set<number>();
+  for (const detailsUrl of checkRunUrls) {
+    const runId = extractActionsRunId(detailsUrl);
+    if (runId !== null) {
+      uniqueIds.add(runId);
+    }
+  }
+  return [...uniqueIds].sort((a, b) => b - a);
+}
+
+function isCandidateArtifactForPr(artifactName: string, pullRequestNumber: number): boolean {
+  return (
+    artifactName === `${PR_AGENT_ARTIFACT_PREFIX}${pullRequestNumber}` ||
+    artifactName === PR_AGENT_ARTIFACT_NAME
+  );
+}
+
+function matchesCollectedComment(
+  evidence: PrAgentProvenanceEvidence,
+  commentDigests: ReadonlyMap<number, string> | undefined,
+): boolean {
+  if (!commentDigests) {
+    return true;
+  }
+  return (
+    evidence.commentId !== null &&
+    evidence.bodyDigest !== null &&
+    commentDigests.get(evidence.commentId) === evidence.bodyDigest
+  );
+}
+
+interface ReadArtifactResult {
+  readonly evidence: PrAgentProvenanceEvidence | null;
+  readonly hasCandidateArtifact: boolean;
+}
+
 async function readRunProvenanceArtifact(
   rest: Octokit,
   retry: RetryRequest,
@@ -156,7 +198,7 @@ async function readRunProvenanceArtifact(
   pullRequestNumber: number,
   canonicalHeadSha: string,
   runId: number,
-): Promise<PrAgentProvenanceEvidence | null> {
+): Promise<ReadArtifactResult> {
   const { data: artifactList } = await retry("list_workflow_run_artifacts", () =>
     rest.rest.actions.listWorkflowRunArtifacts({
       owner,
@@ -166,11 +208,15 @@ async function readRunProvenanceArtifact(
     }),
   );
 
-  const provenanceArtifact = artifactList.artifacts.find(
-    (artifact) => artifact.name === PR_AGENT_ARTIFACT_NAME && !artifact.expired,
+  const scopedArtifactName = `${PR_AGENT_ARTIFACT_PREFIX}${pullRequestNumber}`;
+  const candidateArtifacts = artifactList.artifacts.filter(
+    (artifact) => isCandidateArtifactForPr(artifact.name, pullRequestNumber) && !artifact.expired,
   );
+  const provenanceArtifact =
+    candidateArtifacts.find((artifact) => artifact.name === scopedArtifactName) ??
+    candidateArtifacts[0];
   if (!provenanceArtifact) {
-    return null;
+    return { evidence: null, hasCandidateArtifact: false };
   }
 
   const downloadResponse = await retry("download_pr_agent_provenance_artifact", () =>
@@ -184,23 +230,23 @@ async function readRunProvenanceArtifact(
 
   const archiveBytes = toUint8Array(downloadResponse.data);
   if (!archiveBytes) {
-    return null;
+    return { evidence: null, hasCandidateArtifact: true };
   }
   const jsonText = extractZipEntryText(archiveBytes, PR_AGENT_ARTIFACT_ENTRY, MAX_PROVENANCE_BYTES);
   if (!jsonText) {
-    return null;
+    return { evidence: null, hasCandidateArtifact: true };
   }
 
   let rawJson: unknown;
   try {
     rawJson = JSON.parse(jsonText);
   } catch {
-    return null;
+    return { evidence: null, hasCandidateArtifact: true };
   }
 
   const parsed = PrAgentProvenanceArtifactSchema.safeParse(rawJson);
   if (!parsed.success) {
-    return null;
+    return { evidence: null, hasCandidateArtifact: true };
   }
 
   const artifact = parsed.data;
@@ -211,16 +257,19 @@ async function readRunProvenanceArtifact(
     artifact.pull_request_number !== pullRequestNumber ||
     canonicalizeCommitSha(artifact.head_sha) !== canonicalHeadSha
   ) {
-    return null;
+    return { evidence: null, hasCandidateArtifact: true };
   }
 
   return {
-    status: "verified",
-    workflowPath: artifact.workflow_path,
-    runId: artifact.run_id,
-    headSha: canonicalHeadSha,
-    commentId: artifact.comment_id,
-    bodyDigest: artifact.body_digest.toLowerCase(),
+    evidence: {
+      status: "verified",
+      workflowPath: artifact.workflow_path,
+      runId: artifact.run_id,
+      headSha: canonicalHeadSha,
+      commentId: artifact.comment_id,
+      bodyDigest: artifact.body_digest.toLowerCase(),
+    },
+    hasCandidateArtifact: true,
   };
 }
 
@@ -241,7 +290,7 @@ function runTimestampMs(run: {
 export async function collectPrAgentProvenance(
   input: CollectPrAgentProvenanceInput,
 ): Promise<PrAgentProvenanceEvidence> {
-  const { rest, retry, owner, repo, pullRequestNumber, checkRunUrls } = input;
+  const { rest, retry, owner, repo, pullRequestNumber, checkRunUrls, commentDigests } = input;
   const canonicalHeadSha = canonicalizeCommitSha(input.headSha);
   const expectedRepository = `${owner}/${repo}`.toLowerCase();
   const inspectedRunIds = new Set<number>();
@@ -252,10 +301,10 @@ export async function collectPrAgentProvenance(
   }
   const candidateRuns: CandidateWorkflowRun[] = [];
   let fallbackUnavailable = false;
+  let fallbackVerified: PrAgentProvenanceEvidence | null = null;
 
-  for (const detailsUrl of checkRunUrls) {
-    const runId = extractActionsRunId(detailsUrl);
-    if (runId === null || inspectedRunIds.has(runId)) {
+  for (const runId of orderCheckRunIdsDesc(checkRunUrls)) {
+    if (inspectedRunIds.has(runId)) {
       continue;
     }
     inspectedRunIds.add(runId);
@@ -269,7 +318,7 @@ export async function collectPrAgentProvenance(
         run.status === "completed" &&
         run.repository.full_name.toLowerCase() === expectedRepository
       ) {
-        const verified = await readRunProvenanceArtifact(
+        const result = await readRunProvenanceArtifact(
           rest,
           retry,
           owner,
@@ -278,8 +327,11 @@ export async function collectPrAgentProvenance(
           canonicalHeadSha,
           run.id,
         );
-        if (verified) {
-          return verified;
+        if (result.evidence) {
+          if (matchesCollectedComment(result.evidence, commentDigests)) {
+            return result.evidence;
+          }
+          fallbackVerified ??= result.evidence;
         }
       }
     } catch (error) {
@@ -290,37 +342,50 @@ export async function collectPrAgentProvenance(
   }
 
   try {
-    const { data: workflowRuns } = await retry("list_pr_agent_workflow_runs", () =>
-      rest.rest.actions.listWorkflowRuns({
-        owner,
-        repo,
-        workflow_id: "pr-agent.yml",
-        status: "completed",
-        per_page: 20,
-      }),
-    );
+    for (let page = 1; page <= MAX_WORKFLOW_RUN_PAGES; page++) {
+      const { data: workflowRuns } = await retry("list_pr_agent_workflow_runs", () =>
+        rest.rest.actions.listWorkflowRuns({
+          owner,
+          repo,
+          workflow_id: "pr-agent.yml",
+          status: "completed",
+          per_page: WORKFLOW_RUNS_PER_PAGE,
+          page,
+        }),
+      );
+      const runs = Array.isArray(workflowRuns?.workflow_runs) ? workflowRuns.workflow_runs : [];
 
-    for (const run of Array.isArray(workflowRuns?.workflow_runs)
-      ? workflowRuns.workflow_runs
-      : []) {
-      if (
-        run.path === PR_AGENT_WORKFLOW_PATH &&
-        run.repository.full_name.toLowerCase() === expectedRepository &&
-        !inspectedRunIds.has(run.id)
-      ) {
-        inspectedRunIds.add(run.id);
-        candidateRuns.push({
-          id: run.id,
-          headShaMatches:
-            typeof run.head_sha === "string" &&
-            canonicalizeCommitSha(run.head_sha) === canonicalHeadSha,
-          timestampMs: runTimestampMs(run),
-        });
+      for (const run of runs) {
+        if (
+          Array.isArray(run.pull_requests) &&
+          run.pull_requests.length > 0 &&
+          !run.pull_requests.some((pr) => pr?.number === pullRequestNumber)
+        ) {
+          continue;
+        }
+        if (
+          run.path === PR_AGENT_WORKFLOW_PATH &&
+          run.repository.full_name.toLowerCase() === expectedRepository &&
+          !inspectedRunIds.has(run.id)
+        ) {
+          inspectedRunIds.add(run.id);
+          candidateRuns.push({
+            id: run.id,
+            headShaMatches:
+              typeof run.head_sha === "string" &&
+              canonicalizeCommitSha(run.head_sha) === canonicalHeadSha,
+            timestampMs: runTimestampMs(run),
+          });
+        }
+      }
+
+      if (runs.length < WORKFLOW_RUNS_PER_PAGE) {
+        break;
       }
     }
   } catch (error) {
     if (handleOptionalWorkflowError(error)) {
-      return unavailableProvenance();
+      return fallbackVerified ?? unavailableProvenance();
     }
   }
 
@@ -331,9 +396,10 @@ export async function collectPrAgentProvenance(
       b.id - a.id,
   );
 
-  for (const candidate of candidateRuns.slice(0, MAX_WORKFLOW_RUNS_TO_INSPECT)) {
+  let inspectedMatchingRuns = 0;
+  for (const candidate of candidateRuns.slice(0, MAX_CANDIDATE_RUN_SCANS)) {
     try {
-      const verified = await readRunProvenanceArtifact(
+      const result = await readRunProvenanceArtifact(
         rest,
         retry,
         owner,
@@ -342,14 +408,27 @@ export async function collectPrAgentProvenance(
         canonicalHeadSha,
         candidate.id,
       );
-      if (verified) {
-        return verified;
+      if (result.hasCandidateArtifact) {
+        inspectedMatchingRuns += 1;
+      }
+      if (result.evidence) {
+        if (matchesCollectedComment(result.evidence, commentDigests)) {
+          return result.evidence;
+        }
+        fallbackVerified ??= result.evidence;
+      }
+      if (inspectedMatchingRuns >= MAX_WORKFLOW_RUNS_TO_INSPECT) {
+        break;
       }
     } catch (error) {
       if (handleOptionalWorkflowError(error)) {
         fallbackUnavailable = true;
       }
     }
+  }
+
+  if (fallbackVerified) {
+    return fallbackVerified;
   }
 
   if (fallbackUnavailable) {

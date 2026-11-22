@@ -405,4 +405,191 @@ describe("collectPrAgentProvenance", () => {
       bodyDigest: newDigest,
     });
   });
+
+  it("prefers newer check_run URLs and keeps searching fallback runs until comment digest matches", async () => {
+    const oldBody = "<!-- pr-agent:review:full -->\nold-on-same-sha";
+    const newBody = "<!-- pr-agent:review:full -->\nnew-issue-comment-on-same-sha";
+    const oldDigest = digestCommentBody(oldBody);
+    const newDigest = digestCommentBody(newBody);
+    const zipFor = (runId: number, commentId: number, bodyDigest: string) =>
+      Buffer.from(
+        makeZip(
+          "pr-agent-provenance.json",
+          JSON.stringify({
+            schema_version: 1,
+            workflow_path: ".github/workflows/pr-agent.yml",
+            run_id: runId,
+            repository: "octocat/hello-world",
+            pull_request_number: 1,
+            head_sha: headSha,
+            comment_id: commentId,
+            body_digest: bodyDigest,
+          }),
+        ),
+      );
+
+    const restSameSha = {
+      rest: {
+        actions: {
+          getWorkflowRun: async ({ run_id }: { run_id: number }) => ({
+            data: {
+              id: run_id,
+              path: ".github/workflows/pr-agent.yml",
+              status: "completed",
+              repository: { full_name: "octocat/hello-world" },
+            },
+          }),
+          listWorkflowRuns: async () => ({
+            data: {
+              workflow_runs: [
+                {
+                  id: 30,
+                  path: ".github/workflows/pr-agent.yml",
+                  status: "completed",
+                  head_sha: "base-sha",
+                  updated_at: "2026-10-01T12:15:00Z",
+                  repository: { full_name: "octocat/hello-world" },
+                },
+              ],
+            },
+          }),
+          listWorkflowRunArtifacts: async ({ run_id }: { run_id: number }) => ({
+            data: {
+              artifacts: [{ id: run_id, name: "pr-agent-review-provenance-pr-1", expired: false }],
+            },
+          }),
+          downloadArtifact: async ({ artifact_id }: { artifact_id: number }) => ({
+            data:
+              artifact_id === 30
+                ? zipFor(30, 9, newDigest)
+                : artifact_id === 20
+                  ? zipFor(20, 9, oldDigest)
+                  : zipFor(10, 9, oldDigest),
+          }),
+        },
+      },
+    } as unknown as Octokit;
+
+    const refreshed = await collectPrAgentProvenance({
+      rest: restSameSha,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: [
+        "https://github.com/octocat/hello-world/actions/runs/10/job/1",
+        "https://github.com/octocat/hello-world/actions/runs/20/job/2",
+      ],
+      commentDigests: new Map([[9, newDigest]]),
+    });
+
+    expect(refreshed).toEqual({
+      status: "verified",
+      workflowPath: ".github/workflows/pr-agent.yml",
+      runId: 30,
+      headSha,
+      commentId: 9,
+      bodyDigest: newDigest,
+    });
+
+    // When a check_run URL already matches without descending sort fallback, higher run ID wins first.
+    const newerCheckWins = await collectPrAgentProvenance({
+      rest: restSameSha,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: [
+        "https://github.com/octocat/hello-world/actions/runs/10/job/1",
+        "https://github.com/octocat/hello-world/actions/runs/20/job/2",
+      ],
+    });
+    expect(newerCheckWins.runId).toBe(20);
+  });
+
+  it("filters unrelated-PR workflow runs before applying the inspection limit", async () => {
+    const body = "<!-- pr-agent:review:full -->\npr1";
+    const digest = digestCommentBody(body);
+    const zip = Buffer.from(
+      makeZip(
+        "pr-agent-provenance.json",
+        JSON.stringify({
+          schema_version: 1,
+          workflow_path: ".github/workflows/pr-agent.yml",
+          run_id: 100,
+          repository: "octocat/hello-world",
+          pull_request_number: 1,
+          head_sha: "a".repeat(40),
+          comment_id: 7,
+          body_digest: digest,
+        }),
+      ),
+    );
+
+    const rest = {
+      rest: {
+        actions: {
+          listWorkflowRuns: async () => ({
+            data: {
+              workflow_runs: [
+                ...Array.from({ length: 6 }, (_, index) => ({
+                  id: 200 + index,
+                  path: ".github/workflows/pr-agent.yml",
+                  status: "completed",
+                  pull_requests: index % 2 === 0 ? [{ number: 2 }] : [],
+                  updated_at: "2026-10-01T12:20:00Z",
+                  repository: { full_name: "octocat/hello-world" },
+                })),
+                {
+                  id: 100,
+                  path: ".github/workflows/pr-agent.yml",
+                  status: "completed",
+                  pull_requests: [],
+                  updated_at: "2026-10-01T12:00:00Z",
+                  repository: { full_name: "octocat/hello-world" },
+                },
+              ],
+            },
+          }),
+          listWorkflowRunArtifacts: async ({ run_id }: { run_id: number }) => ({
+            data: {
+              artifacts: [
+                {
+                  id: run_id,
+                  name:
+                    run_id === 100
+                      ? "pr-agent-review-provenance-pr-1"
+                      : "pr-agent-review-provenance-pr-2",
+                  expired: false,
+                },
+              ],
+            },
+          }),
+          downloadArtifact: async () => ({ data: zip }),
+        },
+      },
+    } as unknown as Octokit;
+
+    const result = await collectPrAgentProvenance({
+      rest,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha: "a".repeat(40),
+      checkRunUrls: [],
+      commentDigests: new Map([[7, digest]]),
+    });
+
+    expect(result).toEqual({
+      status: "verified",
+      workflowPath: ".github/workflows/pr-agent.yml",
+      runId: 100,
+      headSha: "a".repeat(40),
+      commentId: 7,
+      bodyDigest: digest,
+    });
+  });
 });
