@@ -485,6 +485,16 @@ describe("isSelfTriggeredEvent loop prevention", () => {
     });
     expect(result.skipped).toBe(true);
     expect(result.reason).toContain("merge-verdict");
+
+    const runnerCheckResult = isSelfTriggeredEvent({
+      eventName: "check_run",
+      actor: "octocat",
+      payload: {
+        check_run: { name: "runner / merge-verdict" },
+      },
+    });
+    expect(runnerCheckResult.skipped).toBe(true);
+    expect(runnerCheckResult.reason).toContain("runner / merge-verdict");
   });
 
   it("skips workflow_run events for merge-verdict while allowing parent CI workflows", () => {

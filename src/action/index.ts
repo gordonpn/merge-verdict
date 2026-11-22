@@ -214,9 +214,11 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
   if (eventName === "check_run") {
     const checkRun = asRecord(payload?.check_run);
     const checkName = typeof checkRun?.name === "string" ? checkRun.name.trim() : "";
+    const normalizedCheckName = checkName.toLowerCase();
     if (
-      checkName.toLowerCase() === requiredCheckName ||
-      checkName.toLowerCase() === "merge-verdict"
+      normalizedCheckName === requiredCheckName ||
+      normalizedCheckName === "merge-verdict" ||
+      normalizedCheckName === "runner / merge-verdict"
     ) {
       return {
         skipped: true,

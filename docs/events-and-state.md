@@ -76,7 +76,7 @@ Because Merge Verdict publishes status checks, check runs, and PR review submiss
      github.actor != 'dependabot[bot]'
    ```
 2. **Review Self-Exclusion**: When processing review events (`pull_request_review`), the engine checks `review.user.login`. If the review was authored by the active Merge Verdict bot identity, processing terminates immediately with exit code 0.
-3. **Status Check Name Exclusion**: When responding to `check_run` events, the engine ignores check runs named `merge-verdict`.
+3. **Status Check Name Exclusion**: When responding to `check_run` events, the engine ignores check runs named `merge-verdict` or `runner / merge-verdict`, and the workflow gates out `github-actions` `check_run` completions so `workflow_run` handles Actions workflows without self-triggering or duplicate runs.
 
 ## 3. Snapshot Consistency and Race Condition Handling
 
