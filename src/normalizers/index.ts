@@ -10,6 +10,7 @@ import { codexNormalizer } from "./codex.js";
 import { copilotNormalizer } from "./copilot.js";
 import { deepSeekNormalizer } from "./deepseek.js";
 import { normalizeCheckRuns } from "./generic-checks.js";
+import { prAgentNormalizer } from "./pr-agent.js";
 import { sourceryNormalizer } from "./sourcery.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
 
@@ -18,6 +19,7 @@ export { codexNormalizer, normalizeCodexReviewer } from "./codex.js";
 export { copilotNormalizer, normalizeCopilotReviewer } from "./copilot.js";
 export { deepSeekNormalizer, normalizeDeepSeekReviewer } from "./deepseek.js";
 export { normalizeCheckRuns } from "./generic-checks.js";
+export { normalizePrAgentReviewer, prAgentNormalizer } from "./pr-agent.js";
 export { normalizeSourceryReviewer, sourceryNormalizer } from "./sourcery.js";
 export type { NormalizerInput, ReviewerNormalizer } from "./types.js";
 
@@ -30,6 +32,7 @@ export const DEFAULT_REVIEWER_NORMALIZERS: readonly ReviewerNormalizer[] = [
   codexNormalizer,
   deepSeekNormalizer,
   copilotNormalizer,
+  prAgentNormalizer,
 ];
 
 /**

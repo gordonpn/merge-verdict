@@ -114,6 +114,7 @@ describe("buildReviewSnapshotFromPullRequest", () => {
     expect(snapshot.reviewers["chatgpt-codex-connector"]?.status).toBe("PENDING");
     expect(snapshot.reviewers["deepseek-review"]?.status).toBe("PENDING");
     expect(snapshot.reviewers.copilot?.status).toBe("PENDING");
+    expect(snapshot.reviewers["pr-agent"]?.status).toBe("PENDING");
 
     expect(snapshot.checkRuns.CodeRabbit?.conclusion).toBe("success");
     expect(snapshot.stateFingerprint).toMatch(/^[a-f0-9]{64}$/);
@@ -219,6 +220,6 @@ describe("buildReviewSnapshotFromPullRequest", () => {
   });
 
   it("exports default normalizers list", () => {
-    expect(DEFAULT_REVIEWER_NORMALIZERS).toHaveLength(5);
+    expect(DEFAULT_REVIEWER_NORMALIZERS).toHaveLength(6);
   });
 });
