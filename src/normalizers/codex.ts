@@ -23,11 +23,51 @@ const CodexReviewStateSchema = z.object({
 });
 type CodexReviewStateJson = z.infer<typeof CodexReviewStateSchema>;
 
+interface ParsedCodexState {
+  readonly state: CodexReviewStateJson;
+  readonly rateLimited: boolean;
+}
+
 function isCodexAuthor(login: string | null): boolean {
   return login !== null && CODEX_LOGINS.has(login.toLowerCase());
 }
 
-function parseCodexState(input: NormalizerInput): CodexReviewStateJson | null {
+function hasCodexQuotaDiagnostic(body: string): boolean {
+  // State JSON, quoted history and code examples are not current diagnostics.
+  const prose = body
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
+    .replace(/<(pre|code|blockquote)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, "");
+  const lines: string[] = [];
+  let fence = "";
+  for (const line of prose.split("\n")) {
+    const delimiter = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      const closingDelimiter = /^ {0,3}(`{3,}|~{3,})[ \t\r]*$/.exec(line)?.[1];
+      if (
+        closingDelimiter &&
+        closingDelimiter[0] === fence[0] &&
+        closingDelimiter.length >= fence.length
+      ) {
+        fence = "";
+      }
+      continue;
+    }
+    if (delimiter) {
+      fence = delimiter;
+      continue;
+    }
+    lines.push(line);
+  }
+  return lines
+    .join("\n")
+    .split(/\n[ \t]*\n/)
+    .map((paragraph) => paragraph.replace(/^(?:[ \t\r]*\n)+/, ""))
+    .some((paragraph) =>
+      /^ {0,3}You have reached your Codex usage limits? for code reviews?\b/i.test(paragraph),
+    );
+}
+
+function parseCodexState(input: NormalizerInput): ParsedCodexState | null {
   const eligibleComments = (input.conversationComments ?? []).filter((c) =>
     isCodexAuthor(c.authorLogin),
   );
@@ -55,7 +95,12 @@ function parseCodexState(input: NormalizerInput): CodexReviewStateJson | null {
     const jsonStr = body.slice(openBrace, commentClose).trim();
     try {
       const parsed = CodexReviewStateSchema.safeParse(JSON.parse(jsonStr));
-      return parsed.success ? parsed.data : null;
+      return parsed.success
+        ? {
+            state: parsed.data,
+            rateLimited: hasCodexQuotaDiagnostic(body),
+          }
+        : null;
     } catch {
       return null;
     }
@@ -104,7 +149,8 @@ function extractCodexTitle(body: string, path: string | null, line: number | nul
  */
 export function normalizeCodexReviewer(input: NormalizerInput): ReviewerExecutionRecord {
   const { headSha } = input;
-  const stateJson = parseCodexState(input);
+  const parsedState = parseCodexState(input);
+  const stateJson = parsedState?.state;
   const threads =
     input.reviewThreads?.filter((t) => {
       const firstComment = t.comments[0];
@@ -162,8 +208,15 @@ export function normalizeCodexReviewer(input: NormalizerInput): ReviewerExecutio
     status = "PENDING";
     verdict = "NONE";
   } else if (stateJson?.code_review?.status === "failed") {
-    status = "FAILED";
-    verdict = "CHANGES_REQUESTED";
+    // Quota diagnostics must share the SHA-bearing state artifact.
+    const rateLimited = isFresh && parsedState?.rateLimited === true;
+    status = rateLimited ? "RATE_LIMITED" : "FAILED";
+    verdict =
+      rateLimited &&
+      stateJson.code_review.has_unresolved_findings !== true &&
+      !findings.some((finding) => finding.isBlocking && !finding.isResolved)
+        ? "NONE"
+        : "CHANGES_REQUESTED";
   } else if (stateJson?.code_review?.status === "completed") {
     status = "COMPLETED";
     const hasUnresolvedFindings =
