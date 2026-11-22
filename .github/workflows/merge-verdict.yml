@@ -40,6 +40,8 @@ jobs:
       github.actor != 'merge-verdict[bot]' &&
       github.actor != 'github-actions[bot]' &&
       github.actor != 'dependabot[bot]' &&
+      ((github.event_name != 'pull_request_review' && github.event_name != 'pull_request_review_comment') ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
       (github.event_name != 'issue_comment' || github.event.issue.pull_request != null) &&
       (github.event_name != 'check_run' ||
         (github.event.check_run.name != 'merge-verdict' &&

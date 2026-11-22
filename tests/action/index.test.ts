@@ -425,6 +425,42 @@ describe("isSelfTriggeredEvent loop prevention", () => {
         },
       }).skipped,
     ).toBe(false);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "gordonpn",
+        payload: {
+          action: "edited",
+          sender: { login: "gordonpn" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(false);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "gordonpn",
+        payload: {
+          action: "deleted",
+          sender: { login: "gordonpn" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(false);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "github-actions[bot]",
+        payload: {
+          action: "edited",
+          sender: { login: "github-actions[bot]" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(true);
   });
 
   it("skips check_run events for the merge-verdict check run", () => {

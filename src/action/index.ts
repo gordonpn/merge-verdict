@@ -236,8 +236,10 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
   }
 
   if (eventName === "issue_comment" || eventName === "pull_request_review_comment") {
+    const action = typeof payload?.action === "string" ? payload.action.trim().toLowerCase() : "";
     const commentLogin = getNestedString(asRecord(payload?.comment), "user", "login");
-    if (isSelfBotLogin(commentLogin)) {
+    // Allow human edits or deletions of bot-authored comments (e.g. PR-Agent summaries) to refresh.
+    if (action !== "edited" && action !== "deleted" && isSelfBotLogin(commentLogin)) {
       return {
         skipped: true,
         reason: `Ignored ${eventName} event authored by "${commentLogin}".`,
