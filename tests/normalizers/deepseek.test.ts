@@ -298,6 +298,24 @@ None.`,
 
     expect(unrelatedHeading.status).toBe("PENDING");
     expect(unrelatedHeading.verdict).toBe("NONE");
+
+    const prefixWordHeading = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 516,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:06:00Z",
+          body: "## Verdict **BLOCKING ISSUES**\n\nGeneral commentary.",
+          bodyDigest: "d16",
+        },
+      ],
+    });
+
+    expect(prefixWordHeading.status).toBe("PENDING");
+    expect(prefixWordHeading.verdict).toBe("NONE");
   });
 
   it("parses BLOCK verdict with BLOCKER severity", () => {
