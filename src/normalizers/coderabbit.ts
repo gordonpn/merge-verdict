@@ -10,6 +10,7 @@ import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
 import { rateLimitCheckTimestamp, stripMarkdownPunctuation } from "./utils.js";
 
 const CODERABBIT_LOGINS = new Set(["coderabbitai", "coderabbitai[bot]"]);
+const CODERABBIT_REPLY_MARKER = "<!-- This is an auto-generated reply by CodeRabbit -->";
 const RATE_LIMIT_COMMENT_MARKER =
   "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->";
 const RATE_LIMIT_PATTERNS = [
@@ -25,6 +26,24 @@ function isCodeRabbitAuthor(login: string | null): boolean {
   return login !== null && CODERABBIT_LOGINS.has(login.toLowerCase());
 }
 
+function isSubstantiveFreshReview(review: GitHubReviewSubmission, headSha: string): boolean {
+  if (review.commitSha !== headSha) {
+    return false;
+  }
+  if (review.state === "PENDING" || review.state === "DISMISSED") {
+    return false;
+  }
+  if (review.state === "APPROVED" || review.state === "CHANGES_REQUESTED") {
+    return true;
+  }
+  const trimmedBody = review.body?.trim() ?? "";
+  if (trimmedBody.length === 0) {
+    return false;
+  }
+  // Thread-resolution and reply reviews use COMMENTED with an auto-generated reply marker.
+  return !trimmedBody.includes(CODERABBIT_REPLY_MARKER);
+}
+
 function isRateLimited(
   checkRun: GitHubCheckRun | undefined,
   reviews: readonly GitHubReviewSubmission[],
@@ -34,10 +53,11 @@ function isRateLimited(
     checkRun?.status === "completed" &&
     checkRun.conclusion === "success" &&
     checkRun.commitSha === input.headSha;
-  const latestReview = reviews[reviews.length - 1];
-  const hasFreshReview = latestReview?.commitSha === input.headSha;
+  const hasFreshSubstantiveReview = reviews.some((review) =>
+    isSubstantiveFreshReview(review, input.headSha),
+  );
 
-  if (hasFreshSuccessCheck || hasFreshReview) {
+  if (hasFreshSuccessCheck || hasFreshSubstantiveReview) {
     return false;
   }
 

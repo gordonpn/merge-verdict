@@ -107,6 +107,283 @@ describe("normalizeCodeRabbitReviewer", () => {
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
 
+  it("classifies neutral rate-limited check run as RATE_LIMITED when a same-SHA empty reply review exists", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 12,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: {
+          title: "Review rate limited",
+          summary: "Result: Rate limited - Review rate limited",
+          text: null,
+        },
+        startedAt: "2026-11-22T19:59:00Z",
+        completedAt: "2026-11-22T20:00:00Z",
+      },
+    ];
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 301,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-11-22T20:00:05Z",
+        body: "",
+        bodyDigest: "d301",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("RATE_LIMITED");
+    expect(result.isFresh).toBe(false);
+    expect(result.verdict).toBe("NONE");
+    expect(result.rateLimitedAt).toBe("2026-11-22T20:00:00Z");
+    expect(result.checkRunConclusion).toBe("neutral");
+    expect(result.findings).toEqual([]);
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("classifies neutral rate-limited check run as RATE_LIMITED when a same-SHA auto-generated reply review exists", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 13,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: {
+          title: "Review rate limited",
+          summary: "Result: Rate limited - Review rate limited",
+          text: null,
+        },
+        startedAt: "2026-11-22T19:59:00Z",
+        completedAt: "2026-11-22T20:00:00Z",
+      },
+    ];
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 302,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-11-22T20:00:05Z",
+        body: "<!-- coderabbit-ai-generated:v1 -->\n\n@contributor Thanks, the change addresses the issue.\n\nReview thread resolved.\n\n<!-- This is an auto-generated reply by CodeRabbit -->",
+        bodyDigest: "d302",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("RATE_LIMITED");
+    expect(result.isFresh).toBe(false);
+    expect(result.verdict).toBe("NONE");
+    expect(result.rateLimitedAt).toBe("2026-11-22T20:00:00Z");
+    expect(result.checkRunConclusion).toBe("neutral");
+    expect(result.findings).toEqual([]);
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("classifies non-rate-limit neutral check run as FAILED even with a same-SHA reply review", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 14,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: {
+          title: null,
+          summary: "Completed with neutral status",
+          text: null,
+        },
+        startedAt: null,
+        completedAt: "2026-11-22T20:00:00Z",
+      },
+    ];
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 303,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-11-22T20:00:05Z",
+        body: "<!-- This is an auto-generated reply by CodeRabbit -->",
+        bodyDigest: "d303",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.verdict).toBe("NONE");
+    expect(result.checkRunConclusion).toBe("neutral");
+  });
+
+  it("does not classify as RATE_LIMITED when a fresh substantive COMMENTED review exists on head SHA", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 15,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: {
+          title: "Review rate limited",
+          summary: "Result: Rate limited",
+          text: null,
+        },
+        startedAt: null,
+        completedAt: "2026-11-22T20:00:00Z",
+      },
+    ];
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 304,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-11-22T20:00:05Z",
+        body: "<details><summary>Actionable comments outside diff</summary>\n- Potential issue: Missing check.\n</details>",
+        bodyDigest: "d304",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+    expect(result.findings).toHaveLength(1);
+  });
+
+  it("does not classify as RATE_LIMITED when a fresh CHANGES_REQUESTED review exists even with an empty body", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 16,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: {
+          title: "Review rate limited",
+          summary: "Result: Rate limited",
+          text: null,
+        },
+        startedAt: null,
+        completedAt: "2026-11-22T20:00:00Z",
+      },
+    ];
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 305,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "CHANGES_REQUESTED",
+        commitSha: headSha,
+        submittedAt: "2026-11-22T20:00:05Z",
+        body: "",
+        bodyDigest: "d305",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+  });
+
+  it("classifies neutral rate-limited check run as RATE_LIMITED when only a PENDING review or older-SHA substantive review exists", () => {
+    const olderSha = "oldsha0000000000000000000000000000000000";
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 17,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: {
+          title: "Review rate limited",
+          summary: "Result: Rate limited",
+          text: null,
+        },
+        startedAt: null,
+        completedAt: "2026-11-22T20:00:00Z",
+      },
+    ];
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 306,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "COMMENTED",
+        commitSha: olderSha,
+        submittedAt: "2026-11-22T19:00:00Z",
+        body: "<details><summary>Actionable comments outside diff</summary>\n- Old finding.\n</details>",
+        bodyDigest: "d306",
+      },
+      {
+        id: 307,
+        reviewerLogin: "coderabbitai[bot]",
+        state: "PENDING",
+        commitSha: headSha,
+        submittedAt: null,
+        body: "Draft review",
+        bodyDigest: "d307",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("RATE_LIMITED");
+    expect(result.isFresh).toBe(false);
+    expect(result.verdict).toBe("NONE");
+    expect(result.rateLimitedAt).toBe("2026-11-22T20:00:00Z");
+    expect(result.checkRunConclusion).toBe("neutral");
+  });
+
   it("classifies rate limit comment marker in conversation comment as RATE_LIMITED", () => {
     const checkRuns: GitHubCheckRun[] = [
       {
