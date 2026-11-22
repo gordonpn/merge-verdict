@@ -48,6 +48,23 @@ describe("normalizeDeepSeekReviewer", () => {
     },
   );
 
+  it.each([" ", "\u00a0", "\u3000"])("handles long %j prefixes and Unicode titles", (spacing) => {
+    const body = readFileSync(
+      new URL("../fixtures/deepseek/whitespace-heading.md", import.meta.url),
+      "utf8",
+    ).replace("{{spacing}}", spacing.repeat(30_000));
+    const review = {
+      ...makeSubsectionReview("REQUEST CHANGES", "## Missing Verification"),
+      body,
+    };
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.findings.map((finding) => finding.title)).toEqual([
+      "Retain the finding\u2028and its detail",
+    ]);
+  });
+
   it.each(["## Unverified Assumptions", "### Unverified Assumptions", "### Missing Verification"])(
     "extracts subsection findings and stops at %s",
     (boundary) => {
