@@ -16,7 +16,10 @@ const DEEPSEEK_CHECK_NAMES = new Set([
   "deepseek review",
   "deepseek-review",
 ]);
-const VERDICT_HEADING_PRESENT = /##\s*Verdict\b(?::|[ \t]*(?:\r?\n|$))/i;
+// Avoid /g on module-level patterns; selection and extraction stay stateless.
+const VERDICT_HEADING_PRESENT =
+  /##\s*Verdict\b(?::|[ \t]*(?:\r?\n|$)|[ \t]+[*_`~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE))/i;
+// Extract only the heading line or first non-empty line after it so prose never supplies a verdict.
 const VERDICT_HEADING_VALUE = /##\s*Verdict\b:?[ \t]*(?:\r?\n[ \t]*)*([^\n\r]+)/i;
 
 function isDeepSeekAuthor(login: string | null): boolean {
@@ -143,10 +146,7 @@ export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecu
   const { headSha } = input;
   const matchingReviews =
     input.reviews?.filter(
-      (r) =>
-        isDeepSeekAuthor(r.reviewerLogin) &&
-        r.body &&
-        (VERDICT_HEADING_PRESENT.test(r.body) || extractRawVerdict(r.body) !== null),
+      (r) => isDeepSeekAuthor(r.reviewerLogin) && r.body && VERDICT_HEADING_PRESENT.test(r.body),
     ) ?? [];
   const review = matchingReviews[matchingReviews.length - 1];
   const checkRun = input.checkRuns?.find((c) => DEEPSEEK_CHECK_NAMES.has(c.name.toLowerCase()));
