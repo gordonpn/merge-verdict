@@ -32,11 +32,47 @@ function isCodexAuthor(login: string | null): boolean {
   return login !== null && CODEX_LOGINS.has(login.toLowerCase());
 }
 
+function stripExcludedHtmlElements(text: string): string {
+  const tagPattern = /<(\/?)(pre|code|blockquote)\b[^>]*>/gi;
+  const stack: string[] = [];
+  let output = "";
+  let cursor = 0;
+
+  for (const match of text.matchAll(tagPattern)) {
+    const index = match.index ?? 0;
+    const isClosing = match[1] === "/";
+    const tagName = (match[2] ?? "").toLowerCase();
+
+    if (!isClosing) {
+      if (stack.length === 0) {
+        output += text.slice(cursor, index);
+      }
+      stack.push(tagName);
+      continue;
+    }
+
+    if (stack.length === 0) {
+      continue;
+    }
+    const openIndex = stack.lastIndexOf(tagName);
+    if (openIndex === -1) {
+      continue;
+    }
+    stack.length = openIndex;
+    if (stack.length === 0) {
+      cursor = index + match[0].length;
+    }
+  }
+
+  if (stack.length === 0) {
+    output += text.slice(cursor);
+  }
+  return output;
+}
+
 function hasCodexQuotaDiagnostic(body: string): boolean {
   // State JSON, quoted history and code examples are not current diagnostics.
-  const prose = body
-    .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
-    .replace(/<(pre|code|blockquote)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, "");
+  const prose = stripExcludedHtmlElements(body.replace(/<!--[\s\S]*?(?:-->|$)/g, ""));
   const lines: string[] = [];
   let fence = "";
   for (const line of prose.split("\n")) {
@@ -49,6 +85,8 @@ function hasCodexQuotaDiagnostic(body: string): boolean {
         closingDelimiter.length >= fence.length
       ) {
         fence = "";
+        // A CommonMark closing fence terminates the block cleanly between paragraphs.
+        lines.push("");
       }
       continue;
     }
