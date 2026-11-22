@@ -39,9 +39,10 @@ permissions:
   pull-requests: write # Submit PR reviews and comment dismissals
   statuses: read # Read external commit status evidence
   issues: read # Read issue comments and conversation threads
+  actions: read # Verify workflow runs and authenticated reviewer artifacts
 ```
 
-This is a trusted publisher job example. Read-only collection jobs use read permissions; omit review write access when the selected provider does not need it. Effective permissions depend on the event and repository/organization policy. A denied check write is a publication error and must withhold approval, not trigger a Commit Status API fallback. Workflows must never request wildcard `write-all` permissions. See [GitHub workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
+This is a trusted publisher job example. Read-only collection jobs use read permissions; omit review write access when the selected provider does not need it. `actions: read` allows `GitHubCollector` to verify workflow-run paths (such as `.github/workflows/pr-agent.yml`) and download provenance artifacts instead of trusting the shared `github-actions[bot]` comment login alone. Effective permissions depend on the event and repository/organization policy. A denied check write is a publication error and must withhold approval, not trigger a Commit Status API fallback. Workflows must never request wildcard `write-all` permissions. See [GitHub workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
 
 ### 2.2. Dedicated GitHub App Scoped Permissions
 

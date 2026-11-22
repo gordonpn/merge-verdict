@@ -2,6 +2,14 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-22: Authenticate PR-Agent workflow attribution and harden producer configuration
+
+- Decision: Emit a workflow-bound `pr-agent-review-provenance` artifact in `.github/workflows/pr-agent.yml` recording `workflow_path`, `run_id`, `repository`, `pull_request_number`, `head_sha`, `comment_id`, and `body_digest`; verify that workflow run and artifact in `GitHubCollector` (with `actions: read` in `.github/workflows/merge-verdict.yml`); require verified provenance in `normalizePrAgentReviewer` whenever `prAgentProvenance` is supplied; and configure `PR_REVIEWER.REQUIRE_TICKET_ANALYSIS_REVIEW: "false"`, `PR_REVIEWER.NUM_MAX_FINDINGS: "10"`, and `PR_REVIEWER.MAX_PREVIOUS_FINDINGS_CHARS: "0"` in `.github/workflows/pr-agent.yml`.
+- Rationale: All workflows using `GITHUB_TOKEN` share the `github-actions[bot]` login, so comment identity and markers alone cannot distinguish `.github/workflows/pr-agent.yml` from another workflow in the same repository. GitHub Actions binds workflow runs and artifacts to the originating workflow file path without needing a PR head checkout. Disabling PR-Agent's upstream ticket analysis prevents partial-milestone `Refs #...` tracking epics from creating false blockers while Merge Verdict checks issue links via `verification.require_issue_links`, raising `NUM_MAX_FINDINGS` avoids the 3-finding partial-run lockup in upstream PR-Agent, and disabling previous-finding prompt injection prevents stale finding prose from being echoed verbatim after fixes while keeping deterministic `finding_id` reconciliation intact.
+- Rejected alternatives: Disabling `PERSISTENT_FINDING_STATE` or filtering bot findings in `src/normalizers/pr-agent.ts` (weakens fail-closed guarantees), or using `publish_as_check_run: true` (disables structured state tracking in upstream `PRReviewer`).
+- Verification: Collector, normalizer, and bounded stdlib ZIP extraction unit tests verify verified matching, tampered body rejection, `unverified`/`unavailable` fail-closed handling, and `runner / pr-agent` `appSlug` checks.
+- Origin: [Issue #165](https://github.com/gordonpn/merge-verdict/issues/165).
+
 ## 2026-11-22: Keep evidence fingerprints independent of timeout evaluation
 
 - Decision: Preserve the evidence-only fingerprint and reevaluate time-dependent policy on each invocation using the snapshot's explicit collection time.
