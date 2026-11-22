@@ -444,6 +444,7 @@ describe("normalizeCopilotReviewer", () => {
     expect(result.verdict).toBe("NONE");
     expect(result.isFresh).toBe(true);
     expect(result.evaluatedCommitSha).toBe(headSha);
+    expect(result.rateLimitedAt).toBe("2026-11-16T02:58:38Z");
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
 
@@ -550,6 +551,33 @@ describe("normalizeCopilotReviewer", () => {
     expect(result.status).toBe("COMPLETED");
     expect(result.verdict).toBe("COMMENTED");
     expect(result.isFresh).toBe(true);
+    expect(result.rateLimitedAt).toBeUndefined();
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("omits rateLimitedAt when quota-limit review has null or invalid submittedAt", () => {
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 5914538936,
+        reviewerLogin: "copilot-pull-request-reviewer[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: null,
+        body: "Copilot was unable to review this pull request because the user who requested the review has insufficient remaining quota.",
+        bodyDigest: "d_quota_null_time",
+      },
+    ];
+
+    const result = normalizeCopilotReviewer({
+      headSha,
+      checkRuns: [],
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("RATE_LIMITED");
+    expect(result.rateLimitedAt).toBeUndefined();
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
 });

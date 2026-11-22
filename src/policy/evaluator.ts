@@ -1,4 +1,5 @@
 import type { MergeVerdictConfig } from "../models/config.js";
+import type { ReviewerExecutionRecord } from "../models/reviewer.js";
 import type { ReviewSnapshot } from "../models/snapshot.js";
 
 export type PolicyVerdict = "PASS" | "PENDING" | "FAIL" | "STALE" | "ERROR";
@@ -24,10 +25,39 @@ export interface PolicyEvaluation {
   readonly headSha: string;
   readonly stateFingerprint: string;
   readonly reasons: readonly PolicyReason[];
+  readonly exemptedReviewerIds: readonly string[];
   readonly approvalEligibility: "undetermined";
 }
 function ownValue<T>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
   return record && Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+function isRateLimitExempt(
+  reviewer: ReviewerExecutionRecord | undefined,
+  snapshot: ReviewSnapshot,
+  config: MergeVerdictConfig,
+): boolean {
+  if (
+    reviewer?.status !== "RATE_LIMITED" ||
+    !config.allowAdvisoryExemptions ||
+    !reviewer.rateLimitedAt ||
+    reviewer.verdict === "CHANGES_REQUESTED" ||
+    reviewer.findings.some((finding) => finding.isBlocking && !finding.isResolved)
+  ) {
+    return false;
+  }
+  if (reviewer.evaluatedCommitSha !== snapshot.headSha) {
+    return false;
+  }
+  if (!Number.isFinite(config.rateLimitTimeoutMinutes) || config.rateLimitTimeoutMinutes <= 0) {
+    return false;
+  }
+  const capturedAtMs = Date.parse(snapshot.capturedAt);
+  const rateLimitedAtMs = Date.parse(reviewer.rateLimitedAt);
+  if (!Number.isFinite(capturedAtMs) || !Number.isFinite(rateLimitedAtMs)) {
+    return false;
+  }
+  return capturedAtMs - rateLimitedAtMs >= config.rateLimitTimeoutMinutes * 60_000;
 }
 
 /**
@@ -65,11 +95,15 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
     }
   }
   const requiredReviewers = [...new Set(config.requiredReviewers)].sort();
+  const exemptedReviewerIds = requiredReviewers.filter((id) =>
+    isRateLimitExempt(ownValue(snapshot.reviewers, id), snapshot, config),
+  );
+  const exemptedReviewerSet = new Set(exemptedReviewerIds);
   for (const id of requiredReviewers) {
     const reviewer = ownValue(snapshot.reviewers, id);
     if (reviewer?.status === "FAILED") {
       add(2, "ERROR", "REVIEWER_EXECUTION_FAILED", id);
-    } else if (reviewer?.status !== "COMPLETED") {
+    } else if (reviewer?.status !== "COMPLETED" && !exemptedReviewerSet.has(id)) {
       add(2, "PENDING", "REVIEWER_INCOMPLETE", id);
     }
   }
@@ -113,6 +147,7 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
     const reviewer = ownValue(snapshot.reviewers, id);
     if (
       reviewer &&
+      !exemptedReviewerSet.has(id) &&
       (!reviewer.isFresh ||
         reviewer.evaluatedCommitSha !== snapshot.headSha ||
         reviewer.status === "STALE")
@@ -149,6 +184,7 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluation {
     headSha: snapshot.headSha,
     stateFingerprint: snapshot.stateFingerprint,
     reasons,
+    exemptedReviewerIds,
     approvalEligibility: "undetermined",
   };
 }

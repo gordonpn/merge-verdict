@@ -56,6 +56,23 @@ describe("ReviewerExecutionRecordSchema", () => {
     expect(parsed.status).toBe("COMPLETED");
   });
 
+  it("parses optional rateLimitedAt ISO datetime and rejects invalid values", () => {
+    const withTimestamp = {
+      ...validRecord,
+      status: "RATE_LIMITED" as const,
+      rateLimitedAt: "2026-11-16T02:58:40Z",
+    };
+    expect(ReviewerExecutionRecordSchema.parse(withTimestamp).rateLimitedAt).toBe(
+      "2026-11-16T02:58:40Z",
+    );
+    expect(() =>
+      ReviewerExecutionRecordSchema.parse({
+        ...withTimestamp,
+        rateLimitedAt: "not-a-datetime",
+      }),
+    ).toThrow();
+  });
+
   it("parses record with nullable evaluatedCommitSha and checkRunConclusion", () => {
     const nullableRecord = {
       ...validRecord,

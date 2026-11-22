@@ -7,7 +7,7 @@ import type {
 } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
-import { stripMarkdownPunctuation } from "./utils.js";
+import { rateLimitCheckTimestamp, stripMarkdownPunctuation } from "./utils.js";
 
 const CODERABBIT_LOGINS = new Set(["coderabbitai", "coderabbitai[bot]"]);
 const RATE_LIMIT_COMMENT_MARKER =
@@ -218,6 +218,7 @@ export function normalizeCodeRabbitReviewer(input: NormalizerInput): ReviewerExe
   const isFresh = evaluatedCommitSha === headSha;
 
   if (isRateLimited(checkRun, reviews, input)) {
+    const rateLimitedAt = rateLimitCheckTimestamp(checkRun, headSha, RATE_LIMIT_PATTERNS);
     return {
       reviewerId: "coderabbitai",
       reviewerName: "CodeRabbit",
@@ -226,6 +227,7 @@ export function normalizeCodeRabbitReviewer(input: NormalizerInput): ReviewerExe
       isFresh: false,
       verdict: "NONE",
       summary: "CodeRabbit review limit reached.",
+      ...(rateLimitedAt ? { rateLimitedAt } : {}),
       findings: [],
       checkRunConclusion: checkRun?.conclusion ?? "neutral",
     };

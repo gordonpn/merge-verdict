@@ -593,4 +593,45 @@ describe("computeStateFingerprint", () => {
     };
     expect(computeStateFingerprint(modified)).not.toBe(computeStateFingerprint(baseInput));
   });
+
+  it("changes hash when reviewer rateLimitedAt is added or changes", () => {
+    const withTimestamp = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          status: "RATE_LIMITED" as const,
+          rateLimitedAt: "2026-11-16T02:58:40Z",
+        },
+      },
+    };
+    const withoutTimestamp = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          status: "RATE_LIMITED" as const,
+        },
+      },
+    };
+    const laterTimestamp = {
+      ...baseInput,
+      reviewers: {
+        ...baseInput.reviewers,
+        coderabbitai: {
+          ...baseInput.reviewers.coderabbitai,
+          status: "RATE_LIMITED" as const,
+          rateLimitedAt: "2026-11-16T03:05:00Z",
+        },
+      },
+    };
+    expect(computeStateFingerprint(withTimestamp)).not.toBe(
+      computeStateFingerprint(withoutTimestamp),
+    );
+    expect(computeStateFingerprint(withTimestamp)).not.toBe(
+      computeStateFingerprint(laterTimestamp),
+    );
+  });
 });

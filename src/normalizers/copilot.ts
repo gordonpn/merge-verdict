@@ -7,7 +7,7 @@ import type {
 } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
-import { stripMarkdownPunctuation } from "./utils.js";
+import { parseIsoTimestamp, stripMarkdownPunctuation } from "./utils.js";
 
 const COPILOT_LOGINS = new Set([
   "copilot-pull-request-reviewer[bot]",
@@ -132,6 +132,7 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
 
   let status: ReviewerStatus = "PENDING";
   let verdict: ReviewerVerdict = "NONE";
+  let rateLimitedAt: string | undefined;
   const hasUnresolvedBlocking = findings.some((f) => f.isBlocking && !f.isResolved);
 
   if (!latestReview && threads.length === 0) {
@@ -143,6 +144,7 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
   } else if (isRateLimitedReview(latestReview)) {
     status = "RATE_LIMITED";
     verdict = hasUnresolvedBlocking ? "CHANGES_REQUESTED" : "NONE";
+    rateLimitedAt = isFresh ? parseIsoTimestamp(latestReview?.submittedAt) : undefined;
   } else {
     status = "COMPLETED";
     if (latestReview?.state === "CHANGES_REQUESTED" || hasUnresolvedBlocking) {
@@ -164,6 +166,7 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
     isFresh,
     verdict,
     summary: latestReview?.body ?? undefined,
+    ...(rateLimitedAt ? { rateLimitedAt } : {}),
     findings,
     checkRunConclusion: null,
   };

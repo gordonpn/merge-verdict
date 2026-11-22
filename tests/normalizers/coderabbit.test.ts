@@ -69,8 +69,41 @@ describe("normalizeCodeRabbitReviewer", () => {
     expect(result.status).toBe("RATE_LIMITED");
     expect(result.isFresh).toBe(false);
     expect(result.verdict).toBe("NONE");
+    expect(result.rateLimitedAt).toBeUndefined();
     expect(result.checkRunConclusion).toBe("neutral");
     expect(result.findings).toEqual([]);
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("populates rateLimitedAt from completed rate-limit check run on head SHA", () => {
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 11,
+        name: "CodeRabbit",
+        status: "completed",
+        conclusion: "neutral",
+        commitSha: headSha,
+        detailsUrl: null,
+        output: {
+          title: "CodeRabbit Review",
+          summary: "Review limit reached.",
+          text: null,
+        },
+        startedAt: null,
+        completedAt: "2026-11-16T02:58:40Z",
+      },
+    ];
+
+    const result = normalizeCodeRabbitReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews: [],
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("RATE_LIMITED");
+    expect(result.rateLimitedAt).toBe("2026-11-16T02:58:40Z");
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
 
