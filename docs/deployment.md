@@ -160,7 +160,7 @@ Package the TypeScript engine into a self-contained GitHub Action:
      summary:
        description: "Markdown evaluation summary"
    runs:
-     using: "node22"
+     using: "node24"
      main: "dist/index.js"
    ```
 2. **Bundler Configuration (`tsup`)**:
