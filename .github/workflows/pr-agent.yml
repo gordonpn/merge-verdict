@@ -68,14 +68,84 @@ jobs:
           fi
 
       - name: PR Agent Action
+        id: pr_agent
         if: github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true'
         uses: The-PR-Agent/pr-agent@e673a02076ce09a4726c3d0c3cc85780e59ca52b # v0.50.0
         env:
           GITHUB_ACTION_CONFIG.HANDLE_PUSH_TRIGGER: "true"
           GITHUB_ACTION_CONFIG.PUSH_COMMANDS: '["/review"]'
+          PR_REVIEWER.REQUIRE_TICKET_ANALYSIS_REVIEW: "false"
+          PR_REVIEWER.PERSISTENT_FINDING_STATE: "true"
+          PR_REVIEWER.NUM_MAX_FINDINGS: "10"
+          PR_REVIEWER.MAX_PREVIOUS_FINDINGS_CHARS: "0"
           CONFIG.MODEL: "deepseek/deepseek-chat"
           CONFIG.FALLBACK_MODELS: '["deepseek/deepseek-chat"]'
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_BASE: "https://api.deepseek.com"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Record review provenance
+        id: provenance
+        if: (github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true') && steps.pr_agent.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          HEAD_SHA="${PR_HEAD_SHA:-}"
+          if [ -z "${HEAD_SHA}" ]; then
+            HEAD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          fi
+          HEAD_SHA="$(printf '%s' "${HEAD_SHA}" | tr '[:upper:]' '[:lower:]')"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            | jq -c -s --arg sha "${HEAD_SHA}" --arg repo "${GITHUB_REPOSITORY}" '
+                add
+                | map(select(
+                    ((.user.login // "") | ascii_downcase) as $login
+                    | ($login == "github-actions" or $login == "github-actions[bot]")
+                    and ((.body // "") | (contains("<!-- pr-agent:review:full -->") or contains("<!-- pr-agent-review-state:v1")))
+                    and (
+                      ((.body // "") | ascii_downcase | contains("\"head_sha\":\"" + $sha + "\""))
+                      or ((.body // "") | ascii_downcase | contains(("https://github.com/" + $repo + "/commit/" + $sha) | ascii_downcase))
+                    )
+                  ))
+                | sort_by([(.updated_at // .created_at), .id])
+                | last // empty
+              ' > "${RUNNER_TEMP}/pr-agent-comment.json"
+          if [ ! -s "${RUNNER_TEMP}/pr-agent-comment.json" ]; then
+            echo "found=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          COMMENT_ID="$(jq -r '.id' "${RUNNER_TEMP}/pr-agent-comment.json")"
+          BODY_DIGEST="$(jq -j '.body' "${RUNNER_TEMP}/pr-agent-comment.json" | sha256sum | cut -d' ' -f1)"
+          jq -n \
+            --arg workflow_path ".github/workflows/pr-agent.yml" \
+            --argjson run_id "${GITHUB_RUN_ID}" \
+            --argjson run_attempt "${GITHUB_RUN_ATTEMPT}" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson pull_request_number "${PR_NUMBER}" \
+            --arg head_sha "${HEAD_SHA}" \
+            --argjson comment_id "${COMMENT_ID}" \
+            --arg body_digest "${BODY_DIGEST}" \
+            '{
+              schema_version: 1,
+              workflow_path: $workflow_path,
+              run_id: $run_id,
+              run_attempt: $run_attempt,
+              repository: $repository,
+              pull_request_number: $pull_request_number,
+              head_sha: $head_sha,
+              comment_id: $comment_id,
+              body_digest: $body_digest
+            }' > "${RUNNER_TEMP}/pr-agent-provenance.json"
+          echo "found=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload review provenance artifact
+        if: steps.provenance.outputs.found == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pr-agent-review-provenance
+          path: ${{ runner.temp }}/pr-agent-provenance.json
+          retention-days: 7
+          if-no-files-found: error
