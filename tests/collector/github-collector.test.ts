@@ -1659,4 +1659,9 @@ describe("historical finding provenance", () => {
 
     expect(collected.prAgentProvenance?.status).toBe("unverified");
   });
+
+  it("enables PR-Agent provenance by default in createGitHubCollector", () => {
+    const collector = createGitHubCollector("valid-token");
+    expect(collector).toBeInstanceOf(GitHubCollector);
+  });
 });

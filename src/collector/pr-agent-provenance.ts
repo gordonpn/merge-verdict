@@ -81,13 +81,18 @@ function extractStatusCode(error: unknown): number | null {
   return null;
 }
 
-function handleOptionalWorkflowError(error: unknown): PrAgentProvenanceEvidence | null {
+function isPermissionDenied(error: unknown): boolean {
+  const status = extractStatusCode(error);
+  return status === 401 || status === 403;
+}
+
+function handleOptionalWorkflowError(error: unknown): boolean {
   const status = extractStatusCode(error);
   if (status === 401 || status === 403) {
-    return unavailableProvenance();
+    return true;
   }
   if (status === 404) {
-    return null;
+    return false;
   }
   throw error;
 }
@@ -216,6 +221,7 @@ export async function collectPrAgentProvenance(
   const expectedRepository = `${owner}/${repo}`.toLowerCase();
   const inspectedRunIds = new Set<number>();
   const candidateRunIds: number[] = [];
+  let fallbackUnavailable = false;
 
   try {
     for (const detailsUrl of checkRunUrls) {
@@ -248,13 +254,13 @@ export async function collectPrAgentProvenance(
           }
         }
       } catch (error) {
-        const authOutcome = handleOptionalWorkflowError(error);
-        if (authOutcome) {
-          return authOutcome;
+        if (handleOptionalWorkflowError(error)) {
+          fallbackUnavailable = true;
         }
       }
     }
 
+    let listWorkflowRunsDenied = false;
     try {
       const { data: workflowRuns } = await retry("list_pr_agent_workflow_runs", () =>
         rest.rest.actions.listWorkflowRuns({
@@ -279,10 +285,13 @@ export async function collectPrAgentProvenance(
         }
       }
     } catch (error) {
-      const authOutcome = handleOptionalWorkflowError(error);
-      if (authOutcome) {
-        return authOutcome;
+      if (handleOptionalWorkflowError(error)) {
+        listWorkflowRunsDenied = true;
       }
+    }
+
+    if (listWorkflowRunsDenied) {
+      return unavailableProvenance();
     }
 
     for (const runId of candidateRunIds.slice(0, MAX_WORKFLOW_RUNS_TO_INSPECT)) {
@@ -299,9 +308,12 @@ export async function collectPrAgentProvenance(
         return verified;
       }
     }
+
+    if (fallbackUnavailable && candidateRunIds.length === 0) {
+      return unavailableProvenance();
+    }
   } catch (error) {
-    const status = extractStatusCode(error);
-    if (status === 401 || status === 403) {
+    if (isPermissionDenied(error)) {
       return unavailableProvenance();
     }
     throw error;

@@ -44,7 +44,11 @@ export function extractZipEntryText(
 
   const totalEntries = archive.readUInt16LE(eocdOffset + 10);
   const centralDirOffset = archive.readUInt32LE(eocdOffset + 16);
-  if (totalEntries > MAX_CENTRAL_DIR_ENTRIES || centralDirOffset >= eocdOffset) {
+  if (
+    totalEntries > MAX_CENTRAL_DIR_ENTRIES ||
+    centralDirOffset >= eocdOffset ||
+    centralDirOffset + 46 > archive.length
+  ) {
     return null;
   }
 
@@ -89,7 +93,7 @@ export function extractZipEntryText(
     const localExtraLength = archive.readUInt16LE(localHeaderOffset + 28);
     const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
     const dataEnd = dataStart + compressedSize;
-    if (dataEnd > centralDirOffset) {
+    if (dataStart > centralDirOffset || dataEnd > centralDirOffset) {
       return null;
     }
 

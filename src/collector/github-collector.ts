@@ -20,6 +20,7 @@ const MAX_CONNECTION_ITEMS = 1000;
 const MAX_CONNECTION_PAGES = 10;
 const POLICY_FILE_PATH = ".github/merge-verdict.yml";
 const REVIEW_THREAD_COMMENT_CONCURRENCY = 5;
+const PR_AGENT_CHECK_NAMES = new Set(["runner / pr-agent", "pr-agent", "pr agent"]);
 
 interface PageInfo {
   readonly hasNextPage: boolean;
@@ -785,10 +786,22 @@ export class GitHubCollector {
       completedAt: check.completed_at ?? null,
     }));
 
+    const prAgentCheckRunUrls = mappedCheckRuns
+      .filter((check) => {
+        const name = check.name.toLowerCase();
+        if (!PR_AGENT_CHECK_NAMES.has(name)) {
+          return false;
+        }
+        return (
+          name !== "runner / pr-agent" ||
+          check.appSlug == null ||
+          check.appSlug.toLowerCase() === "github-actions"
+        );
+      })
+      .map((check) => check.detailsUrl);
+
     const hasPrAgentActivity =
-      mappedCheckRuns.some((check) =>
-        ["runner / pr-agent", "pr-agent", "pr agent"].includes(check.name.toLowerCase()),
-      ) ||
+      prAgentCheckRunUrls.length > 0 ||
       comments.some((comment) => {
         const login = comment.user?.login?.toLowerCase();
         const commentBody = comment.body ?? "";
@@ -810,13 +823,7 @@ export class GitHubCollector {
             repo,
             pullRequestNumber,
             headSha: evaluationSha,
-            checkRunUrls: mappedCheckRuns
-              .filter(
-                (check) =>
-                  check.name.toLowerCase() === "runner / pr-agent" &&
-                  (check.appSlug == null || check.appSlug.toLowerCase() === "github-actions"),
-              )
-              .map((check) => check.detailsUrl),
+            checkRunUrls: prAgentCheckRunUrls,
           })
         : undefined;
 
