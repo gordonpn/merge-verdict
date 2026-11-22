@@ -45,7 +45,7 @@ The developer remains responsible for executing the merge. Automatic merging is 
 
 Merge Verdict adopts an **Actions-first hybrid architecture**:
 
-- **Runtime**: Runs directly in GitHub Actions runners using Node.js 22+.
+- **Runtime**: The composite action invokes `node` from `PATH`. Callers must select Node.js `>=24.11.0` before invoking it; see the setup steps in [docs/deployment.md](docs/deployment.md).
 - **No Database**: Reconstructs authoritative state on demand from live GitHub REST and GraphQL APIs, eliminating split-brain risks.
 - **Flexible Identity**: Publishes the authoritative Checks API check run using credentials with effective `checks: write` permission. A dedicated GitHub App installation token provides an independent bot identity; credential choice never substitutes a legacy commit status for the required check run.
 - **Decoupled Engine**: Core logic is implemented as a standalone TypeScript library, allowing it to run within GitHub Actions, a CLI, or an edge worker without modification.
@@ -54,19 +54,17 @@ For full architectural details, see [docs/architecture.md](docs/architecture.md)
 
 ## Contributor Toolchain
 
-The root `.node-version` pins Node.js 22.18.0. With fnm installed, enable
+The root `.node-version` pins Node.js 24.15.0. With fnm installed, enable
 repository selection in Bash with `eval "$(fnm env --use-on-cd --shell bash)"`,
 then run `fnm install` in the repository once to install its pinned runtime.
 Subsequent directory changes select that version automatically.
 
-The contributor build requires Node.js `^22.18.0 || ^24.11.0 || >=26.0.0`,
-matching tsup 9's engine requirement. The package runtime requirement remains
-Node.js 22.12.0 or newer; development tool requirements do not change the
-supported runtime of the generated library bundles.
-
-Node type declarations are limited to the 22.12 series to catch accidental use
-of newer APIs. CI builds with a contributor runtime, then runs `just check-runtime`
-on Node.js 22.12.0 to verify the existing standalone bundles without running tsup.
+The package runtime and contributor build both require Node.js `>=24.11.0`
+(matching tsup 9's Node 24 requirement). GitHub's default Node runtime for
+JavaScript actions does not select the runtime for this composite action.
+Node type declarations stay on the `24.x` LTS line to prevent Node 25+ APIs from
+entering source code, and CI builds with Node.js 24 then runs `just check-runtime`
+on Node.js 24.11.0 to verify the generated standalone bundles at the package floor.
 
 ## Project Status
 
@@ -75,7 +73,7 @@ Merge Verdict is currently in the **foundation and architecture phase**. The arc
 ## Building
 
 Run `pnpm install --frozen-lockfile`, then `just build` (or `pnpm run build`)
-with a supported contributor Node.js version (22.18.0 is pinned). The build produces standalone `dist/index.js`
+with Node.js `>=24.11.0` (24.15.0 is pinned). The build produces standalone `dist/index.js`
 (ESM) and `dist/index.cjs` (CommonJS) bundles with source maps. Runtime
 dependencies and GraphQL query text are included in each bundle; Node.js
 built-ins are supplied by the runtime.

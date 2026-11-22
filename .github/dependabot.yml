@@ -7,6 +7,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: build(deps)
+    # Keep @types/node on the Node 24 LTS major line matching engines.node (>=24.11.0) per docs/decisions.md.
+    ignore:
+      - dependency-name: "@types/node"
+        versions: [">=25.0.0"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -14,3 +18,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: build(deps)
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
+      pnpm-action-setup:
+        patterns:
+          - "pnpm/action-setup"

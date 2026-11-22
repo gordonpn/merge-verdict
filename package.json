@@ -4,7 +4,7 @@
   "description": "Automated, evidence-based pull request verification and approval system",
   "type": "module",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=24.11.0"
   },
   "scripts": {
     "build": "tsup",
@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",
-    "@types/node": "~22.12.0",
+    "@types/node": "^24.11.0",
     "@vitest/coverage-v8": "4.1.12",
     "tsup": "^9.0.0",
     "typescript": "^7.0.2",

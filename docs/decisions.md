@@ -2,6 +2,14 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-21: Standardize runtime and build baseline on Node.js 24 LTS
+
+- Decision: Raise the package and build runtime baseline to Node.js 24 LTS (`>=24.11.0`, matching `tsup` 9's Node 24 floor), track `@types/node` on the `24.x` line while ignoring `>=25.0.0` in Dependabot, target `node24` in `tsup`, run CI/action workflows on Node.js 24, and run `just check-runtime` on `24.11.0` to verify standalone bundles at the declared floor. Supersedes the 2026-11-15 decision.
+- Rationale: Aligning the package minimum with `tsup` 9 (`^24.11.0`) lets contributors build and test on the same Node 24 LTS line. GitHub's default Node runtime applies to JavaScript actions; this composite action invokes `node` from `PATH`, so callers must select Node.js `>=24.11.0` before invoking it. Allowing `24.x` type updates preserves type-definition fixes while blocking Node 25/26 APIs, and `check-runtime` on `24.11.0` verifies bundle compatibility at the floor.
+- Trade-offs: Drops support for Node.js 22.x consumers, and `24.x` declarations can include minor APIs added after `24.11.0` until caught by `check-runtime` or tests.
+- Rejected alternatives: Remaining pinned to Node 22.12.x (`@types/node <22.13.0`), or dropping `24.11.0` bundle verification in CI.
+- Source: [#143](https://github.com/gordonpn/merge-verdict/issues/143), [#144](https://github.com/gordonpn/merge-verdict/pull/144).
+
 ## 2026-11-19: Require revision provenance for Codex quota classification
 
 - Decision: Classify quota exhaustion only when the explicit Codex diagnostic shares a failed machine-readable state artifact bound to the current head SHA. Preserve blocking findings and stale-state precedence.

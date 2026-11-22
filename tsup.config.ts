@@ -5,7 +5,7 @@ export default defineConfig({
     index: "src/index.ts",
     action: "src/action/index.ts",
   },
-  target: "node22",
+  target: "node24",
   platform: "node",
   format: ["esm", "cjs"],
   outDir: "dist",

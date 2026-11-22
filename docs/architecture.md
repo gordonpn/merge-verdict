@@ -59,7 +59,7 @@ flowchart TD
 
 The trigger subsystem is responsible for invoking the verification engine whenever a relevant change occurs on a pull request.
 
-- **Primary Execution Engine**: GitHub Actions workflows running Node.js 22+.
+- **Primary Execution Engine**: GitHub Actions workflows running Node.js 24+.
 - **Workflow Triggers**:
   - `pull_request`: `opened`, `synchronize`, `reopened`, `ready_for_review`
   - `pull_request_review`: `submitted`, `edited`, `dismissed`
