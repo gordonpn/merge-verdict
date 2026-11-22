@@ -851,33 +851,36 @@ Non-compliant requirements:
     expect(result.findings.some((finding) => finding.isBlocking && !finding.isResolved)).toBe(true);
   });
 
-  it("ignores runner / pr-agent check runs whose appSlug is not github-actions", () => {
-    const cleanBody = stateComment(true, "RESOLVED");
+  it.each(["runner / pr-agent", "pr-agent", "pr agent"])(
+    "ignores %s check runs whose appSlug is not github-actions",
+    (checkName) => {
+      const cleanBody = stateComment(true, "RESOLVED");
 
-    const result = normalizePrAgentReviewer({
-      headSha,
-      conversationComments: [comment(cleanBody, { id: 101, bodyDigest: digest(cleanBody) })],
-      checkRuns: [
-        check({
-          name: "runner / pr-agent",
-          appSlug: "untrusted-app",
-          conclusion: "failure",
-        }),
-      ],
-      prAgentProvenance: {
-        status: "verified",
-        workflowPath: ".github/workflows/pr-agent.yml",
-        runId: 5001,
+      const result = normalizePrAgentReviewer({
         headSha,
-        commentId: 101,
-        bodyDigest: digest(cleanBody),
-      },
-    });
+        conversationComments: [comment(cleanBody, { id: 101, bodyDigest: digest(cleanBody) })],
+        checkRuns: [
+          check({
+            name: checkName,
+            appSlug: "untrusted-app",
+            conclusion: "failure",
+          }),
+        ],
+        prAgentProvenance: {
+          status: "verified",
+          workflowPath: ".github/workflows/pr-agent.yml",
+          runId: 5001,
+          headSha,
+          commentId: 101,
+          bodyDigest: digest(cleanBody),
+        },
+      });
 
-    expect(result.status).toBe("COMPLETED");
-    expect(result.verdict).toBe("APPROVE");
-    expect(result.checkRunConclusion).toBeNull();
-  });
+      expect(result.status).toBe("COMPLETED");
+      expect(result.verdict).toBe("APPROVE");
+      expect(result.checkRunConclusion).toBeNull();
+    },
+  );
 
   it("clears evaluatedCommitSha when unverified current-head comment lacks check confirmation", () => {
     const partialBody = stateComment(false, "ACTIVE");

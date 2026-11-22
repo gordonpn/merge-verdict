@@ -11,6 +11,28 @@ const PR_AGENT_ARTIFACT_ENTRY = "pr-agent-provenance.json";
 const MAX_PROVENANCE_BYTES = 64 * 1024;
 const MAX_WORKFLOW_RUNS_TO_INSPECT = 5;
 
+export const PR_AGENT_CHECK_NAMES: ReadonlySet<string> = new Set([
+  "runner / pr-agent",
+  "pr-agent",
+  "pr agent",
+]);
+
+/**
+ * Checks whether a check run matches known PR-Agent job names from GitHub Actions.
+ *
+ * @param check Check run metadata with name and optional appSlug.
+ * @returns True when the check name matches PR-Agent and any present appSlug is github-actions.
+ */
+export function isTrustedPrAgentCheckRun(check: {
+  readonly name: string;
+  readonly appSlug?: string | null;
+}): boolean {
+  if (!PR_AGENT_CHECK_NAMES.has(check.name.toLowerCase())) {
+    return false;
+  }
+  return check.appSlug == null || check.appSlug.toLowerCase() === "github-actions";
+}
+
 const PrAgentProvenanceArtifactSchema = z.object({
   schema_version: z.literal(1),
   workflow_path: z.literal(PR_AGENT_WORKFLOW_PATH),

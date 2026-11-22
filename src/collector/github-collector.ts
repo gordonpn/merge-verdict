@@ -8,7 +8,11 @@ import {
   type RetryRequest,
   withRestRetries,
 } from "./client.js";
-import { collectPrAgentProvenance, type PrAgentProvenanceEvidence } from "./pr-agent-provenance.js";
+import {
+  collectPrAgentProvenance,
+  isTrustedPrAgentCheckRun,
+  type PrAgentProvenanceEvidence,
+} from "./pr-agent-provenance.js";
 import CHANGED_FILES_QUERY from "./queries/changed-files.graphql?raw";
 import THREAD_COMMENTS_QUERY from "./queries/review-thread-comments.graphql?raw";
 import REVIEW_THREADS_QUERY from "./queries/review-threads.graphql?raw";
@@ -20,7 +24,6 @@ const MAX_CONNECTION_ITEMS = 1000;
 const MAX_CONNECTION_PAGES = 10;
 const POLICY_FILE_PATH = ".github/merge-verdict.yml";
 const REVIEW_THREAD_COMMENT_CONCURRENCY = 5;
-const PR_AGENT_CHECK_NAMES = new Set(["runner / pr-agent", "pr-agent", "pr agent"]);
 
 interface PageInfo {
   readonly hasNextPage: boolean;
@@ -785,17 +788,7 @@ export class GitHubCollector {
     }));
 
     const prAgentCheckRunUrls = mappedCheckRuns
-      .filter((check) => {
-        const name = check.name.toLowerCase();
-        if (!PR_AGENT_CHECK_NAMES.has(name)) {
-          return false;
-        }
-        return (
-          name !== "runner / pr-agent" ||
-          check.appSlug == null ||
-          check.appSlug.toLowerCase() === "github-actions"
-        );
-      })
+      .filter((check) => isTrustedPrAgentCheckRun(check))
       .map((check) => check.detailsUrl);
 
     const hasPrAgentActivity =

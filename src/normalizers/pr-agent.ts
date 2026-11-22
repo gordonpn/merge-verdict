@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { GitHubConversationComment } from "../collector/github-collector.js";
-import { digestCommentBody } from "../collector/pr-agent-provenance.js";
+import { digestCommentBody, isTrustedPrAgentCheckRun } from "../collector/pr-agent-provenance.js";
 import type { NormalizedFinding } from "../models/finding.js";
 import type { ReviewerExecutionRecord, ReviewerStatus } from "../models/reviewer.js";
 import { canonicalizeCommitSha } from "../models/snapshot.js";
@@ -8,7 +8,6 @@ import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
 import { stripMarkdownPunctuation } from "./utils.js";
 
 const PR_AGENT_LOGINS = new Set(["github-actions", "github-actions[bot]"]);
-const PR_AGENT_CHECK_NAMES = new Set(["runner / pr-agent", "pr-agent", "pr agent"]);
 const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
 const STATE_MARKER = "<!-- pr-agent-review-state:v1";
 const StateSchema = z.object({
@@ -312,16 +311,7 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
   const isStaleComment = sha !== undefined && !fresh;
 
   const check = input.checkRuns
-    ?.filter((c) => {
-      const name = c.name.toLowerCase();
-      if (!PR_AGENT_CHECK_NAMES.has(name)) {
-        return false;
-      }
-      if (name === "runner / pr-agent" && c.appSlug != null) {
-        return c.appSlug.toLowerCase() === "github-actions";
-      }
-      return true;
-    })
+    ?.filter((c) => isTrustedPrAgentCheckRun(c))
     .sort((a, b) => b.id - a.id)[0];
 
   const findings: NormalizedFinding[] =
