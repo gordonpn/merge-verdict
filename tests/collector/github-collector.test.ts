@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { deflateRawSync } from "node:zlib";
 import { graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 import { describe, expect, it, vi } from "vitest";
@@ -143,7 +144,10 @@ function createCollector(fetcher: typeof fetch): GitHubCollector {
     headers: { authorization: "token test-token" },
     request: { fetch: fetcher },
   });
-  return new GitHubCollector(rest, graph, { sleep: async () => {} });
+  return new GitHubCollector(rest, graph, {
+    sleep: async () => {},
+    collectPrAgentProvenance: true,
+  });
 }
 
 function nextPageHeaders(url: URL, page: number): Record<string, string> {
@@ -1090,5 +1094,569 @@ describe("historical finding provenance", () => {
         ? `https://github.com/octocat/hello-world/blob/${scenario.expected}`
         : undefined,
     );
+  });
+
+  function createSingleEntryZip(entryName: string, text: string): Uint8Array {
+    const content = Buffer.from(text, "utf8");
+    const payload = deflateRawSync(content);
+    const nameBytes = Buffer.from(entryName, "utf8");
+
+    const localHeader = Buffer.alloc(30 + nameBytes.length);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(8, 8);
+    localHeader.writeUInt32LE(payload.length, 18);
+    localHeader.writeUInt32LE(content.length, 22);
+    localHeader.writeUInt16LE(nameBytes.length, 26);
+    nameBytes.copy(localHeader, 30);
+
+    const centralHeader = Buffer.alloc(46 + nameBytes.length);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(8, 10);
+    centralHeader.writeUInt32LE(payload.length, 20);
+    centralHeader.writeUInt32LE(content.length, 24);
+    centralHeader.writeUInt16LE(nameBytes.length, 28);
+    nameBytes.copy(centralHeader, 46);
+
+    const endOfCentral = Buffer.alloc(22);
+    endOfCentral.writeUInt32LE(0x06054b50, 0);
+    endOfCentral.writeUInt16LE(1, 8);
+    endOfCentral.writeUInt16LE(1, 10);
+    endOfCentral.writeUInt32LE(centralHeader.length, 12);
+    endOfCentral.writeUInt32LE(localHeader.length + payload.length, 16);
+
+    return Buffer.concat([localHeader, payload, centralHeader, endOfCentral]);
+  }
+
+  function zipResponse(zipBytes: Uint8Array, url?: string): Response {
+    const response = new Response(Buffer.from(zipBytes), {
+      status: 200,
+      headers: { "content-type": "application/zip" },
+    });
+    if (url !== undefined) {
+      Object.defineProperty(response, "url", { value: url });
+    }
+    return response;
+  }
+
+  it("collects verified workflow and artifact provenance for PR-Agent comments", async () => {
+    const commentBody = `<!-- pr-agent:review:full -->\n<!-- pr-agent-review-state:v1\n{"schema_version":1,"last_run":{"head_sha":"${"a".repeat(40)}","complete":true},"findings":[]}\n-->`;
+    const bodyDigest = createHash("sha256").update(commentBody).digest("hex");
+    const headSha = "A".repeat(40);
+    const provenanceZip = createSingleEntryZip(
+      "pr-agent-provenance.json",
+      JSON.stringify({
+        schema_version: 1,
+        workflow_path: ".github/workflows/pr-agent.yml",
+        run_id: 7701,
+        run_attempt: 1,
+        repository: "octocat/hello-world",
+        pull_request_number: pullRequestNumber,
+        head_sha: headSha.toLowerCase(),
+        comment_id: 501,
+        body_digest: bodyDigest,
+      }),
+    );
+
+    const { fetcher: standardFetch } = createStandardFetch();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const requestUrl = new URL(input instanceof Request ? input.url : String(input));
+      const pathname = decodeURIComponent(requestUrl.pathname);
+
+      if (pathname === `/repos/octocat/hello-world/pulls/${pullRequestNumber}`) {
+        return jsonResponse(
+          {
+            number: pullRequestNumber,
+            draft: false,
+            mergeable: true,
+            head: { ref: "feature", sha: headSha, repo: { full_name: "octocat/hello-world" } },
+            base: { ref: "main", sha: "base-sha", repo: { full_name: "octocat/hello-world" } },
+            user: { login: "octocat" },
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/issues/${pullRequestNumber}/comments`) {
+        return jsonResponse(
+          [
+            {
+              id: 501,
+              body: commentBody,
+              user: { login: "github-actions[bot]" },
+              created_at: "2026-10-01T12:00:00Z",
+              updated_at: "2026-10-01T12:00:00Z",
+            },
+          ],
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/commits/${headSha}/check-runs`) {
+        return jsonResponse(
+          {
+            total_count: 1,
+            check_runs: [
+              {
+                ...createCheckRun(701, "runner / pr-agent"),
+                head_sha: headSha,
+                html_url: "https://github.com/octocat/hello-world/actions/runs/7701/job/701",
+                app: { slug: "github-actions" },
+                check_suite: { id: 8801 },
+              },
+            ],
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/runs/7701") {
+        return jsonResponse(
+          {
+            id: 7701,
+            path: ".github/workflows/pr-agent.yml",
+            status: "completed",
+            conclusion: "success",
+            head_sha: headSha.toLowerCase(),
+            repository: { full_name: "octocat/hello-world" },
+            updated_at: "2026-10-01T12:01:00Z",
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/runs/7701/artifacts") {
+        return jsonResponse(
+          {
+            artifacts: [{ id: 9901, name: "pr-agent-review-provenance", expired: false }],
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/artifacts/9901/zip") {
+        return zipResponse(provenanceZip, requestUrl.href);
+      }
+      if (pathname === "/repos/octocat/hello-world/commits") {
+        return jsonResponse([], {}, requestUrl.href);
+      }
+      return standardFetch(input, init);
+    });
+
+    const collected = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+    });
+
+    expect(collected.checkRuns[0]).toMatchObject({
+      name: "runner / pr-agent",
+      appSlug: "github-actions",
+      checkSuiteId: 8801,
+    });
+    expect(collected.prAgentProvenance).toEqual({
+      status: "verified",
+      workflowPath: ".github/workflows/pr-agent.yml",
+      runId: 7701,
+      headSha: headSha.toLowerCase(),
+      commentId: 501,
+      bodyDigest,
+    });
+  });
+
+  it("matches issue_comment workflow runs via artifact headSha fallback", async () => {
+    const headSha = "d".repeat(40);
+    const commentBody = `<!-- pr-agent:review:full -->\n<!-- pr-agent-review-state:v1\n{"schema_version":1,"last_run":{"head_sha":"${headSha}","complete":true},"findings":[]}\n-->`;
+    const bodyDigest = createHash("sha256").update(commentBody).digest("hex");
+    const provenanceZip = createSingleEntryZip(
+      "pr-agent-provenance.json",
+      JSON.stringify({
+        schema_version: 1,
+        workflow_path: ".github/workflows/pr-agent.yml",
+        run_id: 7710,
+        repository: "octocat/hello-world",
+        pull_request_number: pullRequestNumber,
+        head_sha: headSha,
+        comment_id: 501,
+        body_digest: bodyDigest,
+      }),
+    );
+
+    const { fetcher: standardFetch } = createStandardFetch();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const requestUrl = new URL(input instanceof Request ? input.url : String(input));
+      const pathname = decodeURIComponent(requestUrl.pathname);
+
+      if (pathname === `/repos/octocat/hello-world/pulls/${pullRequestNumber}`) {
+        return jsonResponse(
+          {
+            number: pullRequestNumber,
+            draft: false,
+            mergeable: true,
+            head: { ref: "feature", sha: headSha, repo: { full_name: "octocat/hello-world" } },
+            base: { ref: "main", sha: "base-sha", repo: { full_name: "octocat/hello-world" } },
+            user: { login: "octocat" },
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/issues/${pullRequestNumber}/comments`) {
+        return jsonResponse(
+          [
+            {
+              id: 501,
+              body: commentBody,
+              user: { login: "github-actions[bot]" },
+              created_at: "2026-10-01T12:00:00Z",
+              updated_at: "2026-10-01T12:00:00Z",
+            },
+          ],
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/commits/${headSha}/check-runs`) {
+        return jsonResponse({ total_count: 0, check_runs: [] }, {}, requestUrl.href);
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/workflows/pr-agent.yml/runs") {
+        return jsonResponse(
+          {
+            workflow_runs: [
+              {
+                id: 7710,
+                path: ".github/workflows/pr-agent.yml",
+                status: "completed",
+                conclusion: "success",
+                head_sha: "base-sha",
+                repository: { full_name: "octocat/hello-world" },
+                updated_at: "2026-10-01T12:02:00Z",
+              },
+            ],
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/runs/7710/artifacts") {
+        return jsonResponse(
+          {
+            artifacts: [{ id: 9910, name: "pr-agent-review-provenance", expired: false }],
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/artifacts/9910/zip") {
+        return zipResponse(provenanceZip, requestUrl.href);
+      }
+      if (pathname === "/repos/octocat/hello-world/commits") {
+        return jsonResponse([], {}, requestUrl.href);
+      }
+      return standardFetch(input, init);
+    });
+
+    const collected = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+    });
+
+    expect(collected.prAgentProvenance).toEqual({
+      status: "verified",
+      workflowPath: ".github/workflows/pr-agent.yml",
+      runId: 7710,
+      headSha,
+      commentId: 501,
+      bodyDigest,
+    });
+  });
+
+  it("returns unverified provenance when a spoofed workflow emits runner / pr-agent", async () => {
+    const headSha = "b".repeat(40);
+    const commentBody = `<!-- pr-agent:review:full -->\n<!-- pr-agent-review-state:v1\n{"schema_version":1,"last_run":{"head_sha":"${headSha}","complete":true},"findings":[]}\n-->`;
+    const { fetcher: standardFetch } = createStandardFetch();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const requestUrl = new URL(input instanceof Request ? input.url : String(input));
+      const pathname = decodeURIComponent(requestUrl.pathname);
+
+      if (pathname === `/repos/octocat/hello-world/pulls/${pullRequestNumber}`) {
+        return jsonResponse(
+          {
+            number: pullRequestNumber,
+            draft: false,
+            mergeable: true,
+            head: { ref: "feature", sha: headSha, repo: { full_name: "octocat/hello-world" } },
+            base: { ref: "main", sha: "base-sha", repo: { full_name: "octocat/hello-world" } },
+            user: { login: "octocat" },
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/issues/${pullRequestNumber}/comments`) {
+        return jsonResponse(
+          [
+            {
+              id: 501,
+              body: commentBody,
+              user: { login: "github-actions[bot]" },
+              created_at: "2026-10-01T12:00:00Z",
+              updated_at: "2026-10-01T12:00:00Z",
+            },
+          ],
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/commits/${headSha}/check-runs`) {
+        return jsonResponse(
+          {
+            total_count: 1,
+            check_runs: [
+              {
+                ...createCheckRun(701, "runner / pr-agent"),
+                head_sha: headSha,
+                html_url: "https://github.com/octocat/hello-world/actions/runs/7702/job/701",
+                app: { slug: "github-actions" },
+                check_suite: { id: 8802 },
+              },
+            ],
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/runs/7702") {
+        return jsonResponse(
+          {
+            id: 7702,
+            path: ".github/workflows/spoof.yml",
+            status: "completed",
+            conclusion: "success",
+            head_sha: headSha,
+            repository: { full_name: "octocat/hello-world" },
+            updated_at: "2026-10-01T12:01:00Z",
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/workflows/pr-agent.yml/runs") {
+        return jsonResponse({ workflow_runs: [] }, {}, requestUrl.href);
+      }
+      if (pathname === "/repos/octocat/hello-world/commits") {
+        return jsonResponse([], {}, requestUrl.href);
+      }
+      return standardFetch(input, init);
+    });
+
+    const collected = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+    });
+
+    expect(collected.prAgentProvenance).toEqual({
+      status: "unverified",
+      workflowPath: null,
+      runId: null,
+      headSha: null,
+      commentId: null,
+      bodyDigest: null,
+    });
+  });
+
+  it("returns unavailable provenance when the token lacks actions:read", async () => {
+    const headSha = "c".repeat(40);
+    const commentBody = `<!-- pr-agent:review:full -->\n<!-- pr-agent-review-state:v1\n{"schema_version":1,"last_run":{"head_sha":"${headSha}","complete":true},"findings":[]}\n-->`;
+    const { fetcher: standardFetch } = createStandardFetch();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const requestUrl = new URL(input instanceof Request ? input.url : String(input));
+      const pathname = decodeURIComponent(requestUrl.pathname);
+
+      if (pathname === `/repos/octocat/hello-world/pulls/${pullRequestNumber}`) {
+        return jsonResponse(
+          {
+            number: pullRequestNumber,
+            draft: false,
+            mergeable: true,
+            head: { ref: "feature", sha: headSha, repo: { full_name: "octocat/hello-world" } },
+            base: { ref: "main", sha: "base-sha", repo: { full_name: "octocat/hello-world" } },
+            user: { login: "octocat" },
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/issues/${pullRequestNumber}/comments`) {
+        return jsonResponse(
+          [
+            {
+              id: 501,
+              body: commentBody,
+              user: { login: "github-actions[bot]" },
+              created_at: "2026-10-01T12:00:00Z",
+              updated_at: "2026-10-01T12:00:00Z",
+            },
+          ],
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/commits/${headSha}/check-runs`) {
+        return jsonResponse(
+          {
+            total_count: 1,
+            check_runs: [
+              {
+                ...createCheckRun(701, "runner / pr-agent"),
+                head_sha: headSha,
+                html_url: "https://github.com/octocat/hello-world/actions/runs/7703/job/701",
+                app: { slug: "github-actions" },
+              },
+            ],
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (
+        pathname === "/repos/octocat/hello-world/actions/runs/7703" ||
+        pathname === "/repos/octocat/hello-world/actions/workflows/pr-agent.yml/runs"
+      ) {
+        return jsonResponse(
+          { message: "Resource not accessible by integration" },
+          { status: 403 },
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/commits") {
+        return jsonResponse([], {}, requestUrl.href);
+      }
+      return standardFetch(input, init);
+    });
+
+    const collected = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+    });
+
+    expect(collected.prAgentProvenance).toEqual({
+      status: "unavailable",
+      workflowPath: null,
+      runId: null,
+      headSha: null,
+      commentId: null,
+      bodyDigest: null,
+    });
+  });
+
+  it("returns unverified provenance on mismatched or missing artifact metadata and handles 404/403 paths", async () => {
+    const headSha = "e".repeat(40);
+    const commentBody = `<!-- pr-agent:review:full -->\n<!-- pr-agent-review-state:v1\n{"schema_version":1,"last_run":{"head_sha":"${headSha}","complete":true},"findings":[]}\n-->`;
+    const badZip = createSingleEntryZip(
+      "pr-agent-provenance.json",
+      JSON.stringify({
+        schema_version: 1,
+        workflow_path: ".github/workflows/pr-agent.yml",
+        run_id: 7704,
+        repository: "octocat/hello-world",
+        pull_request_number: pullRequestNumber + 1,
+        head_sha: headSha,
+        comment_id: 501,
+        body_digest: createHash("sha256").update(commentBody).digest("hex"),
+      }),
+    );
+    const { fetcher: standardFetch } = createStandardFetch();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const requestUrl = new URL(input instanceof Request ? input.url : String(input));
+      const pathname = decodeURIComponent(requestUrl.pathname);
+
+      if (pathname === `/repos/octocat/hello-world/pulls/${pullRequestNumber}`) {
+        return jsonResponse(
+          {
+            number: pullRequestNumber,
+            draft: false,
+            mergeable: true,
+            head: { ref: "feature", sha: headSha, repo: { full_name: "octocat/hello-world" } },
+            base: { ref: "main", sha: "base-sha", repo: { full_name: "octocat/hello-world" } },
+            user: { login: "octocat" },
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/issues/${pullRequestNumber}/comments`) {
+        return jsonResponse(
+          [
+            {
+              id: 501,
+              body: commentBody,
+              user: { login: "github-actions[bot]" },
+              created_at: "2026-10-01T12:00:00Z",
+              updated_at: "2026-10-01T12:00:00Z",
+            },
+          ],
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === `/repos/octocat/hello-world/commits/${headSha}/check-runs`) {
+        return jsonResponse(
+          {
+            total_count: 1,
+            check_runs: [
+              {
+                ...createCheckRun(701, "runner / pr-agent"),
+                head_sha: headSha,
+                html_url: "https://github.com/octocat/hello-world/actions/runs/7704/job/701",
+                app: { slug: "github-actions" },
+              },
+            ],
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/runs/7704") {
+        return jsonResponse(
+          {
+            id: 7704,
+            path: ".github/workflows/pr-agent.yml",
+            status: "completed",
+            conclusion: "success",
+            head_sha: headSha,
+            repository: { full_name: "octocat/hello-world" },
+            updated_at: "2026-10-01T12:01:00Z",
+          },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/runs/7704/artifacts") {
+        return jsonResponse(
+          { artifacts: [{ id: 9904, name: "pr-agent-review-provenance", expired: false }] },
+          {},
+          requestUrl.href,
+        );
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/artifacts/9904/zip") {
+        return zipResponse(badZip, requestUrl.href);
+      }
+      if (pathname === "/repos/octocat/hello-world/actions/workflows/pr-agent.yml/runs") {
+        return jsonResponse({ message: "Not Found" }, { status: 404 }, requestUrl.href);
+      }
+      if (pathname === "/repos/octocat/hello-world/commits") {
+        return jsonResponse([], {}, requestUrl.href);
+      }
+      return standardFetch(input, init);
+    });
+
+    const collected = await createCollector(fetcher).collectPullRequest({
+      ...repository,
+      pullRequestNumber,
+    });
+
+    expect(collected.prAgentProvenance?.status).toBe("unverified");
   });
 });
