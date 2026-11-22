@@ -90,7 +90,7 @@ describe("extractZipEntryText", () => {
     expect(extractZipEntryText(zip, "pr-agent-provenance.json", 64)).toBeNull();
   });
 
-  it("rejects invalid limits, encrypted entries, and unsupported compression methods", () => {
+  it("rejects invalid limits, encrypted entries, corrupt deflate payloads, and unsupported methods", () => {
     const valid = createZipArchive("pr-agent-provenance.json", Buffer.from("{}", "utf8"));
     const encrypted = createZipArchive("pr-agent-provenance.json", Buffer.from("{}", "utf8"), {
       flags: 0x0001,
@@ -98,9 +98,18 @@ describe("extractZipEntryText", () => {
     const unsupported = createZipArchive("pr-agent-provenance.json", Buffer.from("{}", "utf8"), {
       compressionMethod: 14,
     });
+    const largeWithoutEocd = Buffer.alloc(40);
+    const corruptedDeflate = Buffer.from(
+      createZipArchive("pr-agent-provenance.json", Buffer.from("invalid".repeat(20), "utf8")),
+    );
+    const payloadOffset =
+      corruptedDeflate.indexOf("pr-agent-provenance.json") + "pr-agent-provenance.json".length;
+    corruptedDeflate.fill(0xff, payloadOffset, payloadOffset + 4);
 
     expect(extractZipEntryText(valid, "pr-agent-provenance.json", 0)).toBeNull();
+    expect(extractZipEntryText(largeWithoutEocd, "pr-agent-provenance.json", 4096)).toBeNull();
     expect(extractZipEntryText(encrypted, "pr-agent-provenance.json", 4096)).toBeNull();
     expect(extractZipEntryText(unsupported, "pr-agent-provenance.json", 4096)).toBeNull();
+    expect(extractZipEntryText(corruptedDeflate, "pr-agent-provenance.json", 4096)).toBeNull();
   });
 });
