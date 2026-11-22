@@ -16,21 +16,30 @@ const DEEPSEEK_CHECK_NAMES = new Set([
   "deepseek review",
   "deepseek-review",
 ]);
+const VERDICT_TOKEN_LOOKAHEAD = String.raw`[*_\x60~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)(?![A-Za-z0-9])`;
+const QUALIFIED_VERDICT_PREFIX = String.raw`##\s*Verdict\b(?::|[ \t]*(?:\r?\n[ \t]*)+(?=${VERDICT_TOKEN_LOOKAHEAD})|[ \t]+(?=${VERDICT_TOKEN_LOOKAHEAD}))`;
+// Avoid /g on module-level patterns; selection and extraction stay stateless.
+const VERDICT_HEADING_PRESENT = new RegExp(QUALIFIED_VERDICT_PREFIX, "i");
+// Share heading qualification with selection and stop before nested Markdown headings.
+const VERDICT_HEADING_VALUE = new RegExp(
+  String.raw`${QUALIFIED_VERDICT_PREFIX}[ \t]*(?:\r?\n[ \t]*)*(?!#)([^\n\r]+)`,
+  "i",
+);
 
 function isDeepSeekAuthor(login: string | null): boolean {
   return login !== null && DEEPSEEK_LOGINS.has(login.toLowerCase());
 }
 
 function extractRawVerdict(body: string): RawVerdict | null {
-  const match = body.match(/##\s*Verdict:\s*([^\n\r]+)/i);
+  const match = body.match(VERDICT_HEADING_VALUE);
   if (!match?.[1]) {
     return null;
   }
   const clean = stripMarkdownPunctuation(match[1].replaceAll("_", " ")).toUpperCase();
-  if (/\bBLOCK\b/.test(clean)) {
+  if (/^BLOCK\b/.test(clean)) {
     return "BLOCK";
   }
-  if (/\bREQUEST CHANGES\b/.test(clean)) {
+  if (/^REQUEST CHANGES\b/.test(clean)) {
     return "REQUEST CHANGES";
   }
   if (/^APPROVE WITH MINOR FINDINGS\b/.test(clean)) {
@@ -141,7 +150,7 @@ export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecu
   const { headSha } = input;
   const matchingReviews =
     input.reviews?.filter(
-      (r) => isDeepSeekAuthor(r.reviewerLogin) && r.body && /##\s*Verdict:/i.test(r.body),
+      (r) => isDeepSeekAuthor(r.reviewerLogin) && r.body && VERDICT_HEADING_PRESENT.test(r.body),
     ) ?? [];
   const review = matchingReviews[matchingReviews.length - 1];
   const checkRun = input.checkRuns?.find((c) => DEEPSEEK_CHECK_NAMES.has(c.name.toLowerCase()));
