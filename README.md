@@ -45,7 +45,7 @@ The developer remains responsible for executing the merge. Automatic merging is 
 
 Merge Verdict adopts an **Actions-first hybrid architecture**:
 
-- **Runtime**: Runs directly in GitHub Actions runners using Node.js 24+.
+- **Runtime**: The composite action invokes `node` from `PATH`. Callers must select Node.js `>=24.11.0` before invoking it; see the setup steps in [docs/deployment.md](docs/deployment.md).
 - **No Database**: Reconstructs authoritative state on demand from live GitHub REST and GraphQL APIs, eliminating split-brain risks.
 - **Flexible Identity**: Publishes the authoritative Checks API check run using credentials with effective `checks: write` permission. A dedicated GitHub App installation token provides an independent bot identity; credential choice never substitutes a legacy commit status for the required check run.
 - **Decoupled Engine**: Core logic is implemented as a standalone TypeScript library, allowing it to run within GitHub Actions, a CLI, or an edge worker without modification.
@@ -60,7 +60,8 @@ then run `fnm install` in the repository once to install its pinned runtime.
 Subsequent directory changes select that version automatically.
 
 The package runtime and contributor build both require Node.js `>=24.11.0`
-(matching tsup 9's Node 24 requirement and GitHub Actions' Node 24 LTS runtime).
+(matching tsup 9's Node 24 requirement). GitHub's default Node runtime for
+JavaScript actions does not select the runtime for this composite action.
 Node type declarations stay on the `24.x` LTS line to prevent Node 25+ APIs from
 entering source code, and CI builds with Node.js 24 then runs `just check-runtime`
 on Node.js 24.11.0 to verify the generated standalone bundles at the package floor.

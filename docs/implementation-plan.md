@@ -26,7 +26,7 @@ Implement the domain models, GitHub API data collection clients, reviewer normal
 
 ### Dependencies
 
-- Node.js 24+
+- Node.js >=24.11.0
 - pnpm 10+
 - Vitest
 - Zod

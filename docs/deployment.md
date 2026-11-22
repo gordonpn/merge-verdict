@@ -275,6 +275,11 @@ jobs:
           ref: ${{ github.base_ref || github.event.repository.default_branch }}
           path: .verifier
 
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24.11.0
+
       - name: Run Merge Verdict
         uses: ./.verifier
         with:
@@ -334,6 +339,11 @@ jobs:
       pull-requests: write
       checks: write
     steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24.11.0
+
       - name: Run Merge Verdict
         uses: gordonpn/merge-verdict@v1
         with:
