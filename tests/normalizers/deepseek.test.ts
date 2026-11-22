@@ -249,6 +249,15 @@ None.`,
       headSha,
       reviews: [
         {
+          id: 509,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T09:59:00Z",
+          body: "## Verdict: BLOCK\n\n### Material Findings\n* Existing blocker.",
+          bodyDigest: "d09",
+        },
+        {
           id: 513,
           reviewerLogin: "github-actions[bot]",
           state: "COMMENTED",
@@ -261,7 +270,8 @@ None.`,
     });
 
     expect(headingWithoutValue.status).toBe("COMPLETED");
-    expect(headingWithoutValue.verdict).toBe("COMMENTED");
+    expect(headingWithoutValue.verdict).toBe("CHANGES_REQUESTED");
+    expect(headingWithoutValue.findings[0]?.severity).toBe("BLOCKER");
 
     const headingFollowedByProse = normalizeDeepSeekReviewer({
       headSha,
@@ -278,8 +288,8 @@ None.`,
       ],
     });
 
-    expect(headingFollowedByProse.status).toBe("COMPLETED");
-    expect(headingFollowedByProse.verdict).toBe("COMMENTED");
+    expect(headingFollowedByProse.status).toBe("PENDING");
+    expect(headingFollowedByProse.verdict).toBe("NONE");
 
     const unrelatedHeading = normalizeDeepSeekReviewer({
       headSha,
@@ -332,8 +342,78 @@ None.`,
       ],
     });
 
-    expect(proseAfterHeadingWithKeywords.status).toBe("COMPLETED");
-    expect(proseAfterHeadingWithKeywords.verdict).toBe("COMMENTED");
+    expect(proseAfterHeadingWithKeywords.status).toBe("PENDING");
+    expect(proseAfterHeadingWithKeywords.verdict).toBe("NONE");
+
+    const underscoreEmphasisVerdicts = [
+      { body: "## Verdict __BLOCK__", expectedVerdict: "CHANGES_REQUESTED" },
+      { body: "## Verdict __REQUEST_CHANGES__", expectedVerdict: "CHANGES_REQUESTED" },
+      { body: "## Verdict __APPROVE__", expectedVerdict: "APPROVE" },
+    ] as const;
+
+    for (const [offset, testCase] of underscoreEmphasisVerdicts.entries()) {
+      const underscoreResult = normalizeDeepSeekReviewer({
+        headSha,
+        reviews: [
+          {
+            id: 520 + offset,
+            reviewerLogin: "github-actions[bot]",
+            state: "COMMENTED",
+            commitSha: headSha,
+            submittedAt: "2026-10-01T10:10:00Z",
+            body: testCase.body,
+            bodyDigest: `d20-${offset}`,
+          },
+        ],
+      });
+
+      expect(underscoreResult.status).toBe("COMPLETED");
+      expect(underscoreResult.verdict).toBe(testCase.expectedVerdict);
+    }
+
+    const verdictHistoryBeforeVerdict = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 525,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:11:00Z",
+          body: `## Verdict History
+
+Previous note.
+
+## Verdict: REQUEST CHANGES
+
+### Material Findings
+* Handle history headings.`,
+          bodyDigest: "d25",
+        },
+      ],
+    });
+
+    expect(verdictHistoryBeforeVerdict.status).toBe("COMPLETED");
+    expect(verdictHistoryBeforeVerdict.verdict).toBe("CHANGES_REQUESTED");
+    expect(verdictHistoryBeforeVerdict.findings).toHaveLength(1);
+
+    const colonHeadingFollowedBySubheading = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 526,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-10-01T10:12:00Z",
+          body: "## Verdict:\n\n### BLOCK",
+          bodyDigest: "d26",
+        },
+      ],
+    });
+
+    expect(colonHeadingFollowedBySubheading.status).toBe("COMPLETED");
+    expect(colonHeadingFollowedBySubheading.verdict).toBe("COMMENTED");
 
     const singleLineRequestChanges = normalizeDeepSeekReviewer({
       headSha,

@@ -16,11 +16,15 @@ const DEEPSEEK_CHECK_NAMES = new Set([
   "deepseek review",
   "deepseek-review",
 ]);
+const VERDICT_TOKEN_LOOKAHEAD = String.raw`[*_\x60~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)(?![A-Za-z0-9])`;
+const QUALIFIED_VERDICT_PREFIX = String.raw`##\s*Verdict\b(?::|[ \t]*(?:\r?\n[ \t]*)+(?=${VERDICT_TOKEN_LOOKAHEAD})|[ \t]+(?=${VERDICT_TOKEN_LOOKAHEAD}))`;
 // Avoid /g on module-level patterns; selection and extraction stay stateless.
-const VERDICT_HEADING_PRESENT =
-  /##\s*Verdict\b(?::|[ \t]*(?:\r?\n|$)|[ \t]+[*_`~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)\b)/i;
-// Extract the heading line or first non-empty line; extractRawVerdict only accepts start-anchored verdict tokens.
-const VERDICT_HEADING_VALUE = /##\s*Verdict\b:?[ \t]*(?:\r?\n[ \t]*)*([^\n\r]+)/i;
+const VERDICT_HEADING_PRESENT = new RegExp(QUALIFIED_VERDICT_PREFIX, "i");
+// Share heading qualification with selection and stop before nested Markdown headings.
+const VERDICT_HEADING_VALUE = new RegExp(
+  String.raw`${QUALIFIED_VERDICT_PREFIX}[ \t]*(?:\r?\n[ \t]*)*(?!#)([^\n\r]+)`,
+  "i",
+);
 
 function isDeepSeekAuthor(login: string | null): boolean {
   return login !== null && DEEPSEEK_LOGINS.has(login.toLowerCase());
