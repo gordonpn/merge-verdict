@@ -47,7 +47,7 @@ export function extractZipEntryText(
   if (
     totalEntries > MAX_CENTRAL_DIR_ENTRIES ||
     centralDirOffset >= eocdOffset ||
-    centralDirOffset + 46 > archive.length
+    centralDirOffset + 46 > eocdOffset
   ) {
     return null;
   }

@@ -109,6 +109,16 @@ describe("extractZipEntryText", () => {
     truncatedCentral.writeUInt32LE(0x22222222, truncatedCentral.length - 22 - (46 + 24));
     expect(extractZipEntryText(truncatedCentral, "pr-agent-provenance.json", 4096)).toBeNull();
 
+    const oversizedCentralLengths = createSingleEntryZip(
+      "pr-agent-provenance.json",
+      Buffer.from("{}", "utf8"),
+    );
+    const cdStart = oversizedCentralLengths.readUInt32LE(oversizedCentralLengths.length - 22 + 16);
+    oversizedCentralLengths.writeUInt16LE(500, cdStart + 28);
+    expect(
+      extractZipEntryText(oversizedCentralLengths, "pr-agent-provenance.json", 4096),
+    ).toBeNull();
+
     const badDataEnd = createSingleEntryZip("pr-agent-provenance.json", Buffer.from("{}", "utf8"), {
       compressionMethod: 0,
     });

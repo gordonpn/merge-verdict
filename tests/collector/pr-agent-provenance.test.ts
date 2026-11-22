@@ -233,6 +233,84 @@ describe("collectPrAgentProvenance", () => {
       }),
     ).rejects.toEqual({ response: { status: 500 } });
 
+    const restPrimitiveError = {
+      rest: {
+        actions: {
+          listWorkflowRuns: async () => {
+            throw "primitive-network-failure";
+          },
+        },
+      },
+    } as unknown as Octokit;
+
+    await expect(
+      collectPrAgentProvenance({
+        rest: restPrimitiveError,
+        retry: directRetry,
+        owner: "octocat",
+        repo: "hello-world",
+        pullRequestNumber: 1,
+        headSha,
+        checkRunUrls: [],
+      }),
+    ).rejects.toBe("primitive-network-failure");
+
+    const restDeniedWithUnrelatedRun = {
+      rest: {
+        actions: {
+          getWorkflowRun: async () => {
+            throw { status: 403 };
+          },
+          listWorkflowRuns: async () => ({
+            data: {
+              workflow_runs: [
+                {
+                  id: 40,
+                  path: ".github/workflows/pr-agent.yml",
+                  status: "completed",
+                  repository: { full_name: "octocat/hello-world" },
+                },
+              ],
+            },
+          }),
+          listWorkflowRunArtifacts: async () => ({ data: { artifacts: [] } }),
+        },
+      },
+    } as unknown as Octokit;
+
+    const deniedResult = await collectPrAgentProvenance({
+      rest: restDeniedWithUnrelatedRun,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: ["https://github.com/octocat/hello-world/actions/runs/998/job/1"],
+    });
+    expect(deniedResult.status).toBe("unavailable");
+
+    const restNonStatusObject = {
+      rest: {
+        actions: {
+          listWorkflowRuns: async () => {
+            throw { status: "not-a-number" };
+          },
+        },
+      },
+    } as unknown as Octokit;
+
+    await expect(
+      collectPrAgentProvenance({
+        rest: restNonStatusObject,
+        retry: directRetry,
+        owner: "octocat",
+        repo: "hello-world",
+        pullRequestNumber: 1,
+        headSha,
+        checkRunUrls: [],
+      }),
+    ).rejects.toEqual({ status: "not-a-number" });
+
     expect(digestCommentBody("test")).toHaveLength(64);
   });
 });

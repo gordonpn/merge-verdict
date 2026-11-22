@@ -878,4 +878,28 @@ Non-compliant requirements:
     expect(result.verdict).toBe("APPROVE");
     expect(result.checkRunConclusion).toBeNull();
   });
+
+  it("clears evaluatedCommitSha when unverified current-head comment lacks check confirmation", () => {
+    const partialBody = stateComment(false, "ACTIVE");
+
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [comment(partialBody, { id: 101, bodyDigest: digest(partialBody) })],
+      prAgentProvenance: {
+        status: "unverified",
+        workflowPath: null,
+        runId: null,
+        headSha: null,
+        commentId: null,
+        bodyDigest: null,
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "PENDING",
+      evaluatedCommitSha: null,
+      isFresh: false,
+      verdict: "CHANGES_REQUESTED",
+    });
+  });
 });

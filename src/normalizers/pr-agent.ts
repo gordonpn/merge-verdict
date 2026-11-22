@@ -351,7 +351,7 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
   let status: ReviewerStatus = sha ? (fresh ? "COMPLETED" : "STALE") : "PENDING";
   let evaluatedCommitSha = sha ?? null;
   if (fresh && state?.last_run.complete === false) status = "PENDING";
-  if (provenanceProvided && !provenCommentTrusted && status === "COMPLETED") {
+  if (provenanceProvided && !provenCommentTrusted && fresh) {
     status = "PENDING";
     evaluatedCommitSha = null;
   }

@@ -309,7 +309,7 @@ export async function collectPrAgentProvenance(
       }
     }
 
-    if (fallbackUnavailable && candidateRunIds.length === 0) {
+    if (fallbackUnavailable) {
       return unavailableProvenance();
     }
   } catch (error) {
