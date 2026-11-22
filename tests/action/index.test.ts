@@ -342,6 +342,15 @@ describe("repository and pull request number extraction", () => {
 
     expect(
       extractPullRequestNumber(undefined, {
+        workflow_run: { pull_requests: [] },
+      }),
+    ).toBeNull();
+
+    expect(extractPullRequestNumber("0", { pull_request: { number: 99 } })).toBeNull();
+    expect(extractPullRequestNumber("-1", { pull_request: { number: 99 } })).toBeNull();
+
+    expect(
+      extractPullRequestNumber(undefined, {
         check_run: { pull_requests: [{}] },
       }),
     ).toBeNull();
