@@ -62,8 +62,8 @@ Subsequent directory changes select that version automatically.
 The package runtime and contributor build both require Node.js `>=24.11.0`
 (matching tsup 9's Node 24 requirement and GitHub Actions' Node 24 LTS runtime).
 Node type declarations stay on the `24.x` LTS line to prevent Node 25+ APIs from
-entering source code, and CI runs `just check-runtime` on the same Node 24
-runtime to verify the generated standalone bundles.
+entering source code, and CI builds with Node.js 24 then runs `just check-runtime`
+on Node.js 24.11.0 to verify the generated standalone bundles at the package floor.
 
 ## Project Status
 
