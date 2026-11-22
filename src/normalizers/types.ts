@@ -5,6 +5,7 @@ import type {
   GitHubReviewSubmission,
   GitHubReviewThread,
 } from "../collector/github-collector.js";
+import type { PrAgentProvenanceEvidence } from "../collector/pr-agent-provenance.js";
 import type { ReviewerExecutionRecord } from "../models/reviewer.js";
 
 /**
@@ -19,6 +20,7 @@ export interface NormalizerInput {
   readonly checkRuns?: readonly GitHubCheckRun[];
   readonly conversationComments?: readonly GitHubConversationComment[];
   readonly commitStatuses?: readonly GitHubCommitStatus[];
+  readonly prAgentProvenance?: PrAgentProvenanceEvidence;
 }
 
 /**

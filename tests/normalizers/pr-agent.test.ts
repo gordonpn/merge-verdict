@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -736,4 +737,145 @@ Non-compliant requirements:
       expect(evaluation.verdict).toBe(expectedPolicyVerdict);
     },
   );
+
+  function digest(body: string): string {
+    return createHash("sha256").update(body).digest("hex");
+  }
+
+  it("prefers the artifact-attested PR-Agent comment over a spoofed newer github-actions[bot] comment", () => {
+    const authenticBody = stateComment(true, "ACTIVE");
+    const spoofedCleanBody = stateComment(true, "RESOLVED");
+
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [
+        comment(authenticBody, {
+          id: 101,
+          bodyDigest: digest(authenticBody),
+          createdAt: "2026-11-22T09:00:00Z",
+        }),
+        comment(spoofedCleanBody, {
+          id: 202,
+          bodyDigest: digest(spoofedCleanBody),
+          createdAt: "2026-11-22T09:05:00Z",
+        }),
+      ],
+      checkRuns: [check({ appSlug: "github-actions", checkSuiteId: 9001 })],
+      prAgentProvenance: {
+        status: "verified",
+        workflowPath: ".github/workflows/pr-agent.yml",
+        runId: 5001,
+        headSha,
+        commentId: 101,
+        bodyDigest: digest(authenticBody),
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "COMPLETED",
+      verdict: "CHANGES_REQUESTED",
+      isFresh: true,
+      evaluatedCommitSha: headSha,
+    });
+    expect(result.findings.some((finding) => finding.isBlocking && !finding.isResolved)).toBe(true);
+  });
+
+  it("rejects tampered comment bodies and unverified or unavailable workflow provenance", () => {
+    const cleanBody = stateComment(true, "RESOLVED");
+
+    const tampered = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [
+        comment(`${cleanBody}\n<!-- edited -->`, {
+          id: 101,
+          bodyDigest: digest(`${cleanBody}\n<!-- edited -->`),
+        }),
+      ],
+      checkRuns: [check({ appSlug: "github-actions" })],
+      prAgentProvenance: {
+        status: "verified",
+        workflowPath: ".github/workflows/pr-agent.yml",
+        runId: 5001,
+        headSha,
+        commentId: 101,
+        bodyDigest: digest(cleanBody),
+      },
+    });
+    expect(tampered.status).toBe("PENDING");
+    expect(tampered.verdict).toBe("NONE");
+    expect(tampered.isFresh).toBe(false);
+
+    for (const provenanceStatus of ["unverified", "unavailable"] as const) {
+      const blocked = normalizePrAgentReviewer({
+        headSha,
+        conversationComments: [
+          comment(cleanBody, {
+            id: 101,
+            bodyDigest: digest(cleanBody),
+          }),
+        ],
+        checkRuns: [check({ appSlug: "github-actions" })],
+        prAgentProvenance: {
+          status: provenanceStatus,
+          workflowPath: null,
+          runId: null,
+          headSha: null,
+          commentId: null,
+          bodyDigest: null,
+        },
+      });
+      expect(blocked.status).toBe("PENDING");
+      expect(blocked.verdict).not.toBe("APPROVE");
+    }
+  });
+
+  it("retains findings while withholding COMPLETED approval when unverified comment reports blocking items", () => {
+    const blockingBody = stateComment(true, "ACTIVE");
+
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [comment(blockingBody, { id: 101, bodyDigest: digest(blockingBody) })],
+      checkRuns: [check({ appSlug: "github-actions" })],
+      prAgentProvenance: {
+        status: "unverified",
+        workflowPath: ".github/workflows/other.yml",
+        runId: 999,
+        headSha: null,
+        commentId: null,
+        bodyDigest: null,
+      },
+    });
+
+    expect(result.status).toBe("PENDING");
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+    expect(result.findings.some((finding) => finding.isBlocking && !finding.isResolved)).toBe(true);
+  });
+
+  it("ignores runner / pr-agent check runs whose appSlug is not github-actions", () => {
+    const cleanBody = stateComment(true, "RESOLVED");
+
+    const result = normalizePrAgentReviewer({
+      headSha,
+      conversationComments: [comment(cleanBody, { id: 101, bodyDigest: digest(cleanBody) })],
+      checkRuns: [
+        check({
+          name: "runner / pr-agent",
+          appSlug: "untrusted-app",
+          conclusion: "failure",
+        }),
+      ],
+      prAgentProvenance: {
+        status: "verified",
+        workflowPath: ".github/workflows/pr-agent.yml",
+        runId: 5001,
+        headSha,
+        commentId: 101,
+        bodyDigest: digest(cleanBody),
+      },
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("APPROVE");
+    expect(result.checkRunConclusion).toBeNull();
+  });
 });

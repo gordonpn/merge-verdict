@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { GitHubConversationComment } from "../collector/github-collector.js";
+import { digestCommentBody } from "../collector/pr-agent-provenance.js";
 import type { NormalizedFinding } from "../models/finding.js";
 import type { ReviewerExecutionRecord, ReviewerStatus } from "../models/reviewer.js";
 import { canonicalizeCommitSha } from "../models/snapshot.js";
@@ -277,7 +278,31 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
     .sort((a, b) => commentTime(b) - commentTime(a) || b.id - a.id)
     .map((c) => analyzeComment(c, input.repository, normalizedHeadSha));
 
-  const selected = candidates.find((c) => c.fresh) ?? candidates[0];
+  const provenance = input.prAgentProvenance;
+  const provenanceProvided = provenance !== undefined;
+  const verifiedProvenance =
+    provenance?.status === "verified" &&
+    provenance.commentId !== null &&
+    provenance.bodyDigest !== null &&
+    provenance.headSha !== null &&
+    canonicalizeCommitSha(provenance.headSha) === normalizedHeadSha
+      ? {
+          commentId: provenance.commentId,
+          bodyDigest: provenance.bodyDigest.toLowerCase(),
+        }
+      : null;
+
+  const verifiedCandidate = verifiedProvenance
+    ? candidates.find(
+        (c) =>
+          c.comment.id === verifiedProvenance.commentId &&
+          (c.comment.bodyDigest ?? digestCommentBody(c.body)).toLowerCase() ===
+            verifiedProvenance.bodyDigest,
+      )
+    : undefined;
+
+  const provenCommentTrusted = provenanceProvided ? verifiedCandidate !== undefined : true;
+  const selected = verifiedCandidate ?? candidates.find((c) => c.fresh) ?? candidates[0];
   const comment = selected?.comment;
   const body = selected?.body ?? "";
   const stateSpan = selected?.stateSpan;
@@ -287,7 +312,16 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
   const isStaleComment = sha !== undefined && !fresh;
 
   const check = input.checkRuns
-    ?.filter((c) => PR_AGENT_CHECK_NAMES.has(c.name.toLowerCase()))
+    ?.filter((c) => {
+      const name = c.name.toLowerCase();
+      if (!PR_AGENT_CHECK_NAMES.has(name)) {
+        return false;
+      }
+      if (name === "runner / pr-agent" && c.appSlug != null) {
+        return c.appSlug.toLowerCase() === "github-actions";
+      }
+      return true;
+    })
     .sort((a, b) => b.id - a.id)[0];
 
   const findings: NormalizedFinding[] =
@@ -317,6 +351,10 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
   let status: ReviewerStatus = sha ? (fresh ? "COMPLETED" : "STALE") : "PENDING";
   let evaluatedCommitSha = sha ?? null;
   if (fresh && state?.last_run.complete === false) status = "PENDING";
+  if (provenanceProvided && !provenCommentTrusted && status === "COMPLETED") {
+    status = "PENDING";
+    evaluatedCommitSha = null;
+  }
   const checkMatchesHead =
     check !== undefined && canonicalizeCommitSha(check.commitSha) === normalizedHeadSha;
   if (check && !isStaleComment && (!fresh || checkMatchesHead)) {
@@ -324,8 +362,8 @@ export function normalizePrAgentReviewer(input: NormalizerInput): ReviewerExecut
     if (!checkMatchesHead) status = "STALE";
     else if (check.status !== "completed") status = "PENDING";
     else if (!["success", "neutral", "skipped"].includes(check.conclusion ?? "")) status = "FAILED";
-    else if (!fresh) {
-      // A successful workflow cannot establish missing review provenance.
+    else if (!fresh || (provenanceProvided && !provenCommentTrusted)) {
+      // A successful workflow cannot establish missing or unverified review provenance.
       status = comment ? "PENDING" : "SKIPPED";
       if (comment) evaluatedCommitSha = null;
     }
