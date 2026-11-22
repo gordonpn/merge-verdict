@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../../src/models/config.js";
-import type { ReviewSnapshot } from "../../src/models/snapshot.js";
+import { createReviewSnapshot, type ReviewSnapshot } from "../../src/models/snapshot.js";
 import { normalizeCopilotReviewer } from "../../src/normalizers/copilot.js";
 import { evaluatePolicy, type PolicyEvaluationInput } from "../../src/policy/evaluator.js";
 
@@ -58,6 +58,57 @@ function reviewer(value: Fixture) {
 }
 
 describe("evaluatePolicy decision matrix", () => {
+  it("reevaluates a timeout deadline with unchanged evidence fingerprints", () => {
+    const value = input();
+    value.config.allowAdvisoryExemptions = true;
+    value.config.rateLimitTimeoutMinutes = 30;
+    reviewer(value).status = "RATE_LIMITED";
+    reviewer(value).isFresh = false;
+    reviewer(value).rateLimitedAt = "2026-11-11T00:00:00Z";
+    const { stateFingerprint: _fingerprint, capturedAt: _capturedAt, ...evidence } = value.snapshot;
+    const before = createReviewSnapshot({
+      ...evidence,
+      capturedAt: "2026-11-11T00:29:59.999Z",
+    });
+    const atDeadline = createReviewSnapshot({
+      ...evidence,
+      capturedAt: "2026-11-11T00:30:00Z",
+    });
+    const after = createReviewSnapshot({
+      ...evidence,
+      capturedAt: "2026-11-11T00:30:00.001Z",
+    });
+    const finalSnapshot = { headSha: before.headSha, stateFingerprint: before.stateFingerprint };
+
+    const evaluations = [before, atDeadline, after].map((snapshot) =>
+      evaluatePolicy({ ...value, snapshot, finalSnapshot }),
+    );
+
+    expect(evaluations.map((evaluation) => evaluation.verdict)).toEqual([
+      "PENDING",
+      "PASS",
+      "PASS",
+    ]);
+    expect(evaluations.map((evaluation) => evaluation.exemptedReviewerIds)).toEqual([
+      [],
+      ["reviewer"],
+      ["reviewer"],
+    ]);
+    expect([atDeadline.stateFingerprint, after.stateFingerprint]).toEqual([
+      before.stateFingerprint,
+      before.stateFingerprint,
+    ]);
+    expect(
+      [before, atDeadline, after].map((snapshot) => snapshot.reviewers.reviewer?.status),
+    ).toEqual(["RATE_LIMITED", "RATE_LIMITED", "RATE_LIMITED"]);
+    expect(
+      evaluatePolicy({
+        ...value,
+        snapshot: atDeadline,
+        finalSnapshot: { ...finalSnapshot, stateFingerprint: "changed-evidence" },
+      }).verdict,
+    ).toBe("STALE");
+  });
   it("passes reconciled evidence without claiming approval eligibility", () => {
     expect(evaluatePolicy(input())).toMatchObject({
       verdict: "PASS",

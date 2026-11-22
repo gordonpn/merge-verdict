@@ -2,6 +2,14 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-22: Keep evidence fingerprints independent of timeout evaluation
+
+- Decision: Preserve the evidence-only fingerprint and reevaluate time-dependent policy on each invocation using the snapshot's explicit collection time.
+- Rationale: The Action already evaluates unconditionally. Equal evidence fingerprints can legitimately accompany different verdicts across a rate-limit timeout deadline.
+- Rejected alternatives: Hashing collection time would invalidate evidence freshness on every collection. Adding storage or timers is unnecessary for this contract clarification; automatic refresh remains separate scheduling work.
+- Verification: A regression computes real fingerprints before, at, and after the timeout, asserting identical fingerprints, exact verdicts and exemptions, and unchanged execution statuses.
+- Origin: [Rate-limit timeout fingerprint contract](https://github.com/gordonpn/merge-verdict/issues/150).
+
 ## 2026-11-22: Preserve verdict severity while reading DeepSeek subsections
 
 - Decision: Recognize numbered level-three material finding headings and keep each heading's supporting text together. Apply the adapter's existing verdict-derived severity and blocking rules.
