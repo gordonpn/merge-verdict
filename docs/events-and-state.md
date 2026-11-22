@@ -58,7 +58,7 @@ jobs:
 **Behavior**:
 
 - Workflows are isolated per pull request.
-- Because `concurrency` is scoped to `jobs.evaluate`, events rejected by `jobs.evaluate.if` (bot actors, fork review events, non-PR comments, self checks, and empty or multi-PR runs) are skipped before entering the concurrency group and cannot replace a pending refresh.
+- Because `concurrency` is scoped to `jobs.evaluate`, events rejected by `jobs.evaluate.if` (bot actors, fork review events, non-PR comments, self checks, and empty or multi-PR runs) skip without publishing checks and rely on GitHub Actions evaluating `jobs.evaluate.if` before occupying the PR concurrency slot, while Section 3 snapshot verification prevents stale runs from publishing over newer state.
 - During the advisory rollout (`cancel-in-progress: false`), incoming eligible events queue behind any active run for the same PR so a fresh run evaluates once the active check publication finishes without mid-publication cancellation. Active cancellation (`cancel-in-progress: true`) requires live cancellation recovery validation first.
 
 ### 2.2. Self-Triggering Loop Prevention

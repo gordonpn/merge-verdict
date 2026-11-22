@@ -505,6 +505,20 @@ describe("isSelfTriggeredEvent loop prevention", () => {
         },
       }).skipped,
     ).toBe(true);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "pull_request_review_comment",
+        actor: "fork-contributor",
+        payload: {
+          action: "edited",
+          repository: { full_name: "gordonpn/merge-verdict" },
+          pull_request: { head: { repo: { full_name: "fork-contributor/merge-verdict" } } },
+          sender: { login: "fork-contributor" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(true);
   });
 
   it("skips check_run events for the merge-verdict check run", () => {

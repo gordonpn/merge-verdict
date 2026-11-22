@@ -260,10 +260,20 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
     const action = typeof payload?.action === "string" ? payload.action.trim().toLowerCase() : "";
     const commentLogin = getNestedString(asRecord(payload?.comment), "user", "login");
     const senderLogin = getNestedString(payload, "sender", "login");
+    const pullHeadRepo = getNestedString(
+      asRecord(asRecord(payload?.pull_request)?.head),
+      "repo",
+      "full_name",
+    );
+    const baseRepo = getNestedString(payload, "repository", "full_name");
+    const isCrossRepoFork =
+      pullHeadRepo.length > 0 && baseRepo.length > 0 && pullHeadRepo !== baseRepo;
     const isHumanActor =
       actor.length > 0 && !isBotLogin(actor) && (senderLogin === "" || !isBotLogin(senderLogin));
-    // Allow human edits or deletions of bot-authored comments (e.g. PR-Agent summaries) to refresh.
-    const isHumanRefresh = (action === "edited" || action === "deleted") && isHumanActor;
+    // Allow same-repo human edits or deletions of bot comments (e.g. PR-Agent summaries) to refresh.
+    // On GitHub, only repo collaborators/maintainers can edit or delete github-actions[bot] comments.
+    const isHumanRefresh =
+      (action === "edited" || action === "deleted") && isHumanActor && !isCrossRepoFork;
     if (isSelfBotLogin(commentLogin) && !isHumanRefresh) {
       return {
         skipped: true,
