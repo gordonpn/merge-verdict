@@ -526,89 +526,104 @@ describe("collectPrAgentProvenance", () => {
     expect(newerCheckWins.runId).toBe(30);
   });
 
-  it("filters unrelated-PR workflow runs before applying the inspection limit", async () => {
-    const body = "<!-- pr-agent:review:full -->\npr1";
-    const digest = digestCommentBody(body);
-    const zip = Buffer.from(
-      makeZip(
-        "pr-agent-provenance.json",
-        JSON.stringify({
-          schema_version: 2,
-          workflow_path: ".github/workflows/pr-agent.yml",
-          run_id: 100,
-          repository: "octocat/hello-world",
-          pull_request_number: 1,
-          head_sha: "a".repeat(40),
-          comment_id: 7,
-          body_digest: digest,
-        }),
-      ),
-    );
+  it.each([false, true])(
+    "preserves known check-linked runs beyond fallback limits: %s",
+    async (checkLinked) => {
+      const body = "<!-- pr-agent:review:full -->\npr1";
+      const digest = digestCommentBody(body);
+      const zip = Buffer.from(
+        makeZip(
+          "pr-agent-provenance.json",
+          JSON.stringify({
+            schema_version: 2,
+            workflow_path: ".github/workflows/pr-agent.yml",
+            run_id: 100,
+            repository: "octocat/hello-world",
+            pull_request_number: 1,
+            head_sha: "a".repeat(40),
+            comment_id: 7,
+            body_digest: digest,
+          }),
+        ),
+      );
 
-    const rest = {
-      rest: {
-        actions: {
-          listWorkflowRuns: async () => ({
-            data: {
-              workflow_runs: [
-                ...Array.from({ length: 6 }, (_, index) => ({
-                  id: 200 + index,
-                  path: ".github/workflows/pr-agent.yml",
-                  status: "completed",
-                  pull_requests: index % 2 === 0 ? [{ number: 2 }] : [],
-                  updated_at: "2026-10-01T12:20:00Z",
-                  repository: { full_name: "octocat/hello-world" },
-                })),
-                {
-                  id: 100,
-                  path: ".github/workflows/pr-agent.yml",
-                  status: "completed",
-                  pull_requests: [],
-                  updated_at: "2026-10-01T12:00:00Z",
-                  repository: { full_name: "octocat/hello-world" },
-                },
-              ],
-            },
-          }),
-          listWorkflowRunArtifacts: async ({ run_id }: { run_id: number }) => ({
-            data: {
-              artifacts: [
-                {
-                  id: run_id,
-                  name:
-                    run_id === 100
-                      ? "pr-agent-review-provenance-pr-1"
-                      : "pr-agent-review-provenance-pr-2",
-                  expired: false,
-                },
-              ],
-            },
-          }),
-          downloadArtifact: async () => ({ data: zip }),
+      const rest = {
+        rest: {
+          actions: {
+            getWorkflowRun: async () => ({
+              data: {
+                id: 100,
+                path: ".github/workflows/pr-agent.yml",
+                status: "completed",
+                head_sha: headSha,
+                updated_at: "2026-10-01T12:00:00Z",
+                repository: { full_name: "octocat/hello-world" },
+              },
+            }),
+            listWorkflowRuns: async () => ({
+              data: {
+                workflow_runs: [
+                  ...Array.from({ length: checkLinked ? 60 : 6 }, (_, index) => ({
+                    id: 200 + index,
+                    path: ".github/workflows/pr-agent.yml",
+                    status: "completed",
+                    pull_requests: index % 2 === 0 ? [{ number: 2 }] : [],
+                    updated_at: "2026-10-01T12:20:00Z",
+                    repository: { full_name: "octocat/hello-world" },
+                  })),
+                  {
+                    id: 100,
+                    path: ".github/workflows/pr-agent.yml",
+                    status: "completed",
+                    pull_requests: [],
+                    updated_at: "2026-10-01T12:00:00Z",
+                    repository: { full_name: "octocat/hello-world" },
+                  },
+                ],
+              },
+            }),
+            listWorkflowRunArtifacts: async ({ run_id }: { run_id: number }) => ({
+              data: {
+                artifacts: [
+                  {
+                    id: run_id,
+                    name:
+                      run_id === 100
+                        ? "pr-agent-review-provenance-pr-1"
+                        : "pr-agent-review-provenance-pr-2",
+                    expired: false,
+                  },
+                ],
+              },
+            }),
+            downloadArtifact: async () => ({ data: zip }),
+          },
         },
-      },
-    } as unknown as Octokit;
+      } as unknown as Octokit;
 
-    const result = await collectPrAgentProvenance({
-      rest,
-      retry: directRetry,
-      owner: "octocat",
-      repo: "hello-world",
-      pullRequestNumber: 1,
-      headSha: "a".repeat(40),
-      checkRunUrls: [],
-      commentDigests: new Map([[7, digest]]),
-    });
+      const result = await collectPrAgentProvenance({
+        rest,
+        retry: directRetry,
+        owner: "octocat",
+        repo: "hello-world",
+        pullRequestNumber: 1,
+        headSha: "a".repeat(40),
+        checkRunUrls: checkLinked
+          ? ["https://github.com/octocat/hello-world/actions/runs/100/job/1"]
+          : [],
+        commentDigests: new Map([[7, digest]]),
+      });
 
-    expect(result).toEqual({
-      status: "verified",
-      workflowPath: ".github/workflows/pr-agent.yml",
-      runId: 100,
-      headSha: "a".repeat(40),
-      commentId: 7,
-      bodyDigest: digest,
-    });
-  });
+      expect(result).toEqual({
+        status: "verified",
+        workflowPath: ".github/workflows/pr-agent.yml",
+        runId: 100,
+        headSha: "a".repeat(40),
+        commentId: 7,
+        bodyDigest: digest,
+      });
+    },
+  );
 
   it("retries in-progress check_run runs via completed listing and treats 410 artifact downloads as missing", async () => {
     const body = "<!-- pr-agent:review:full -->\nready";

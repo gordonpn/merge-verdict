@@ -308,10 +308,11 @@ export async function collectPrAgentProvenance(
     readonly timestampMs: number;
   }
   const candidateRuns: CandidateWorkflowRun[] = [];
+  const checkRunIds = new Set(orderCheckRunIdsDesc(checkRunUrls));
   let fallbackUnavailable = false;
   let fallbackVerified: PrAgentProvenanceEvidence | null = null;
 
-  for (const runId of orderCheckRunIdsDesc(checkRunUrls)) {
+  for (const runId of checkRunIds) {
     if (inspectedRunIds.has(runId)) {
       continue;
     }
@@ -395,7 +396,17 @@ export async function collectPrAgentProvenance(
   );
 
   let inspectedMatchingRuns = 0;
-  for (const candidate of candidateRuns.slice(0, MAX_CANDIDATE_RUN_SCANS)) {
+  let scannedFallbackRuns = 0;
+  for (const candidate of candidateRuns) {
+    const checkLinked = checkRunIds.has(candidate.id);
+    if (
+      !checkLinked &&
+      (scannedFallbackRuns >= MAX_CANDIDATE_RUN_SCANS ||
+        inspectedMatchingRuns >= MAX_WORKFLOW_RUNS_TO_INSPECT)
+    ) {
+      continue;
+    }
+    if (!checkLinked) scannedFallbackRuns += 1;
     try {
       const result = await readRunProvenanceArtifact(
         rest,
@@ -406,7 +417,7 @@ export async function collectPrAgentProvenance(
         canonicalHeadSha,
         candidate.id,
       );
-      if (result.hasCandidateArtifact) {
+      if (result.hasCandidateArtifact && !checkLinked) {
         inspectedMatchingRuns += 1;
       }
       if (result.evidence) {
@@ -414,9 +425,6 @@ export async function collectPrAgentProvenance(
           return result.evidence;
         }
         fallbackVerified ??= result.evidence;
-      }
-      if (inspectedMatchingRuns >= MAX_WORKFLOW_RUNS_TO_INSPECT) {
-        break;
       }
     } catch (error) {
       if (handleOptionalWorkflowError(error)) {
