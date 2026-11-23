@@ -12,7 +12,7 @@ Delivery after that initial scan: [#161](https://github.com/gordonpn/merge-verdi
 
 - Priority: P2. Effort: S. Readiness: implementation in [PR #167](https://github.com/gordonpn/merge-verdict/pull/167), awaiting hosted verification and human review.
 - Reason: Selecting shared-bot comments after a review cannot identify the generated output of that run.
-- First action: Verify the publisher's posting response, version 2 artifact, and current comment digest on the exact PR head.
+- First action: Investigate the hosted partial review's excluded-file coverage before attempting full state reconciliation. Exact posting-response binding is verified on `5229766`; the live state remains partial with older active findings.
 - Done: Generated output binds to its own posting receipt; unrelated output and edits fail closed; same-head candidate ordering is verified; producer state and ticket-compliance behavior have live evidence.
 - Unblocks: Authenticated PR-Agent evidence for [#73](https://github.com/gordonpn/merge-verdict/issues/73). Local tests alone do not complete the issue.
 - Snapshot boundary: This NOW entry was refreshed on 2026-11-23 UTC. The surrounding backlog entries retain the older snapshot above and require live revalidation before execution. [#171](https://github.com/gordonpn/merge-verdict/issues/171) tracks the older attribution race and needs reconciliation against posting-response evidence, not automatic closure.
@@ -38,6 +38,8 @@ Delivery after that initial scan: [#161](https://github.com/gordonpn/merge-verdi
 ## LATER
 
 The pinned PR-Agent action wrapper still pulls a mutable runtime image tag. [#172](https://github.com/gordonpn/merge-verdict/issues/172) tracks pinning the runtime digest and verifying its source/version relationship independently from producer binding.
+
+[#173](https://github.com/gordonpn/merge-verdict/issues/173) tracks binding provenance to the current workflow run attempt. Do not confuse same-head review discovery with verification of a same-run rerun's attempt.
 
 The DeepSeek subsection implementation discovered existing fenced-heading and description-fidelity limits, tracked separately in [#162](https://github.com/gordonpn/merge-verdict/issues/162). Do not expand the observed-format fix to implement a general Markdown parser.
 
