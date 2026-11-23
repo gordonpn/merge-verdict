@@ -210,6 +210,7 @@ describe("publishGeneratedReview", () => {
     { overrides: { PR_NUMBER: "0" }, success: false },
     { overrides: { GITHUB_RUN_ID: "not-a-number" }, success: false },
     { overrides: { GITHUB_RUN_ATTEMPT: "-1" }, success: false },
+    { overrides: { PROVENANCE_PATH: "" }, success: false },
   ])(
     "validates CLI inputs and writes evidence only after publication: $overrides",
     ({ overrides, success }) => {

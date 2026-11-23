@@ -107,6 +107,7 @@ async function main(): Promise<void> {
     runAttempt: positiveInteger("GITHUB_RUN_ATTEMPT"),
   };
   const text = readFileSync(requiredEnv("PR_AGENT_OUTPUT_PATH"), "utf8");
+  const provenancePath = requiredEnv("PROVENANCE_PATH");
   const currentHead = execFileSync(
     "gh",
     ["api", `repos/${repository}/pulls/${target.pullRequestNumber}`, "--jq", ".head.sha"],
@@ -132,7 +133,7 @@ async function main(): Promise<void> {
     const receipt: unknown = JSON.parse(response);
     return receipt;
   });
-  writeFileSync(requiredEnv("PROVENANCE_PATH"), JSON.stringify(evidence));
+  writeFileSync(provenancePath, JSON.stringify(evidence));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
