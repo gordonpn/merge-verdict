@@ -88,7 +88,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Checkout review publisher
-        if: github.event_name == 'pull_request' || (steps.pr_state.outputs.eligible == 'true' && (github.event.comment.body == '/review' || startsWith(github.event.comment.body, '/review ')))
+        if: steps.target_meta.outputs.head_sha != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: gordonpn/merge-verdict
@@ -96,8 +96,12 @@ jobs:
           persist-credentials: false
           sparse-checkout: scripts
 
+      - name: Validate pinned publisher files
+        if: steps.target_meta.outputs.head_sha != ''
+        run: test -f scripts/publish-pr-agent-review.ts && test -f scripts/pr-agent-review-envelope.md
+
       - name: Set up publisher runtime
-        if: github.event_name == 'pull_request' || (steps.pr_state.outputs.eligible == 'true' && (github.event.comment.body == '/review' || startsWith(github.event.comment.body, '/review ')))
+        if: steps.target_meta.outputs.head_sha != ''
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24.15.0"
@@ -125,7 +129,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish generated review with provenance
-        if: (github.event_name == 'pull_request' || (steps.pr_state.outputs.eligible == 'true' && (github.event.comment.body == '/review' || startsWith(github.event.comment.body, '/review ')))) && steps.pr_agent.outcome == 'success'
+        if: steps.target_meta.outputs.head_sha != '' && steps.pr_agent.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
@@ -135,7 +139,7 @@ jobs:
         run: node scripts/publish-pr-agent-review.ts
 
       - name: Upload review provenance artifact
-        if: (github.event_name == 'pull_request' || (steps.pr_state.outputs.eligible == 'true' && (github.event.comment.body == '/review' || startsWith(github.event.comment.body, '/review ')))) && steps.pr_agent.outcome == 'success'
+        if: steps.target_meta.outputs.head_sha != '' && steps.pr_agent.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pr-agent-review-provenance-pr-${{ github.event.pull_request.number || github.event.issue.number }}
