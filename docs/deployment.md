@@ -268,6 +268,7 @@ jobs:
       contents: read
       pull-requests: write
       checks: write
+      actions: read
     steps:
       - name: Checkout trusted verifier
         uses: actions/checkout@v4
@@ -338,6 +339,7 @@ jobs:
       contents: read
       pull-requests: write
       checks: write
+      actions: read
     steps:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7

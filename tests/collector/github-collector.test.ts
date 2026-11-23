@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { deflateRawSync } from "node:zlib";
 import { graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
@@ -1659,8 +1660,43 @@ describe("historical finding provenance", () => {
     expect(collected.prAgentProvenance?.status).toBe("unverified");
   });
 
-  it("enables PR-Agent provenance by default in createGitHubCollector", () => {
-    const collector = createGitHubCollector("valid-token");
-    expect(collector).toBeInstanceOf(GitHubCollector);
+  it.each([true, false])("factory provenance collection enabled=%s", async (enabled) => {
+    const body = readFileSync(
+      new URL("../fixtures/pr-agent/factory-review.md", import.meta.url),
+      "utf8",
+    );
+    const { fetcher: standardFetch } = createStandardFetch();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith(`/issues/${pullRequestNumber}/comments`)) {
+        return jsonResponse([
+          { ...createIssueComment(501, body), user: { login: "github-actions[bot]" } },
+        ]);
+      }
+      if (url.pathname.endsWith("/actions/workflows/pr-agent.yml/runs")) {
+        return jsonResponse({ workflow_runs: [] });
+      }
+      return standardFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const collector = createGitHubCollector(
+        "valid-token",
+        enabled ? {} : { collectPrAgentProvenance: false },
+      );
+
+      const result = await collector.collectPullRequest({ ...repository, pullRequestNumber });
+
+      expect(result.prAgentProvenance?.status).toBe(enabled ? "unverified" : undefined);
+      expect(
+        fetcher.mock.calls.some(([input]) =>
+          String(input instanceof Request ? input.url : input).includes(
+            "/actions/workflows/pr-agent.yml/runs",
+          ),
+        ),
+      ).toBe(enabled);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

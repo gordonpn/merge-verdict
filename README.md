@@ -52,6 +52,8 @@ Merge Verdict adopts an **Actions-first hybrid architecture**:
 
 For full architectural details, see [docs/architecture.md](docs/architecture.md).
 
+PR-Agent provenance verification requires `actions: read` in the caller's workflow token. Upgrading from header-only attribution can leave PR-Agent `PENDING` until that permission is granted; see [docs/security.md](docs/security.md). The collector factory enables provenance collection by default. Direct `GitHubCollector` construction requires explicit opt-in, and the factory accepts `collectPrAgentProvenance: false` to disable collection. Disabling collection preserves legacy header-based attribution and does not provide authenticated workflow provenance.
+
 ## Contributor Toolchain
 
 The root `.node-version` pins Node.js 24.15.0. With fnm installed, enable
