@@ -41,8 +41,6 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     steps:
       - name: Check PR eligibility for comment triggers
         id: pr_state
@@ -61,6 +59,8 @@ jobs:
 
       - name: Validate reviewer credentials
         if: github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           if [ -z "${DEEPSEEK_API_KEY//[[:space:]]/}" ]; then
             echo "::error::DEEPSEEK_API_KEY is missing, empty, or whitespace-only while ENABLE_PR_AGENT is enabled."
@@ -69,7 +69,7 @@ jobs:
 
       - name: Capture review target metadata
         id: target_meta
-        if: github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true'
+        if: github.event_name == 'pull_request' || (steps.pr_state.outputs.eligible == 'true' && (github.event.comment.body == '/review' || startsWith(github.event.comment.body, '/review ')))
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
@@ -91,6 +91,8 @@ jobs:
         if: github.event_name == 'pull_request' || (steps.pr_state.outputs.eligible == 'true' && (github.event.comment.body == '/review' || startsWith(github.event.comment.body, '/review ')))
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          repository: gordonpn/merge-verdict
+          ref: 67a8d86babf671b694bc34472608541950c20797
           persist-credentials: false
           sparse-checkout: scripts
 
