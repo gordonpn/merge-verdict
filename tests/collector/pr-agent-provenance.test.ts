@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { deflateRawSync } from "node:zlib";
 import type { Octokit } from "@octokit/rest";
 import { describe, expect, it } from "vitest";
+import { publishGeneratedReview } from "../../scripts/publish-pr-agent-review.js";
 import {
   collectPrAgentProvenance,
   digestCommentBody,
@@ -108,20 +110,28 @@ describe("collectPrAgentProvenance", () => {
   it.each([1, 2])(
     "validates schema %s after a per-check run lookup returns 403",
     async (schemaVersion) => {
-      const body = "<!-- pr-agent:review:full -->";
-      const digest = digestCommentBody(body);
+      const generatedOutput = readFileSync(
+        new URL("../fixtures/pr-agent/generated-output.json", import.meta.url),
+        "utf8",
+      );
+      const produced = await publishGeneratedReview(
+        generatedOutput,
+        {
+          repository: "octocat/hello-world",
+          pullRequestNumber: 1,
+          headSha,
+          runId: 30,
+          runAttempt: 1,
+        },
+        async (body) => ({ id: 9, body }),
+      );
+      const digest = produced.body_digest;
       const zip = Buffer.from(
         makeZip(
           "pr-agent-provenance.json",
           JSON.stringify({
+            ...produced,
             schema_version: schemaVersion,
-            workflow_path: ".github/workflows/pr-agent.yml",
-            run_id: 30,
-            repository: "octocat/hello-world",
-            pull_request_number: 1,
-            head_sha: headSha,
-            comment_id: 9,
-            body_digest: digest,
           }),
         ),
       );
