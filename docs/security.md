@@ -44,7 +44,13 @@ permissions:
 
 This is a trusted publisher job example. Read-only collection jobs use read permissions; omit review write access when the selected provider does not need it. `actions: read` allows `createGitHubCollector` (which enables `collectPrAgentProvenance` by default; `GitHubCollector` callers can opt in explicitly) to verify workflow-run paths (such as `.github/workflows/pr-agent.yml`) and download provenance artifacts instead of trusting the shared `github-actions[bot]` comment login alone. Existing callers using `GITHUB_TOKEN` must grant `actions: read` for PR-Agent reviews to reach `COMPLETED`; when `actions: read` is denied, provenance reports `unavailable` and PR-Agent remains `PENDING`. Effective permissions depend on the event and repository/organization policy. A denied check write is a publication error and must withhold approval, not trigger a Commit Status API fallback. Workflows must never request wildcard `write-all` permissions. See [GitHub workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
 
-### 2.2. Dedicated GitHub App Scoped Permissions
+### 2.2. PR-Agent Posting Provenance
+
+PR-Agent provenance schema version 2 binds generated local output to the exact comment write response, rather than discovering shared-bot comments after posting. The publisher validates generated PR identity and the current head before writing, then requires the returned body to equal the submitted body. Missing output, ambiguous records, stale heads, write errors, or mismatched receipts fail the job without creating provenance. Later edits fail the collector's body-digest check. Version 1 artifacts are rejected; upgrade the producer and rerun `/review` before expecting authenticated completion.
+
+This authenticates the trusted publisher's output, not the correctness of an LLM review. The same-repository eligibility rules exclude forks, bots, and Dependabot before execution. The publisher checks out scripts from the workflow revision and runs Node.js 24 without installing PR dependencies. A compromised eligible workflow revision, third-party action runtime, or runner remains inside the trusted computing boundary; this does not provide cryptographic isolation from that compromise.
+
+### 2.3. Dedicated GitHub App Scoped Permissions
 
 When using a dedicated GitHub App to generate installation access tokens, the App registration must be restricted to:
 

@@ -38,7 +38,7 @@ export function isTrustedPrAgentCheckRun(check: {
 }
 
 const PrAgentProvenanceArtifactSchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   workflow_path: z.literal(PR_AGENT_WORKFLOW_PATH),
   run_id: z.number().int().positive(),
   run_attempt: z.number().int().positive().optional(),
@@ -326,21 +326,11 @@ export async function collectPrAgentProvenance(
         run.repository.full_name.toLowerCase() === expectedRepository
       ) {
         inspectedRunIds.add(run.id);
-        const result = await readRunProvenanceArtifact(
-          rest,
-          retry,
-          owner,
-          repo,
-          pullRequestNumber,
-          canonicalHeadSha,
-          run.id,
-        );
-        if (result.evidence) {
-          if (matchesCollectedComment(result.evidence, commentDigests)) {
-            return result.evidence;
-          }
-          fallbackVerified ??= result.evidence;
-        }
+        candidateRuns.push({
+          id: run.id,
+          headShaMatches: canonicalizeCommitSha(run.head_sha) === canonicalHeadSha,
+          timestampMs: runTimestampMs(run),
+        });
       }
     } catch (error) {
       if (handleOptionalWorkflowError(error)) {
@@ -393,7 +383,7 @@ export async function collectPrAgentProvenance(
     }
   } catch (error) {
     if (handleOptionalWorkflowError(error)) {
-      return fallbackVerified ?? unavailableProvenance();
+      fallbackUnavailable = true;
     }
   }
 

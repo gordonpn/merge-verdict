@@ -1,0 +1,10 @@
+{
+  "type": "review",
+  "pr": {
+    "provider": "github",
+    "repo": "octocat/hello-world",
+    "number": 1,
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "markdown": "Generated review\nNo findings."
+}

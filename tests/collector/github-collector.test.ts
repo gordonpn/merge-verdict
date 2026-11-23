@@ -1149,7 +1149,7 @@ describe("historical finding provenance", () => {
     const provenanceZip = createSingleEntryZip(
       "pr-agent-provenance.json",
       JSON.stringify({
-        schema_version: 1,
+        schema_version: 2,
         workflow_path: ".github/workflows/pr-agent.yml",
         run_id: 7701,
         run_attempt: 1,
@@ -1272,7 +1272,7 @@ describe("historical finding provenance", () => {
     const provenanceZip = createSingleEntryZip(
       "pr-agent-provenance.json",
       JSON.stringify({
-        schema_version: 1,
+        schema_version: 2,
         workflow_path: ".github/workflows/pr-agent.yml",
         run_id: 7710,
         repository: "octocat/hello-world",
@@ -1557,7 +1557,7 @@ describe("historical finding provenance", () => {
     const badZip = createSingleEntryZip(
       "pr-agent-provenance.json",
       JSON.stringify({
-        schema_version: 1,
+        schema_version: 2,
         workflow_path: ".github/workflows/pr-agent.yml",
         run_id: 7704,
         repository: "octocat/hello-world",

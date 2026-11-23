@@ -2,6 +2,15 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-23: Bind PR-Agent provenance to the comment write response
+
+- Decision: Configure upstream's host-only local file sink for review output, validate its repository, PR number, and head SHA, publish that generated Markdown in a separate step, and attest the ID and exact body returned by that write. Accept only provenance schema version 2. Order discovered check-linked and comment-triggered runs together before reading artifacts.
+- Rationale: The pinned action has no comment-ID output. Its file sink provides generated Markdown and PR identity before normal publishing. Searching shared-bot comments afterward can select a sibling workflow's text; recording our own posting response removes that selection boundary. The maintainer explicitly selected a separate comment per run to preserve upstream state reconciliation.
+- Rejected alternatives: Adding a nonce after comment selection still authenticates the wrong selection; disabling normal publishing also disables the file sink and persistent state; adding an App or maintaining an upstream fork adds credentials or maintenance that this integration does not need.
+- Verification: Publisher unit and CLI tests cover exact receipt binding, invalid or ambiguous generated output, posting failure, obsolete heads, later edits, and preserved active findings and incomplete reviews. Collector tests reproduce newer comment-triggered evidence being hidden by an older check URL. Hosted execution remains a separate verification target.
+- Limits: The trusted workflow, action runtime, checkout, runner, and local sink must remain trusted. A compromised publisher or workflow can forge evidence. The extra comment is intentional; discovery remains bounded to the existing pagination and artifact inspection limits. Upstream reconciliation still decides whether findings are active or resolved. Existing schema version 1 artifacts no longer establish approval.
+- Origin: [Issue #165](https://github.com/gordonpn/merge-verdict/issues/165), [PR #167](https://github.com/gordonpn/merge-verdict/pull/167). The prior selection-based decision below is superseded for comment attribution.
+
 ## 2026-11-22: Authenticate PR-Agent workflow attribution and harden producer configuration
 
 - Decision: Emit a workflow-bound `pr-agent-review-provenance` artifact in `.github/workflows/pr-agent.yml` recording `workflow_path`, `run_id`, `repository`, `pull_request_number`, `head_sha`, `comment_id`, and `body_digest`; verify that workflow run and artifact in `GitHubCollector` (with `actions: read` in `.github/workflows/merge-verdict.yml`); require verified provenance in `normalizePrAgentReviewer` whenever `prAgentProvenance` is supplied; and configure `PR_REVIEWER.REQUIRE_TICKET_ANALYSIS_REVIEW: "false"`, `PR_REVIEWER.NUM_MAX_FINDINGS: "10"`, and `PR_REVIEWER.MAX_PREVIOUS_FINDINGS_CHARS: "0"` in `.github/workflows/pr-agent.yml`.

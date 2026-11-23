@@ -19,6 +19,10 @@ check-runtime:
 test:
     pnpm test
 
+# Verify PR-Agent posting receipts and workflow provenance discovery
+test-pr-agent-producer:
+    pnpm test tests/collector/pr-agent-publisher.test.ts tests/collector/pr-agent-provenance.test.ts
+
 # Run unit tests with code coverage report
 test-coverage:
     pnpm run test:coverage

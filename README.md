@@ -54,6 +54,8 @@ For full architectural details, see [docs/architecture.md](docs/architecture.md)
 
 PR-Agent provenance verification requires `actions: read` in the caller's workflow token. Upgrading from header-only attribution can leave PR-Agent `PENDING` until that permission is granted; see [docs/security.md](docs/security.md). The collector factory enables provenance collection by default. Direct `GitHubCollector` construction requires explicit opt-in, and the factory accepts `collectPrAgentProvenance: false` to disable collection. Disabling collection preserves legacy header-based attribution and does not provide authenticated workflow provenance.
 
+The PR-Agent workflow publishes generated review text in a separate comment and records the comment ID and exact body digest from GitHub's posting response. Provenance schema version 2 requires a fresh `/review` run after upgrading; version 1 artifacts are rejected. The extra comment preserves upstream persistent finding state. Run `just test-pr-agent-producer` to verify the publisher and discovery regressions. See [reviewer integrations](docs/reviewer-integrations.md#25-pr-agent) for the trust boundary and failure behavior.
+
 ## Contributor Toolchain
 
 The root `.node-version` pins Node.js 24.15.0. With fnm installed, enable
