@@ -1660,6 +1660,43 @@ describe("historical finding provenance", () => {
     expect(collected.prAgentProvenance?.status).toBe("unverified");
   });
 
+  it("retries provenance REST failures at only one layer", async () => {
+    const body = readFileSync(
+      new URL("../fixtures/pr-agent/factory-review.md", import.meta.url),
+      "utf8",
+    );
+    const { fetcher: standardFetch } = createStandardFetch();
+    let attempts = 0;
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith(`/issues/${pullRequestNumber}/comments`)) {
+        return jsonResponse([
+          { ...createIssueComment(501, body), user: { login: "github-actions[bot]" } },
+        ]);
+      }
+      if (url.pathname.endsWith("/actions/workflows/pr-agent.yml/runs")) {
+        attempts += 1;
+        return jsonResponse({ message: "Server error" }, { status: 500 }, url.href);
+      }
+      return standardFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const collector = createGitHubCollector("valid-token", {
+        sleep: async () => {},
+        random: () => 0.5,
+      });
+
+      await expect(
+        collector.collectPullRequest({ ...repository, pullRequestNumber }),
+      ).rejects.toBeInstanceOf(GitHubCollectorError);
+
+      expect(attempts).toBe(4);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each([true, false])("factory provenance collection enabled=%s", async (enabled) => {
     const body = readFileSync(
       new URL("../fixtures/pr-agent/factory-review.md", import.meta.url),

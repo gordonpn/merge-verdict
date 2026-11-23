@@ -812,7 +812,7 @@ export class GitHubCollector {
       collectProvenance && hasPrAgentActivity
         ? await collectPrAgentProvenance({
             rest: this.rest,
-            retry,
+            retry: (_operation, request) => request(),
             owner,
             repo,
             pullRequestNumber,
