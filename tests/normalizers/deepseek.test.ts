@@ -108,7 +108,7 @@ describe("normalizeDeepSeekReviewer", () => {
       [
         "HIGH - Preserve fenced headings and indentation",
         "Example showing headings and dividers inside a fenced block:",
-        "```markdown",
+        "```text",
         "## Example Section",
         "",
         "### 2. Not a real finding",
@@ -122,7 +122,7 @@ describe("normalizeDeepSeekReviewer", () => {
       [
         "MEDIUM - Retain indented lines outside fences",
         "Keep the indented example:",
-        "  const guarded = true;",
+        "    const guarded = true;",
       ].join("\n"),
     ]);
   });
@@ -208,6 +208,41 @@ describe("normalizeDeepSeekReviewer", () => {
         "    const nested = 1;",
         "---",
       ].join("\n"),
+    );
+  });
+
+  it("does not treat inline backtick spans as fences and strips CR with CRLF input", () => {
+    const body = [
+      "## Verdict: REQUEST CHANGES",
+      "",
+      "## Material Findings",
+      "",
+      "### 1. Inline triple-backtick span",
+      "```inline```",
+      "  indented continuation",
+      "### 2. Next finding after CRLF fence",
+      "```ts",
+      "  const ok = true;",
+      "```",
+    ].join("\r\n");
+
+    const review = {
+      ...makeSubsectionReview("REQUEST CHANGES", "## Unverified Assumptions"),
+      body,
+      bodyDigest: "inline-backtick-crlf",
+    };
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.findings.map((f) => f.title)).toEqual([
+      "Inline triple-backtick span",
+      "Next finding after CRLF fence",
+    ]);
+    expect(result.findings[0]?.description).toBe(
+      ["Inline triple-backtick span", "```inline```", "  indented continuation"].join("\n"),
+    );
+    expect(result.findings[1]?.description).toBe(
+      ["Next finding after CRLF fence", "```ts", "  const ok = true;", "```"].join("\n"),
     );
   });
 

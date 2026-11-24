@@ -8,14 +8,14 @@
 
 Example showing headings and dividers inside a fenced block:
 
-```markdown
+```text
 ## Example Section
 
 ### 2. Not a real finding
 
-if (ready) {
-return true;
-}
+  if (ready) {
+    return true;
+  }
 ---
 ```
 
@@ -24,7 +24,8 @@ return true;
 ### 2. MEDIUM - Retain indented lines outside fences
 
 Keep the indented example:
-const guarded = true;
+
+    const guarded = true;
 
 ## Unverified Assumptions
 
