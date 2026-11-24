@@ -32,12 +32,30 @@ function isCodexAuthor(login: string | null): boolean {
   return login !== null && CODEX_LOGINS.has(login.toLowerCase());
 }
 
-function stripFencedCodeBlocks(text: string): string {
-  const lines: string[] = [];
+// Canonical exclusion ordering for quota prose extraction:
+// 1. Single-pass linear scan tracks Markdown fences and HTML comments together so neither
+//    construct can prematurely close or hijack the other (fences ignore `<!--`, comments
+//    ignore line-start ```` ``` ```` / `~~~`).
+// 2. Removed fenced blocks and multi-line HTML comments emit `\n` so adjacent prose paragraphs
+//    cannot merge across stripped blocks.
+// 3. `stripExcludedHtmlElements` then runs on the result and unwinds misnested closing tags
+//    to the innermost matching ancestor while failing closed to EOF when any tag stays open.
+function stripMarkdownFencesAndHtmlComments(text: string): string {
+  const chunks: string[] = [];
+  const len = text.length;
   let fence = "";
-  for (const line of text.split("\n")) {
-    const delimiter = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+  let i = 0;
+  let lineEnd = -1;
+  let nextLineStart = 0;
+
+  while (i < len) {
+    if (i >= nextLineStart) {
+      lineEnd = text.indexOf("\n", i);
+      nextLineStart = lineEnd === -1 ? len : lineEnd + 1;
+    }
+
     if (fence) {
+      const line = lineEnd === -1 ? text.slice(i) : text.slice(i, lineEnd);
       const closingDelimiter = /^ {0,3}(`{3,}|~{3,})[ \t\r]*$/.exec(line)?.[1];
       if (
         closingDelimiter &&
@@ -46,17 +64,48 @@ function stripFencedCodeBlocks(text: string): string {
       ) {
         fence = "";
         // Preserve paragraph separation between prose before and after a removed fence.
-        lines.push("");
+        chunks.push("\n");
       }
+      i = nextLineStart;
       continue;
     }
-    if (delimiter) {
-      fence = delimiter;
+
+    const atLineStart = i === 0 || text[i - 1] === "\n";
+    if (atLineStart) {
+      const line = lineEnd === -1 ? text.slice(i) : text.slice(i, lineEnd);
+      const delimiter = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+      if (delimiter) {
+        fence = delimiter;
+        i = nextLineStart;
+        continue;
+      }
+    }
+
+    const segment = text.slice(i, nextLineStart);
+    const commentOffset = segment.indexOf("<!--");
+    if (commentOffset === -1) {
+      chunks.push(segment);
+      i = nextLineStart;
       continue;
     }
-    lines.push(line);
+
+    if (commentOffset > 0) {
+      chunks.push(segment.slice(0, commentOffset));
+    }
+
+    const commentStart = i + commentOffset;
+    const commentClose = text.indexOf("-->", commentStart + 4);
+    if (commentClose === -1) {
+      break;
+    }
+
+    if (lineEnd !== -1 && commentClose > lineEnd) {
+      chunks.push("\n");
+    }
+    i = commentClose + 3;
   }
-  return lines.join("\n");
+
+  return chunks.join("");
 }
 
 function stripExcludedHtmlElements(text: string): string {
@@ -85,8 +134,9 @@ function stripExcludedHtmlElements(text: string): string {
       continue;
     }
 
-    if (stack.at(-1) === tagName) {
-      stack.pop();
+    const matchIndex = stack.lastIndexOf(tagName);
+    if (matchIndex >= 0) {
+      stack.length = matchIndex;
       if (stack.length === 0) {
         cursor = index + match[0].length;
       }
@@ -101,9 +151,7 @@ function stripExcludedHtmlElements(text: string): string {
 }
 
 function hasCodexQuotaDiagnostic(body: string): boolean {
-  // Strip fenced examples before HTML tags/comments so tag-like code examples never swallow prose.
-  const withoutFences = stripFencedCodeBlocks(body);
-  const prose = stripExcludedHtmlElements(withoutFences.replace(/<!--[\s\S]*?(?:-->|$)/g, ""));
+  const prose = stripExcludedHtmlElements(stripMarkdownFencesAndHtmlComments(body));
   return prose
     .split(/\n[ \t]*\n/)
     .map((paragraph) => paragraph.replace(/^(?:[ \t\r]*\n)+/, ""))

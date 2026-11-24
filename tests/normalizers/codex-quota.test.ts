@@ -102,8 +102,24 @@ describe("Codex quota provenance", () => {
       `${failedState}\n\`\`\`html\n<blockquote>example\n\`\`\`\n${quotaNotice}`,
     ],
     [
+      "fenced code containing an unclosed HTML comment",
+      `${failedState}\n\`\`\`html\n<!-- unclosed comment\n\`\`\`\n${quotaNotice}`,
+    ],
+    [
+      "line-start HTML comment containing unclosed line-start triple backticks and tildes",
+      `${failedState}\n<!--\n\`\`\`text\n~~~text\n-->\n\n${quotaNotice}`,
+    ],
+    [
+      "inline HTML comment containing unclosed line-start triple backticks and tildes",
+      `${failedState}\nDiagnostic context: <!--\n\`\`\`text\n~~~text\n-->\n${quotaNotice}`,
+    ],
+    [
       "self-closing and stray closing excluded HTML tags",
       `${failedState}\n<code/></blockquote>\n\n${quotaNotice}`,
+    ],
+    [
+      "misnested HTML closing tag unwinding inner open tag",
+      `${failedState}\n<blockquote><pre>Earlier run</blockquote>\n\nYou have reached your Codex usage limits for code reviews.`,
     ],
   ])("recognizes an explicit quota diagnostic after %s", (_kind, body) => {
     const result = normalizeCodexReviewer({ headSha, conversationComments: [comment(body)] });
@@ -156,18 +172,23 @@ describe("Codex quota provenance", () => {
       "<blockquote><pre>Earlier run</pre>\n\nYou have reached your Codex usage limits for code reviews.\n</blockquote>",
     ],
     [
-      "misnested HTML closing tag inside blockquote",
-      "<blockquote><pre>Earlier run</blockquote>\n\nYou have reached your Codex usage limits for code reviews.",
+      "stray unmatched closing tag inside open blockquote",
+      "<blockquote></pre>\n\nYou have reached your Codex usage limits for code reviews.",
     ],
     [
       "unclosed HTML pre block",
       "<pre>\nYou have reached your Codex usage limits for code reviews.",
     ],
     [
+      "unclosed HTML blockquote",
+      "<blockquote>\nYou have reached your Codex usage limits for code reviews.",
+    ],
+    [
       "self-closing HTML tag inside excluded pre block",
       "<pre><code/>\nYou have reached your Codex usage limits for code reviews.\n</pre>",
     ],
     ["HTML comment", "<!--\nYou have reached your Codex usage limits for code reviews.\n-->"],
+    ["unclosed HTML comment", "<!--\nYou have reached your Codex usage limits for code reviews."],
     [
       "historical reference",
       "Previous run reported: You have reached your Codex usage limits for code reviews.",
