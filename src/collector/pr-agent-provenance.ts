@@ -425,6 +425,7 @@ export async function collectPrAgentProvenance(
           return result.evidence;
         }
         fallbackVerified ??= result.evidence;
+        break;
       }
     } catch (error) {
       if (handleOptionalWorkflowError(error)) {

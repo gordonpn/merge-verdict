@@ -720,4 +720,83 @@ describe("collectPrAgentProvenance", () => {
       bodyDigest: digest,
     });
   });
+
+  it("stops instead of falling back to an older attested comment when a newer run fails digest matching", async () => {
+    const olderBody = "<!-- pr-agent:review:full -->\nolder clean";
+    const newerTamperedBody = "<!-- pr-agent:review:full -->\ntampered";
+    const olderDigest = digestCommentBody(olderBody);
+    const newerOriginalDigest = digestCommentBody("<!-- pr-agent:review:full -->\nnewer original");
+    const zipFor = (runId: number, commentId: number, bodyDigest: string) =>
+      Buffer.from(
+        makeZip(
+          "pr-agent-provenance.json",
+          JSON.stringify({
+            schema_version: 2,
+            workflow_path: ".github/workflows/pr-agent.yml",
+            run_id: runId,
+            repository: "octocat/hello-world",
+            pull_request_number: 1,
+            head_sha: headSha,
+            comment_id: commentId,
+            body_digest: bodyDigest,
+          }),
+        ),
+      );
+
+    const rest = {
+      rest: {
+        actions: {
+          listWorkflowRuns: async () => ({
+            data: {
+              workflow_runs: [
+                {
+                  id: 410,
+                  path: ".github/workflows/pr-agent.yml",
+                  status: "completed",
+                  updated_at: "2026-10-01T12:15:00Z",
+                  repository: { full_name: "octocat/hello-world" },
+                },
+                {
+                  id: 400,
+                  path: ".github/workflows/pr-agent.yml",
+                  status: "completed",
+                  updated_at: "2026-10-01T12:00:00Z",
+                  repository: { full_name: "octocat/hello-world" },
+                },
+              ],
+            },
+          }),
+          listWorkflowRunArtifacts: async ({ run_id }: { run_id: number }) => ({
+            data: {
+              artifacts: [{ id: run_id, name: "pr-agent-review-provenance-pr-1", expired: false }],
+            },
+          }),
+          downloadArtifact: async ({ artifact_id }: { artifact_id: number }) => ({
+            data:
+              artifact_id === 410
+                ? zipFor(410, 202, newerOriginalDigest)
+                : zipFor(400, 101, olderDigest),
+          }),
+        },
+      },
+    } as unknown as Octokit;
+
+    const result = await collectPrAgentProvenance({
+      rest,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: [],
+      commentDigests: new Map([
+        [101, olderDigest],
+        [202, digestCommentBody(newerTamperedBody)],
+      ]),
+    });
+
+    expect(result.runId).toBe(410);
+    expect(result.commentId).toBe(202);
+    expect(result.bodyDigest).toBe(newerOriginalDigest);
+  });
 });

@@ -6,5 +6,5 @@
     "number": 1,
     "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   },
-  "markdown": "Generated review\nNo findings."
+  "markdown": "Generated review\nNo findings.\n<!-- pr-agent-review-state:v1\n{\"schema_version\":1,\"last_run\":{\"head_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"complete\":true},\"findings\":[]}\n-->"
 }

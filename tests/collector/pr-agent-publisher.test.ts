@@ -63,6 +63,18 @@ describe("publishGeneratedReview", () => {
     output({ markdown: "" }),
     output({ markdown: "   " }),
     output({ markdown: null }),
+    output({ markdown: "Generated review without persistent state" }),
+    output({
+      markdown:
+        '<!-- pr-agent-review-state:v1 {"schema_version":1,"last_run":{"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","complete":true},"findings":[]} unclosed',
+    }),
+    output({
+      markdown: "<!-- pr-agent-review-state:v1 {not-json} -->",
+    }),
+    output({
+      markdown:
+        '<!-- pr-agent-review-state:v1\n{"schema_version":1,"last_run":{"head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","complete":true},"findings":[]}\n-->',
+    }),
     output({ pr: null }),
     output({ pr: { provider: "gitlab" } }),
     output({

@@ -24,8 +24,78 @@ interface PostingEvidence {
   readonly body_digest: string;
 }
 
+const STATE_MARKER = "<!-- pr-agent-review-state:v1";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function skipWhitespace(text: string, start: number): number {
+  let cursor = start;
+  while (cursor < text.length && /\s/.test(text[cursor] ?? "")) {
+    cursor += 1;
+  }
+  return cursor;
+}
+
+function hasMatchingPersistentState(markdown: string, headSha: string): boolean {
+  const start = markdown.indexOf(STATE_MARKER);
+  if (start < 0) return false;
+
+  const jsonStart = skipWhitespace(markdown, start + STATE_MARKER.length);
+  if (markdown[jsonStart] !== "{") return false;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let jsonEnd = -1;
+  for (let i = jsonStart; i < markdown.length; i += 1) {
+    const ch = markdown[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        jsonEnd = i + 1;
+        break;
+      }
+    }
+  }
+  if (jsonEnd < 0) return false;
+
+  const afterJson = skipWhitespace(markdown, jsonEnd);
+  if (!markdown.startsWith("-->", afterJson)) return false;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(markdown.slice(jsonStart, jsonEnd));
+  } catch {
+    return false;
+  }
+
+  return (
+    isRecord(parsed) &&
+    parsed.schema_version === 1 &&
+    isRecord(parsed.last_run) &&
+    typeof parsed.last_run.complete === "boolean" &&
+    typeof parsed.last_run.head_sha === "string" &&
+    parsed.last_run.head_sha.toLowerCase() === headSha.toLowerCase() &&
+    Array.isArray(parsed.findings)
+  );
 }
 
 /** Publishes one generated review and returns evidence from its exact posting receipt. */
@@ -47,6 +117,12 @@ export async function publishGeneratedReview(
     output.markdown.trim() === ""
   ) {
     throw new Error("Expected one generated review for the captured repository, PR, and head");
+  }
+
+  if (!hasMatchingPersistentState(output.markdown, target.headSha)) {
+    throw new Error(
+      "Generated PR-Agent review is missing valid persistent finding state for the captured head",
+    );
   }
 
   const envelope = readFileSync(new URL("./pr-agent-review-envelope.md", import.meta.url), "utf8")
