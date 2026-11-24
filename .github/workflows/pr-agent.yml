@@ -92,7 +92,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: gordonpn/merge-verdict
-          ref: 67a8d86babf671b694bc34472608541950c20797
+          ref: 1c90012284a29329da842a22eb6243bd2e3a5893
           persist-credentials: false
           sparse-checkout: scripts
 
