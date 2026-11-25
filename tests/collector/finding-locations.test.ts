@@ -6,11 +6,15 @@ import { GitHubCollector } from "../../src/index.js";
 const repository = { owner: "octocat", repo: "hello-world" };
 const pullRequestNumber = 26;
 
-function jsonResponse(data: unknown): Response {
-  return new Response(JSON.stringify(data), {
+function jsonResponse(data: unknown, url?: string): Response {
+  const response = new Response(JSON.stringify(data), {
     status: 200,
     headers: { "content-type": "application/json" },
   });
+  if (url !== undefined) {
+    Object.defineProperty(response, "url", { value: url });
+  }
+  return response;
 }
 
 function createCollector(fetcher: typeof fetch): GitHubCollector {
@@ -25,36 +29,42 @@ function createCollector(fetcher: typeof fetch): GitHubCollector {
   });
 }
 
-function createBaseRestHandler(pathname: string): Response | null {
+function createBaseRestHandler(pathname: string, url: string): Response | null {
   if (pathname.endsWith(`/pulls/${pullRequestNumber}`)) {
-    return jsonResponse({
-      number: pullRequestNumber,
-      draft: false,
-      mergeable: true,
-      head: { ref: "feature", sha: "head-sha", repo: { full_name: "octocat/hello-world" } },
-      base: { ref: "main", sha: "base-sha", repo: { full_name: "octocat/hello-world" } },
-      user: { login: "octocat" },
-    });
+    return jsonResponse(
+      {
+        number: pullRequestNumber,
+        draft: false,
+        mergeable: true,
+        head: { ref: "feature", sha: "head-sha", repo: { full_name: "octocat/hello-world" } },
+        base: { ref: "main", sha: "base-sha", repo: { full_name: "octocat/hello-world" } },
+        user: { login: "octocat" },
+      },
+      url,
+    );
   }
   if (pathname.endsWith("/contents/.github/merge-verdict.yml")) {
-    return jsonResponse({
-      type: "file",
-      encoding: "base64",
-      content: Buffer.from("verification: true").toString("base64"),
-    });
+    return jsonResponse(
+      {
+        type: "file",
+        encoding: "base64",
+        content: Buffer.from("verification: true").toString("base64"),
+      },
+      url,
+    );
   }
   if (
     pathname.endsWith("/comments") ||
     pathname.endsWith("/reviews") ||
     pathname.endsWith("/statuses")
   ) {
-    return jsonResponse([]);
+    return jsonResponse([], url);
   }
   if (pathname.endsWith("/check-runs")) {
-    return jsonResponse({ total_count: 0, check_runs: [] });
+    return jsonResponse({ total_count: 0, check_runs: [] }, url);
   }
   if (pathname.endsWith("/commits")) {
-    return jsonResponse([{ sha: "head-sha" }]);
+    return jsonResponse([{ sha: "head-sha" }], url);
   }
   return null;
 }
@@ -170,11 +180,11 @@ describe("GitHubCollector finding locations and changedFiles", () => {
         }
       }
 
-      const restResponse = createBaseRestHandler(pathname);
+      const restResponse = createBaseRestHandler(pathname, requestUrl.href);
       if (restResponse) {
         return restResponse;
       }
-      return jsonResponse({});
+      return jsonResponse({}, requestUrl.href);
     });
 
     const collector = createCollector(fetcher);
@@ -290,11 +300,11 @@ describe("GitHubCollector finding locations and changedFiles", () => {
         }
       }
 
-      const restResponse = createBaseRestHandler(pathname);
+      const restResponse = createBaseRestHandler(pathname, requestUrl.href);
       if (restResponse) {
         return restResponse;
       }
-      return jsonResponse({});
+      return jsonResponse({}, requestUrl.href);
     });
 
     const collector = createCollector(fetcher);
