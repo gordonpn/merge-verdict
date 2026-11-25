@@ -122,6 +122,7 @@ describe("collectPrAgentProvenance", () => {
           headSha,
           runId: 30,
           runAttempt: 1,
+          hasPriorReviewState: false,
         },
         async (body) => ({ id: 9, body }),
       );

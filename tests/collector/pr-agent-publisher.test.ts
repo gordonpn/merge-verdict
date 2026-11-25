@@ -8,13 +8,14 @@ import { publishGeneratedReview } from "../../scripts/publish-pr-agent-review.js
 import { digestCommentBody } from "../../src/collector/pr-agent-provenance.js";
 import { normalizePrAgentReviewer } from "../../src/normalizers/pr-agent.js";
 
-function context() {
+function context(hasPriorReviewState = false) {
   return {
     repository: "octocat/hello-world",
     pullRequestNumber: 1,
     headSha: "a".repeat(40),
     runId: 30,
     runAttempt: 2,
+    hasPriorReviewState,
   };
 }
 
@@ -63,7 +64,22 @@ describe("publishGeneratedReview", () => {
     output({ markdown: "" }),
     output({ markdown: "   " }),
     output({ markdown: null }),
-    output({ markdown: "Generated review without persistent state" }),
+    output({
+      markdown: "Review truncated\n⚠️ **Review coverage:**\n- `src/file.ts`",
+    }),
+    output({
+      markdown: "Chunked failure\n1 chunk(s) failed and are not covered by this review.",
+    }),
+    output({
+      payload: { key_issues_to_review: [{ relevant_file: "src/file.ts" }] },
+      markdown: "Generated review without state",
+    }),
+    output({ payload: null, markdown: "Generated review without state" }),
+    output({ payload: {}, markdown: "Generated review without state" }),
+    output({
+      payload: { key_issues_to_review: "none" },
+      markdown: "Generated review without state",
+    }),
     output({
       markdown:
         '<!-- pr-agent-review-state:v1 {"schema_version":1,"last_run":{"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","complete":true},"findings":[]} unclosed',
@@ -102,6 +118,16 @@ describe("publishGeneratedReview", () => {
       expect(post).not.toHaveBeenCalled();
     },
   );
+
+  it("rejects markerless output when prior persistent state exists or is unknown", async () => {
+    const post = vi.fn();
+
+    await expect(publishGeneratedReview(output(), context(true), post)).rejects.toThrow();
+    const { hasPriorReviewState: _omitted, ...withoutPriorFlag } = context(false);
+    await expect(publishGeneratedReview(output(), withoutPriorFlag, post)).rejects.toThrow();
+
+    expect(post).not.toHaveBeenCalled();
+  });
 
   it.each([null, {}, { id: 0 }, { id: 1.5 }, { id: 1, body: "sibling workflow replacement" }])(
     "rejects a missing or mismatched posting receipt: %s",
@@ -215,6 +241,20 @@ describe("publishGeneratedReview", () => {
 
   it.each([
     { overrides: {}, success: true },
+    { overrides: { TEST_COMMENTS_JSON: "{}" }, success: false },
+    {
+      overrides: {
+        TEST_COMMENTS_JSON: JSON.stringify([
+          [
+            {
+              user: { login: "github-actions[bot]" },
+              body: "<!-- pr-agent-review-state:v1 {} -->",
+            },
+          ],
+        ]),
+      },
+      success: false,
+    },
     { overrides: { TEST_CURRENT_HEAD: "b".repeat(40) }, success: false },
     { overrides: { GITHUB_REPOSITORY: "" }, success: false },
     { overrides: { GITHUB_REPOSITORY: "invalid" }, success: false },
