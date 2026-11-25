@@ -77,6 +77,7 @@ describe("collectPrAgentProvenance", () => {
             getWorkflowRun: async () => ({
               data: {
                 id: 10,
+                run_attempt: 1,
                 path: ".github/workflows/pr-agent.yml",
                 status: "completed",
                 repository: { full_name: "octocat/hello-world" },
@@ -148,6 +149,7 @@ describe("collectPrAgentProvenance", () => {
                 workflow_runs: [
                   {
                     id: 30,
+                    run_attempt: 1,
                     path: ".github/workflows/pr-agent.yml",
                     status: "completed",
                     repository: { full_name: "octocat/hello-world" },
@@ -206,6 +208,7 @@ describe("collectPrAgentProvenance", () => {
               workflow_runs: [
                 {
                   id: 20,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   repository: { full_name: "octocat/hello-world" },
@@ -291,6 +294,7 @@ describe("collectPrAgentProvenance", () => {
               workflow_runs: [
                 {
                   id: 40,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   repository: { full_name: "octocat/hello-world" },
@@ -352,6 +356,7 @@ describe("collectPrAgentProvenance", () => {
             schema_version: 2,
             workflow_path: ".github/workflows/pr-agent.yml",
             run_id: runId,
+            run_attempt: 1,
             repository: "octocat/hello-world",
             pull_request_number: 1,
             head_sha: headSha,
@@ -370,6 +375,7 @@ describe("collectPrAgentProvenance", () => {
               workflow_runs: [
                 {
                   id: 40,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   head_sha: headSha,
@@ -378,6 +384,7 @@ describe("collectPrAgentProvenance", () => {
                 },
                 {
                   id: 55,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   head_sha: "base-sha",
@@ -386,6 +393,7 @@ describe("collectPrAgentProvenance", () => {
                 },
                 {
                   id: 50,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   head_sha: headSha,
@@ -447,6 +455,7 @@ describe("collectPrAgentProvenance", () => {
             schema_version: 2,
             workflow_path: ".github/workflows/pr-agent.yml",
             run_id: runId,
+            run_attempt: 1,
             repository: "octocat/hello-world",
             pull_request_number: 1,
             head_sha: headSha,
@@ -462,6 +471,7 @@ describe("collectPrAgentProvenance", () => {
           getWorkflowRun: async ({ run_id }: { run_id: number }) => ({
             data: {
               id: run_id,
+              run_attempt: 1,
               path: ".github/workflows/pr-agent.yml",
               status: "completed",
               repository: { full_name: "octocat/hello-world" },
@@ -472,6 +482,7 @@ describe("collectPrAgentProvenance", () => {
               workflow_runs: [
                 {
                   id: 30,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   head_sha: "base-sha",
@@ -549,6 +560,7 @@ describe("collectPrAgentProvenance", () => {
             schema_version: 2,
             workflow_path: ".github/workflows/pr-agent.yml",
             run_id: 100,
+            run_attempt: 1,
             repository: "octocat/hello-world",
             pull_request_number: 1,
             head_sha: "a".repeat(40),
@@ -564,6 +576,7 @@ describe("collectPrAgentProvenance", () => {
             getWorkflowRun: async () => ({
               data: {
                 id: 100,
+                run_attempt: 1,
                 path: ".github/workflows/pr-agent.yml",
                 status: "completed",
                 head_sha: headSha,
@@ -576,6 +589,7 @@ describe("collectPrAgentProvenance", () => {
                 workflow_runs: [
                   ...Array.from({ length: checkLinked ? 60 : 6 }, (_, index) => ({
                     id: 200 + index,
+                    run_attempt: 1,
                     path: ".github/workflows/pr-agent.yml",
                     status: "completed",
                     pull_requests: index % 2 === 0 ? [{ number: 2 }] : [],
@@ -584,6 +598,7 @@ describe("collectPrAgentProvenance", () => {
                   })),
                   {
                     id: 100,
+                    run_attempt: 1,
                     path: ".github/workflows/pr-agent.yml",
                     status: "completed",
                     pull_requests: [],
@@ -646,6 +661,7 @@ describe("collectPrAgentProvenance", () => {
           schema_version: 2,
           workflow_path: ".github/workflows/pr-agent.yml",
           run_id: 300,
+          run_attempt: 1,
           repository: "octocat/hello-world",
           pull_request_number: 1,
           head_sha: headSha,
@@ -661,6 +677,7 @@ describe("collectPrAgentProvenance", () => {
           getWorkflowRun: async () => ({
             data: {
               id: 300,
+              run_attempt: 1,
               path: ".github/workflows/pr-agent.yml",
               status: "in_progress",
               repository: { full_name: "octocat/hello-world" },
@@ -671,6 +688,7 @@ describe("collectPrAgentProvenance", () => {
               workflow_runs: [
                 {
                   id: 301,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   updated_at: "2026-10-01T12:10:00Z",
@@ -678,6 +696,7 @@ describe("collectPrAgentProvenance", () => {
                 },
                 {
                   id: 300,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   updated_at: "2026-10-01T12:05:00Z",
@@ -735,6 +754,7 @@ describe("collectPrAgentProvenance", () => {
             schema_version: 2,
             workflow_path: ".github/workflows/pr-agent.yml",
             run_id: runId,
+            run_attempt: 1,
             repository: "octocat/hello-world",
             pull_request_number: 1,
             head_sha: headSha,
@@ -752,6 +772,7 @@ describe("collectPrAgentProvenance", () => {
               workflow_runs: [
                 {
                   id: 410,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   updated_at: "2026-10-01T12:15:00Z",
@@ -759,6 +780,7 @@ describe("collectPrAgentProvenance", () => {
                 },
                 {
                   id: 400,
+                  run_attempt: 1,
                   path: ".github/workflows/pr-agent.yml",
                   status: "completed",
                   updated_at: "2026-10-01T12:00:00Z",
@@ -1113,5 +1135,112 @@ describe("collectPrAgentProvenance", () => {
     });
 
     expect(rejected.status).toBe("unverified");
+  });
+
+  it("prioritizes scoped artifacts with per_page 100 and continues past 410 or invalid candidate artifacts", async () => {
+    const digest = digestCommentBody("<!-- pr-agent:review:full -->\nfallback-candidate");
+    const validZip = Buffer.from(
+      makeZip(
+        "pr-agent-provenance.json",
+        JSON.stringify({
+          schema_version: 2,
+          workflow_path: ".github/workflows/pr-agent.yml",
+          run_id: 505,
+          run_attempt: 2,
+          repository: "octocat/hello-world",
+          pull_request_number: 1,
+          head_sha: headSha,
+          comment_id: 105,
+          body_digest: digest,
+        }),
+      ),
+    );
+    const seenPerPages: Array<number | undefined> = [];
+    const downloadOrder: number[] = [];
+
+    const rest = {
+      rest: {
+        actions: {
+          getWorkflowRun: async () => ({
+            data: {
+              id: 505,
+              run_attempt: 2,
+              path: ".github/workflows/pr-agent.yml",
+              status: "completed",
+              head_sha: headSha,
+              repository: { full_name: "octocat/hello-world" },
+            },
+          }),
+          listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
+          listWorkflowRunArtifacts: async ({ per_page }: { per_page?: number }) => {
+            seenPerPages.push(per_page);
+            return {
+              data: {
+                artifacts: [
+                  {
+                    id: 3001,
+                    name: "pr-agent-review-provenance",
+                    expired: false,
+                    created_at: "not-a-date",
+                  },
+                  {
+                    id: 3002,
+                    name: "pr-agent-review-provenance-pr-1",
+                    expired: false,
+                    created_at: "2026-10-01T12:00:00Z",
+                  },
+                  {
+                    id: 3003,
+                    name: "pr-agent-review-provenance-pr-1",
+                    expired: false,
+                    created_at: "2026-10-01T12:05:00Z",
+                  },
+                  {
+                    id: 3004,
+                    name: "pr-agent-review-provenance",
+                    expired: false,
+                  },
+                ],
+              },
+            };
+          },
+          downloadArtifact: async ({ artifact_id }: { artifact_id: number }) => {
+            downloadOrder.push(artifact_id);
+            if (artifact_id === 3003) {
+              throw { status: 410 };
+            }
+            if (artifact_id === 3002) {
+              return { data: Buffer.from(makeZip("pr-agent-provenance.json", "{bad-json")) };
+            }
+            if (artifact_id === 3004) {
+              return { data: validZip };
+            }
+            return { data: "unexpected" };
+          },
+        },
+      },
+    } as unknown as Octokit;
+
+    const result = await collectPrAgentProvenance({
+      rest,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: ["https://github.com/octocat/hello-world/actions/runs/505/job/1"],
+      commentDigests: new Map([[105, digest]]),
+    });
+
+    expect(seenPerPages).toEqual([100]);
+    expect(downloadOrder).toEqual([3003, 3002, 3004]);
+    expect(result).toEqual({
+      status: "verified",
+      workflowPath: ".github/workflows/pr-agent.yml",
+      runId: 505,
+      headSha,
+      commentId: 105,
+      bodyDigest: digest,
+    });
   });
 });

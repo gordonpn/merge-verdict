@@ -1217,6 +1217,7 @@ describe("historical finding provenance", () => {
         return jsonResponse(
           {
             id: 7701,
+            run_attempt: 1,
             path: ".github/workflows/pr-agent.yml",
             status: "completed",
             conclusion: "success",
@@ -1275,6 +1276,7 @@ describe("historical finding provenance", () => {
         schema_version: 2,
         workflow_path: ".github/workflows/pr-agent.yml",
         run_id: 7710,
+        run_attempt: 1,
         repository: "octocat/hello-world",
         pull_request_number: pullRequestNumber,
         head_sha: headSha,
@@ -1326,6 +1328,7 @@ describe("historical finding provenance", () => {
             workflow_runs: [
               {
                 id: 7710,
+                run_attempt: 1,
                 path: ".github/workflows/pr-agent.yml",
                 status: "completed",
                 conclusion: "success",
@@ -1431,6 +1434,7 @@ describe("historical finding provenance", () => {
         return jsonResponse(
           {
             id: 7702,
+            run_attempt: 1,
             path: ".github/workflows/spoof.yml",
             status: "completed",
             conclusion: "success",
@@ -1560,6 +1564,7 @@ describe("historical finding provenance", () => {
         schema_version: 2,
         workflow_path: ".github/workflows/pr-agent.yml",
         run_id: 7704,
+        run_attempt: 1,
         repository: "octocat/hello-world",
         pull_request_number: pullRequestNumber + 1,
         head_sha: headSha,
@@ -1622,6 +1627,7 @@ describe("historical finding provenance", () => {
         return jsonResponse(
           {
             id: 7704,
+            run_attempt: 1,
             path: ".github/workflows/pr-agent.yml",
             status: "completed",
             conclusion: "success",
