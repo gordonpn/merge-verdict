@@ -17,6 +17,9 @@ const DEEPSEEK_CHECK_NAMES = new Set([
   "deepseek-review",
 ]);
 const NUMBERED_FINDING_HEADING = /^###[^\S\r\n]+\d+\.[^\S\r\n]+(\S[^\r\n]*)$/;
+const FENCE_OPENING = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const FENCE_CLOSING = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+const HORIZONTAL_RULE = /^ {0,3}(?:[-*_][ \t]*){3,}$/;
 const VERDICT_TOKEN_LOOKAHEAD = String.raw`[*_\x60~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)(?![A-Za-z0-9])`;
 const QUALIFIED_VERDICT_PREFIX = String.raw`##\s*Verdict\b(?::|[ \t]*(?:\r?\n[ \t]*)+(?=${VERDICT_TOKEN_LOOKAHEAD})|[ \t]+(?=${VERDICT_TOKEN_LOOKAHEAD}))`;
 // Avoid /g on module-level patterns; selection and extraction stay stateless.
@@ -52,6 +55,47 @@ function extractRawVerdict(body: string): RawVerdict | null {
   return null;
 }
 
+interface FenceState {
+  char: "`" | "~";
+  length: number;
+}
+
+function nextFenceState(line: string, current: FenceState | null): FenceState | null {
+  if (current) {
+    const closeMatch = FENCE_CLOSING.exec(line);
+    const marker = closeMatch?.[1];
+    if (marker && marker[0] === current.char && marker.length >= current.length) {
+      return null;
+    }
+    return current;
+  }
+
+  const openMatch = FENCE_OPENING.exec(line);
+  const marker = openMatch?.[1];
+  if (!marker) {
+    return null;
+  }
+  const char = marker[0] === "`" ? "`" : "~";
+  const info = openMatch[2] ?? "";
+  // CommonMark forbids backticks in the info string of a backtick fence.
+  if (char === "`" && info.includes("`")) {
+    return null;
+  }
+  return { char, length: marker.length };
+}
+
+function trimBlankLines(lines: readonly string[]): string[] {
+  let start = 0;
+  while (start < lines.length && lines[start]?.trim().length === 0) {
+    start++;
+  }
+  let end = lines.length;
+  while (end > start && lines[end - 1]?.trim().length === 0) {
+    end--;
+  }
+  return lines.slice(start, end);
+}
+
 function extractMaterialFindingsSection(body: string): string | null {
   const marker = "Material Findings";
   const markerIndex = body.toLowerCase().indexOf(marker.toLowerCase());
@@ -62,7 +106,9 @@ function extractMaterialFindingsSection(body: string): string | null {
   const lines = afterMarker.split("\n");
   const sectionLines: string[] = [];
   let isFirstLine = true;
-  for (const line of lines) {
+  let fence: FenceState | null = null;
+  for (const rawLine of lines) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     const trimmed = line.trim();
     if (isFirstLine) {
       isFirstLine = false;
@@ -71,12 +117,13 @@ function extractMaterialFindingsSection(body: string): string | null {
       }
       continue;
     }
-    if (/^#{2,3}\s/.test(trimmed) && !NUMBERED_FINDING_HEADING.test(trimmed)) {
+    if (!fence && /^#{2,3}\s/.test(trimmed) && !NUMBERED_FINDING_HEADING.test(trimmed)) {
       break;
     }
-    sectionLines.push(trimmed);
+    fence = nextFenceState(line, fence);
+    sectionLines.push(line);
   }
-  return sectionLines.join("\n").trim();
+  return trimBlankLines(sectionLines).join("\n");
 }
 
 function parseBulletLine(line: string): string | null {
@@ -96,22 +143,46 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
   if (!sectionText) {
     return [];
   }
-  if (sectionText.toLowerCase() === "none." || sectionText.toLowerCase() === "none") {
+  const normalizedSection = sectionText.trim().toLowerCase();
+  if (normalizedSection === "none." || normalizedSection === "none") {
     return [];
   }
 
   const lines = sectionText.split("\n");
   const entries: [string, ...string[]][] = [];
   let subsection: [string, ...string[]] | undefined;
+  let fence: FenceState | null = null;
   for (const line of lines) {
-    const heading = line.match(NUMBERED_FINDING_HEADING)?.[1];
+    const trimmed = line.trim();
+    if (fence) {
+      fence = nextFenceState(line, fence);
+      if (subsection) {
+        subsection.push(line);
+      }
+      continue;
+    }
+
+    const heading = trimmed.match(NUMBERED_FINDING_HEADING)?.[1]?.trim();
     if (heading) {
       subsection = [heading];
       entries.push(subsection);
       continue;
     }
+    if (HORIZONTAL_RULE.test(line)) {
+      continue;
+    }
+    const nextFence = nextFenceState(line, null);
+    if (nextFence) {
+      fence = nextFence;
+      if (subsection) {
+        subsection.push(line);
+      }
+      continue;
+    }
     if (subsection) {
-      if (line.trim()) subsection.push(line);
+      if (trimmed.length > 0) {
+        subsection.push(line);
+      }
       continue;
     }
     const bullet = parseBulletLine(line);
@@ -120,7 +191,9 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
   const findings: NormalizedFinding[] = [];
   let index = 1;
 
-  for (const entry of entries) {
+  for (const rawEntry of entries) {
+    const [heading, ...bodyLines] = rawEntry;
+    const entry: [string, ...string[]] = [heading, ...trimBlankLines(bodyLines)];
     const findingText = entry[0];
     if (findingText.toLowerCase() === "none." || findingText.toLowerCase() === "none") {
       continue;

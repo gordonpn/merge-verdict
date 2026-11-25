@@ -87,6 +87,165 @@ describe("normalizeDeepSeekReviewer", () => {
     },
   );
 
+  it("preserves fenced headings, indentation, and fenced dividers while stripping standalone dividers", () => {
+    const body = readFileSync(
+      new URL("../fixtures/deepseek/fenced-findings.md", import.meta.url),
+      "utf8",
+    );
+    const review = {
+      ...makeSubsectionReview("REQUEST CHANGES", "## Unverified Assumptions"),
+      body,
+      bodyDigest: "fenced-findings",
+    };
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.findings.map((f) => f.title)).toEqual([
+      "HIGH - Preserve fenced headings and indentation",
+      "MEDIUM - Retain indented lines outside fences",
+    ]);
+    expect(result.findings.map((f) => f.description)).toEqual([
+      [
+        "HIGH - Preserve fenced headings and indentation",
+        "Example showing headings and dividers inside a fenced block:",
+        "```text",
+        "## Example Section",
+        "",
+        "### 2. Not a real finding",
+        "",
+        "  if (ready) {",
+        "    return true;",
+        "  }",
+        "---",
+        "```",
+      ].join("\n"),
+      [
+        "MEDIUM - Retain indented lines outside fences",
+        "Keep the indented example:",
+        "    const guarded = true;",
+      ].join("\n"),
+    ]);
+  });
+
+  it("tracks CommonMark tilde fences and ignores shorter closing fences and outside dividers", () => {
+    const body = [
+      "## Verdict: REQUEST CHANGES",
+      "",
+      "## Material Findings",
+      "",
+      "### 1. First finding with tilde fence",
+      "~~~~markdown",
+      "## Heading inside tilde fence",
+      "~~~",
+      "### 2. Not a second finding",
+      "~~~~",
+      "   * * *",
+      "___",
+      "### 2. Real second finding",
+      "Detail after tilde fence.",
+      "## Missing Verification",
+      "Ignored trailing section.",
+    ].join("\n");
+
+    const review = {
+      ...makeSubsectionReview("REQUEST CHANGES", "## Missing Verification"),
+      body,
+      bodyDigest: "tilde-fence",
+    };
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.findings.map((f) => f.title)).toEqual([
+      "First finding with tilde fence",
+      "Real second finding",
+    ]);
+    expect(result.findings[0]?.description).toBe(
+      [
+        "First finding with tilde fence",
+        "~~~~markdown",
+        "## Heading inside tilde fence",
+        "~~~",
+        "### 2. Not a second finding",
+        "~~~~",
+      ].join("\n"),
+    );
+    expect(result.findings[1]?.description).toBe(
+      ["Real second finding", "Detail after tilde fence."].join("\n"),
+    );
+  });
+
+  it("keeps unclosed fenced blocks within the active finding until EOF", () => {
+    const body = [
+      "## Verdict: REQUEST CHANGES",
+      "",
+      "## Material Findings",
+      "",
+      "### 1. Finding with unclosed fence",
+      "   ```ts",
+      "## Unverified Assumptions",
+      "### 2. Should stay inside fence",
+      "    const nested = 1;",
+      "---",
+      "",
+    ].join("\n");
+
+    const review = {
+      ...makeSubsectionReview("REQUEST CHANGES", "## Unverified Assumptions"),
+      body,
+      bodyDigest: "unclosed-fence",
+    };
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]?.title).toBe("Finding with unclosed fence");
+    expect(result.findings[0]?.description).toBe(
+      [
+        "Finding with unclosed fence",
+        "   ```ts",
+        "## Unverified Assumptions",
+        "### 2. Should stay inside fence",
+        "    const nested = 1;",
+        "---",
+      ].join("\n"),
+    );
+  });
+
+  it("does not treat inline backtick spans as fences and strips CR with CRLF input", () => {
+    const body = [
+      "## Verdict: REQUEST CHANGES",
+      "",
+      "## Material Findings",
+      "",
+      "### 1. Inline triple-backtick span",
+      "```inline```",
+      "  indented continuation",
+      "### 2. Next finding after CRLF fence",
+      "```ts",
+      "  const ok = true;",
+      "```",
+    ].join("\r\n");
+
+    const review = {
+      ...makeSubsectionReview("REQUEST CHANGES", "## Unverified Assumptions"),
+      body,
+      bodyDigest: "inline-backtick-crlf",
+    };
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.findings.map((f) => f.title)).toEqual([
+      "Inline triple-backtick span",
+      "Next finding after CRLF fence",
+    ]);
+    expect(result.findings[0]?.description).toBe(
+      ["Inline triple-backtick span", "```inline```", "  indented continuation"].join("\n"),
+    );
+    expect(result.findings[1]?.description).toBe(
+      ["Next finding after CRLF fence", "```ts", "  const ok = true;", "```"].join("\n"),
+    );
+  });
+
   it("exports adapter object matching ReviewerNormalizer interface", () => {
     expect(deepSeekNormalizer.reviewerId).toBe("deepseek-review");
     expect(deepSeekNormalizer.reviewerName).toBe("DeepSeek Review");
