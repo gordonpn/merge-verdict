@@ -8,13 +8,14 @@ Delivery after that initial scan: [#161](https://github.com/gordonpn/merge-verdi
 
 ## NOW
 
-### [#155: Parse subsection findings under DeepSeek Material Findings](https://github.com/gordonpn/merge-verdict/issues/155)
+### [#165: PR-Agent producer attribution and reconciliation](https://github.com/gordonpn/merge-verdict/issues/165)
 
-- Priority: P2. Effort: XS. Readiness: ready, implementation in progress on an isolated branch from this main revision.
-- Reason: The live reviewer emits numbered subsection findings that the existing parser omits. Verdict heading support is merged, so this is the next bounded correctness fix.
-- First action: Reproduce the captured subsection format with a failing fixture test, then preserve findings and section boundaries.
-- Done: Supported subsection findings retain severity and blocking behavior, unrelated sections stay excluded, and repository tests, coverage and review gates pass.
-- Unblocks: More accurate advisory validation in [#73](https://github.com/gordonpn/merge-verdict/issues/73).
+- Priority: P2. Effort: S. Readiness: implementation in [PR #167](https://github.com/gordonpn/merge-verdict/pull/167), awaiting hosted verification and human review.
+- Reason: Selecting shared-bot comments after a review cannot identify the generated output of that run.
+- First action: Investigate the hosted partial review's excluded-file coverage before attempting full state reconciliation. Exact posting-response binding is verified on `5229766`; the live state remains partial with older active findings.
+- Done: Generated output binds to its own posting receipt; unrelated output and edits fail closed; same-head candidate ordering is verified; producer state and ticket-compliance behavior have live evidence.
+- Unblocks: Authenticated PR-Agent evidence for [#73](https://github.com/gordonpn/merge-verdict/issues/73). Local tests alone do not complete the issue.
+- Snapshot boundary: This NOW entry was refreshed on 2026-11-23 UTC. The surrounding backlog entries retain the older snapshot above and require live revalidation before execution. [#171](https://github.com/gordonpn/merge-verdict/issues/171) tracks the older attribution race and needs reconciliation against posting-response evidence, not automatic closure.
 
 ## NEXT
 
@@ -35,6 +36,10 @@ Delivery after that initial scan: [#161](https://github.com/gordonpn/merge-verdi
 - [#94](https://github.com/gordonpn/merge-verdict/issues/94), [#93](https://github.com/gordonpn/merge-verdict/issues/93), and [#76](https://github.com/gordonpn/merge-verdict/issues/76) retain hosted compatibility, coverage-enforcement and production-gate acceptance. No branch-protection or approval rollout is implied by local tests.
 
 ## LATER
+
+The pinned PR-Agent action wrapper still pulls a mutable runtime image tag. [#172](https://github.com/gordonpn/merge-verdict/issues/172) tracks pinning the runtime digest and verifying its source/version relationship independently from producer binding.
+
+[#173](https://github.com/gordonpn/merge-verdict/issues/173) tracks binding provenance to the current workflow run attempt. Do not confuse same-head review discovery with verification of a same-run rerun's attempt.
 
 The DeepSeek subsection implementation discovered existing fenced-heading and description-fidelity limits, tracked separately in [#162](https://github.com/gordonpn/merge-verdict/issues/162). Do not expand the observed-format fix to implement a general Markdown parser.
 

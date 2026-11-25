@@ -41,8 +41,6 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     steps:
       - name: Check PR eligibility for comment triggers
         id: pr_state
@@ -61,21 +59,90 @@ jobs:
 
       - name: Validate reviewer credentials
         if: github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           if [ -z "${DEEPSEEK_API_KEY//[[:space:]]/}" ]; then
             echo "::error::DEEPSEEK_API_KEY is missing, empty, or whitespace-only while ENABLE_PR_AGENT is enabled."
             exit 1
           fi
 
+      - name: Capture review target metadata
+        id: target_meta
+        if: github.event_name == 'pull_request' || (steps.pr_state.outputs.eligible == 'true' && (github.event.comment.body == '/review' || startsWith(github.event.comment.body, '/review ')))
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          HEAD_SHA="${PR_HEAD_SHA:-}"
+          if [ -z "${HEAD_SHA}" ]; then
+            HEAD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha' 2>/dev/null || true)"
+          fi
+          if [ -z "${HEAD_SHA}" ]; then
+            echo "::error::Could not resolve PR head SHA before PR-Agent execution."
+            exit 1
+          fi
+          {
+            echo "head_sha=$(printf '%s' "${HEAD_SHA}" | tr '[:upper:]' '[:lower:]')"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout review publisher
+        if: steps.target_meta.outputs.head_sha != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: gordonpn/merge-verdict
+          ref: 82d1703ae8ddf7a631f1d0ae85a2c22f05c43d68
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: Validate pinned publisher files
+        if: steps.target_meta.outputs.head_sha != ''
+        run: test -f scripts/publish-pr-agent-review.ts && test -f scripts/pr-agent-review-envelope.md
+
+      - name: Set up publisher runtime
+        if: steps.target_meta.outputs.head_sha != ''
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24.15.0"
+
       - name: PR Agent Action
+        id: pr_agent
         if: github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true'
         uses: The-PR-Agent/pr-agent@e673a02076ce09a4726c3d0c3cc85780e59ca52b # v0.50.0
         env:
           GITHUB_ACTION_CONFIG.HANDLE_PUSH_TRIGGER: "true"
           GITHUB_ACTION_CONFIG.PUSH_COMMANDS: '["/review"]'
+          PR_REVIEWER.REQUIRE_TICKET_ANALYSIS_REVIEW: "false"
+          PR_REVIEWER.PERSISTENT_FINDING_STATE: "true"
+          PR_REVIEWER.NUM_MAX_FINDINGS: "10"
+          PR_REVIEWER.MAX_PREVIOUS_FINDINGS_CHARS: "0"
+          PUSH_OUTPUTS.ENABLE: "true"
+          PUSH_OUTPUTS.CHANNELS: '["file"]'
+          PUSH_OUTPUTS.TOOLS: '["review"]'
+          PUSH_OUTPUTS.FILE_PATH: /github/workspace/pr-agent-output-${{ github.run_id }}-${{ github.run_attempt }}.jsonl
           CONFIG.MODEL: "deepseek/deepseek-chat"
           CONFIG.FALLBACK_MODELS: '["deepseek/deepseek-chat"]'
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_BASE: "https://api.deepseek.com"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish generated review with provenance
+        if: steps.target_meta.outputs.head_sha != '' && steps.pr_agent.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          HEAD_SHA: ${{ steps.target_meta.outputs.head_sha }}
+          PR_AGENT_OUTPUT_PATH: ${{ github.workspace }}/pr-agent-output-${{ github.run_id }}-${{ github.run_attempt }}.jsonl
+          PROVENANCE_PATH: ${{ runner.temp }}/pr-agent-provenance.json
+        run: node scripts/publish-pr-agent-review.ts
+
+      - name: Upload review provenance artifact
+        if: steps.target_meta.outputs.head_sha != '' && steps.pr_agent.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pr-agent-review-provenance-pr-${{ github.event.pull_request.number || github.event.issue.number }}
+          path: ${{ runner.temp }}/pr-agent-provenance.json
+          retention-days: 7
+          if-no-files-found: error

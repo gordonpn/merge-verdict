@@ -8,6 +8,11 @@ import {
   type RetryRequest,
   withRestRetries,
 } from "./client.js";
+import {
+  collectPrAgentProvenance,
+  isTrustedPrAgentCheckRun,
+  type PrAgentProvenanceEvidence,
+} from "./pr-agent-provenance.js";
 import CHANGED_FILES_QUERY from "./queries/changed-files.graphql?raw";
 import THREAD_COMMENTS_QUERY from "./queries/review-thread-comments.graphql?raw";
 import REVIEW_THREADS_QUERY from "./queries/review-threads.graphql?raw";
@@ -115,6 +120,13 @@ export interface CollectPullRequestInput {
   readonly policySha?: string;
   /** Repository-relative policy file path, loaded only from the protected base revision. */
   readonly configPath?: string;
+  /** Collect GitHub Actions workflow-run and provenance-artifact evidence for PR-Agent. */
+  readonly collectPrAgentProvenance?: boolean;
+}
+
+export interface GitHubCollectorOptions extends CollectorRetryOptions {
+  /** Collect GitHub Actions workflow-run and provenance-artifact evidence for PR-Agent. */
+  readonly collectPrAgentProvenance?: boolean;
 }
 
 export interface GitHubReviewThreadComment {
@@ -183,6 +195,7 @@ export interface GitHubCheckRun {
   readonly conclusion: GitHubCheckRunConclusion | null;
   readonly commitSha: string;
   readonly detailsUrl: string | null;
+  readonly appSlug?: string | null;
   readonly output: {
     readonly title: string | null;
     readonly summary: string | null;
@@ -232,6 +245,7 @@ export interface GitHubPullRequestData {
   readonly checkRuns: readonly GitHubCheckRun[];
   /** Most recent status for each context on the evaluation SHA. */
   readonly commitStatuses: readonly GitHubCommitStatus[];
+  readonly prAgentProvenance?: PrAgentProvenanceEvidence;
   readonly policyContent: string;
 }
 
@@ -627,11 +641,17 @@ async function getPolicyContent(
  * Inject clients without additional retry/throttling plugins to preserve bounds.
  */
 export class GitHubCollector {
+  private readonly retryOptions: CollectorRetryOptions;
+  private readonly defaultCollectPrAgentProvenance: boolean;
+
   constructor(
     private readonly rest: Octokit,
     private readonly graph: GraphqlClient,
-    private readonly retryOptions: CollectorRetryOptions = {},
-  ) {}
+    options: GitHubCollectorOptions = {},
+  ) {
+    this.retryOptions = options;
+    this.defaultCollectPrAgentProvenance = options.collectPrAgentProvenance ?? false;
+  }
 
   async collectPullRequest(input: CollectPullRequestInput): Promise<GitHubPullRequestData> {
     try {
@@ -750,6 +770,58 @@ export class GitHubCollector {
     const headRepoFullName = pullRequest.head.repo?.full_name;
     const baseRepoFullName = pullRequest.base.repo?.full_name;
 
+    const mappedCheckRuns: GitHubCheckRun[] = checkRuns.map((check) => ({
+      id: check.id,
+      name: check.name,
+      status: check.status,
+      conclusion: check.conclusion ?? null,
+      commitSha: check.head_sha,
+      detailsUrl: check.html_url ?? null,
+      appSlug: check.app?.slug ?? null,
+      output: {
+        title: check.output.title ?? null,
+        summary: check.output.summary ?? null,
+        text: check.output.text ?? null,
+      },
+      startedAt: check.started_at ?? null,
+      completedAt: check.completed_at ?? null,
+    }));
+
+    const prAgentCheckRunUrls = mappedCheckRuns
+      .filter((check) => isTrustedPrAgentCheckRun(check))
+      .map((check) => check.detailsUrl);
+
+    const prAgentCommentDigests = new Map<number, string>();
+    for (const comment of comments) {
+      const login = comment.user?.login?.toLowerCase();
+      const commentBody = comment.body ?? "";
+      if (
+        (login === "github-actions" || login === "github-actions[bot]") &&
+        (commentBody.includes("<!-- pr-agent:review:full -->") ||
+          commentBody.includes("<!-- pr-agent-review-state:v1"))
+      ) {
+        prAgentCommentDigests.set(comment.id, digestBody(commentBody));
+      }
+    }
+
+    const hasPrAgentActivity = prAgentCheckRunUrls.length > 0 || prAgentCommentDigests.size > 0;
+
+    const collectProvenance =
+      input.collectPrAgentProvenance ?? this.defaultCollectPrAgentProvenance;
+    const prAgentProvenance =
+      collectProvenance && hasPrAgentActivity
+        ? await collectPrAgentProvenance({
+            rest: this.rest,
+            retry: (_operation, request) => request(),
+            owner,
+            repo,
+            pullRequestNumber,
+            headSha: pullRequest.head.sha,
+            checkRunUrls: prAgentCheckRunUrls,
+            commentDigests: prAgentCommentDigests,
+          })
+        : undefined;
+
     return {
       repository: `${owner}/${repo}`,
       pullRequestNumber,
@@ -786,21 +858,7 @@ export class GitHubCollector {
         body: review.body ?? null,
         bodyDigest: digestBody(review.body ?? null),
       })),
-      checkRuns: checkRuns.map((check) => ({
-        id: check.id,
-        name: check.name,
-        status: check.status,
-        conclusion: check.conclusion ?? null,
-        commitSha: check.head_sha,
-        detailsUrl: check.html_url ?? null,
-        output: {
-          title: check.output.title ?? null,
-          summary: check.output.summary ?? null,
-          text: check.output.text ?? null,
-        },
-        startedAt: check.started_at ?? null,
-        completedAt: check.completed_at ?? null,
-      })),
+      checkRuns: mappedCheckRuns,
       commitStatuses: [...latestStatuses.values()].map((status) => ({
         context: status.context,
         state: status.state,
@@ -810,6 +868,7 @@ export class GitHubCollector {
         createdAt: status.created_at,
         updatedAt: status.updated_at,
       })),
+      ...(prAgentProvenance ? { prAgentProvenance } : {}),
       policyContent,
     };
   }
@@ -828,7 +887,7 @@ export class GitHubCollector {
  */
 export function createGitHubCollector(
   token: string,
-  retryOptions: CollectorRetryOptions = {},
+  options: GitHubCollectorOptions = {},
 ): GitHubCollector {
   const authToken = token.trim();
   if (authToken.length === 0) {
@@ -839,5 +898,8 @@ export function createGitHubCollector(
   const graph = graphql.defaults({
     headers: { authorization: `token ${authToken}` },
   });
-  return new GitHubCollector(rest, graph, retryOptions);
+  return new GitHubCollector(rest, graph, {
+    collectPrAgentProvenance: true,
+    ...options,
+  });
 }

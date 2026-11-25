@@ -1,0 +1,13 @@
+{
+  "type": "review",
+  "pr": {
+    "provider": "github",
+    "repo": "octocat/hello-world",
+    "number": 1,
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "payload": {
+    "key_issues_to_review": []
+  },
+  "markdown": "Generated review\nNo findings."
+}

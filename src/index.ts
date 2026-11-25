@@ -10,6 +10,7 @@ export type {
   GitHubCheckRunConclusion,
   GitHubCheckRunStatus,
   GitHubCollectorErrorKind,
+  GitHubCollectorOptions,
   GitHubCommitStatus,
   GitHubCommitStatusState,
   GitHubConversationComment,
@@ -24,6 +25,7 @@ export {
   GitHubCollector,
   GitHubCollectorError,
 } from "./collector/github-collector.js";
+export type { PrAgentProvenanceEvidence } from "./collector/pr-agent-provenance.js";
 export * from "./config/index.js";
 export type { CheckRunStatus } from "./models/index.js";
 export * from "./models/index.js";

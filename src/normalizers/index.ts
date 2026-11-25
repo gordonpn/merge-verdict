@@ -80,6 +80,7 @@ export function buildReviewSnapshotFromPullRequest(
     checkRuns: prData.checkRuns,
     conversationComments: prData.conversationComments,
     commitStatuses: prData.commitStatuses,
+    ...(prData.prAgentProvenance ? { prAgentProvenance: prData.prAgentProvenance } : {}),
   };
 
   const normalizers = options.normalizers ?? DEFAULT_REVIEWER_NORMALIZERS;

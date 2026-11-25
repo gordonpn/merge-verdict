@@ -39,11 +39,20 @@ permissions:
   pull-requests: write # Submit PR reviews and comment dismissals
   statuses: read # Read external commit status evidence
   issues: read # Read issue comments and conversation threads
+  actions: read # Verify workflow runs and authenticated reviewer artifacts
 ```
 
-This is a trusted publisher job example. Read-only collection jobs use read permissions; omit review write access when the selected provider does not need it. Effective permissions depend on the event and repository/organization policy. A denied check write is a publication error and must withhold approval, not trigger a Commit Status API fallback. Workflows must never request wildcard `write-all` permissions. See [GitHub workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
+This is a trusted publisher job example. Read-only collection jobs use read permissions; omit review write access when the selected provider does not need it. `actions: read` allows `createGitHubCollector` (which enables `collectPrAgentProvenance` by default; `GitHubCollector` callers can opt in explicitly) to verify workflow-run paths (such as `.github/workflows/pr-agent.yml`) and download provenance artifacts instead of trusting the shared `github-actions[bot]` comment login alone. Existing callers using `GITHUB_TOKEN` must grant `actions: read` for PR-Agent reviews to reach `COMPLETED`; when `actions: read` is denied, provenance reports `unavailable` and PR-Agent remains `PENDING`. Effective permissions depend on the event and repository/organization policy. A denied check write is a publication error and must withhold approval, not trigger a Commit Status API fallback. Workflows must never request wildcard `write-all` permissions. See [GitHub workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions).
 
-### 2.2. Dedicated GitHub App Scoped Permissions
+### 2.2. PR-Agent Posting Provenance
+
+PR-Agent provenance schema version 2 binds generated local output to the exact comment write response, rather than discovering shared-bot comments after posting. The publisher validates generated PR identity and the current head before writing, then requires the returned body to equal the submitted body. Missing output, ambiguous records, stale heads, write errors, or mismatched receipts fail the job without creating provenance. Later edits fail the collector's body-digest check. Version 1 artifacts are rejected; upgrade the producer and rerun `/review` before expecting authenticated completion.
+
+GitHub does not make the head read and comment write atomic. A head change during that interval can leave a comment about the previous revision; its attested SHA cannot approve a different head. Collection and final snapshot freshness checks remain required. Attribution proves which body was posted, not review correctness or completeness. Expired or deleted artifacts require a fresh review, and incomplete upstream reviews retain unresolved findings.
+
+This authenticates the trusted publisher's output, not the correctness of an LLM review. The same-repository eligibility rules exclude forks, bots, and Dependabot before execution. The publisher checks out an explicit immutable revision of `gordonpn/merge-verdict`, not PR-supplied scripts, and runs Node.js 24 without installing PR dependencies. Updating publisher code requires an explicit reviewed pin update after committing the new script revision. The provider API key is scoped to credential validation and the PR-Agent action, never the publisher. A compromised eligible workflow revision, third-party action runtime, or runner remains inside the trusted computing boundary; this does not provide cryptographic isolation from that compromise.
+
+### 2.3. Dedicated GitHub App Scoped Permissions
 
 When using a dedicated GitHub App to generate installation access tokens, the App registration must be restricted to:
 
@@ -54,6 +63,7 @@ When using a dedicated GitHub App to generate installation access tokens, the Ap
 | `Commit Statuses` | Read-Only    | Read external commit status evidence; no legacy status publishing fallback.                                 |
 | `Contents`        | Read-Only    | Read base-branch policy content.                                                                            |
 | `Issues`          | Read-Only    | Read top-level PR conversation comments.                                                                    |
+| `Actions`         | Read-Only    | Retrieve PR-Agent workflow runs and download provenance artifacts when provenance verification is enabled.  |
 | `Metadata`        | Read-Only    | Default requirement for all GitHub Apps to query repository structure.                                      |
 
 Permissions such as `Administration`, `Workflows`, `Secrets`, or `Repository contents (write)` are strictly prohibited.
