@@ -800,4 +800,318 @@ describe("collectPrAgentProvenance", () => {
     expect(result.commentId).toBe(202);
     expect(result.bodyDigest).toBe(newerOriginalDigest);
   });
+
+  it("fails closed when workflow run_attempt is 2 and schema-2 artifact records run_attempt 1", async () => {
+    const digest = digestCommentBody("<!-- pr-agent:review:full -->\nattempt-1");
+    const zip = Buffer.from(
+      makeZip(
+        "pr-agent-provenance.json",
+        JSON.stringify({
+          schema_version: 2,
+          workflow_path: ".github/workflows/pr-agent.yml",
+          run_id: 500,
+          run_attempt: 1,
+          repository: "octocat/hello-world",
+          pull_request_number: 1,
+          head_sha: headSha,
+          comment_id: 10,
+          body_digest: digest,
+        }),
+      ),
+    );
+
+    const rest = {
+      rest: {
+        actions: {
+          getWorkflowRun: async () => ({
+            data: {
+              id: 500,
+              run_attempt: 2,
+              path: ".github/workflows/pr-agent.yml",
+              status: "completed",
+              head_sha: headSha,
+              repository: { full_name: "octocat/hello-world" },
+            },
+          }),
+          listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
+          listWorkflowRunArtifacts: async () => ({
+            data: {
+              artifacts: [{ id: 5001, name: "pr-agent-review-provenance-pr-1", expired: false }],
+            },
+          }),
+          downloadArtifact: async () => ({ data: zip }),
+        },
+      },
+    } as unknown as Octokit;
+
+    const result = await collectPrAgentProvenance({
+      rest,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: ["https://github.com/octocat/hello-world/actions/runs/500/job/1"],
+      commentDigests: new Map([[10, digest]]),
+    });
+
+    expect(result.status).toBe("unverified");
+  });
+
+  it("fails closed when a schema-2 artifact is missing run_attempt", async () => {
+    const digest = digestCommentBody("<!-- pr-agent:review:full -->\nmissing-attempt");
+    const zip = Buffer.from(
+      makeZip(
+        "pr-agent-provenance.json",
+        JSON.stringify({
+          schema_version: 2,
+          workflow_path: ".github/workflows/pr-agent.yml",
+          run_id: 501,
+          repository: "octocat/hello-world",
+          pull_request_number: 1,
+          head_sha: headSha,
+          comment_id: 11,
+          body_digest: digest,
+        }),
+      ),
+    );
+
+    const rest = {
+      rest: {
+        actions: {
+          getWorkflowRun: async () => ({
+            data: {
+              id: 501,
+              run_attempt: 1,
+              path: ".github/workflows/pr-agent.yml",
+              status: "completed",
+              head_sha: headSha,
+              repository: { full_name: "octocat/hello-world" },
+            },
+          }),
+          listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
+          listWorkflowRunArtifacts: async () => ({
+            data: {
+              artifacts: [{ id: 5011, name: "pr-agent-review-provenance-pr-1", expired: false }],
+            },
+          }),
+          downloadArtifact: async () => ({ data: zip }),
+        },
+      },
+    } as unknown as Octokit;
+
+    const result = await collectPrAgentProvenance({
+      rest,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: ["https://github.com/octocat/hello-world/actions/runs/501/job/1"],
+      commentDigests: new Map([[11, digest]]),
+    });
+
+    expect(result.status).toBe("unverified");
+  });
+
+  it.each([undefined, 0, -1, 1.5, "1"])(
+    "fails closed when workflow run has missing or invalid run_attempt (%s)",
+    async (invalidAttempt) => {
+      const digest = digestCommentBody("<!-- pr-agent:review:full -->\ninvalid-run-attempt");
+      const zip = Buffer.from(
+        makeZip(
+          "pr-agent-provenance.json",
+          JSON.stringify({
+            schema_version: 2,
+            workflow_path: ".github/workflows/pr-agent.yml",
+            run_id: 502,
+            run_attempt: 1,
+            repository: "octocat/hello-world",
+            pull_request_number: 1,
+            head_sha: headSha,
+            comment_id: 12,
+            body_digest: digest,
+          }),
+        ),
+      );
+
+      for (const useCheckRun of [true, false]) {
+        const runPayload = {
+          id: 502,
+          path: ".github/workflows/pr-agent.yml",
+          status: "completed",
+          head_sha: headSha,
+          repository: { full_name: "octocat/hello-world" },
+          ...(invalidAttempt !== undefined ? { run_attempt: invalidAttempt } : {}),
+        };
+
+        const rest = {
+          rest: {
+            actions: {
+              getWorkflowRun: async () => ({ data: runPayload }),
+              listWorkflowRuns: async () => ({
+                data: { workflow_runs: useCheckRun ? [] : [runPayload] },
+              }),
+              listWorkflowRunArtifacts: async () => ({
+                data: {
+                  artifacts: [
+                    { id: 5021, name: "pr-agent-review-provenance-pr-1", expired: false },
+                  ],
+                },
+              }),
+              downloadArtifact: async () => ({ data: zip }),
+            },
+          },
+        } as unknown as Octokit;
+
+        const result = await collectPrAgentProvenance({
+          rest,
+          retry: directRetry,
+          owner: "octocat",
+          repo: "hello-world",
+          pullRequestNumber: 1,
+          headSha,
+          checkRunUrls: useCheckRun
+            ? ["https://github.com/octocat/hello-world/actions/runs/502/job/1"]
+            : [],
+          commentDigests: new Map([[12, digest]]),
+        });
+
+        expect(result.status).toBe("unverified");
+      }
+    },
+  );
+
+  it("selects matching run_attempt 2 artifact when run_attempt 1 is listed first, and fails closed if only run_attempt 1 exists", async () => {
+    const oldDigest = digestCommentBody("<!-- pr-agent:review:full -->\nold-attempt-1");
+    const newDigest = digestCommentBody("<!-- pr-agent:review:full -->\nnew-attempt-2");
+    const zipFor = (runId: number, runAttempt: number, commentId: number, bodyDigest: string) =>
+      Buffer.from(
+        makeZip(
+          "pr-agent-provenance.json",
+          JSON.stringify({
+            schema_version: 2,
+            workflow_path: ".github/workflows/pr-agent.yml",
+            run_id: runId,
+            run_attempt: runAttempt,
+            repository: "octocat/hello-world",
+            pull_request_number: 1,
+            head_sha: headSha,
+            comment_id: commentId,
+            body_digest: bodyDigest,
+          }),
+        ),
+      );
+
+    const restWithAttempt2 = {
+      rest: {
+        actions: {
+          getWorkflowRun: async () => ({
+            data: {
+              id: 503,
+              run_attempt: 2,
+              path: ".github/workflows/pr-agent.yml",
+              status: "completed",
+              head_sha: headSha,
+              repository: { full_name: "octocat/hello-world" },
+            },
+          }),
+          listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
+          listWorkflowRunArtifacts: async () => ({
+            data: {
+              artifacts: [
+                {
+                  id: 1002,
+                  name: "pr-agent-review-provenance-pr-1",
+                  expired: false,
+                  created_at: "2026-10-01T12:05:00Z",
+                },
+                {
+                  id: 1001,
+                  name: "pr-agent-review-provenance-pr-1",
+                  expired: false,
+                  created_at: "2026-10-01T12:00:00Z",
+                },
+              ],
+            },
+          }),
+          downloadArtifact: async ({ artifact_id }: { artifact_id: number }) => ({
+            data:
+              artifact_id === 1002
+                ? zipFor(503, 1, 101, oldDigest)
+                : zipFor(503, 2, 102, newDigest),
+          }),
+        },
+      },
+    } as unknown as Octokit;
+
+    const verified = await collectPrAgentProvenance({
+      rest: restWithAttempt2,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: ["https://github.com/octocat/hello-world/actions/runs/503/job/1"],
+      commentDigests: new Map([
+        [101, oldDigest],
+        [102, newDigest],
+      ]),
+    });
+
+    expect(verified).toEqual({
+      status: "verified",
+      workflowPath: ".github/workflows/pr-agent.yml",
+      runId: 503,
+      headSha,
+      commentId: 102,
+      bodyDigest: newDigest,
+    });
+
+    const restOnlyAttempt1 = {
+      rest: {
+        actions: {
+          getWorkflowRun: async () => ({
+            data: {
+              id: 504,
+              run_attempt: 2,
+              path: ".github/workflows/pr-agent.yml",
+              status: "completed",
+              head_sha: headSha,
+              repository: { full_name: "octocat/hello-world" },
+            },
+          }),
+          listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
+          listWorkflowRunArtifacts: async () => ({
+            data: {
+              artifacts: [
+                {
+                  id: 2001,
+                  name: "pr-agent-review-provenance-pr-1",
+                  expired: false,
+                  created_at: "2026-10-01T12:00:00Z",
+                },
+              ],
+            },
+          }),
+          downloadArtifact: async () => ({
+            data: zipFor(504, 1, 101, oldDigest),
+          }),
+        },
+      },
+    } as unknown as Octokit;
+
+    const rejected = await collectPrAgentProvenance({
+      rest: restOnlyAttempt1,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: ["https://github.com/octocat/hello-world/actions/runs/504/job/1"],
+      commentDigests: new Map([[101, oldDigest]]),
+    });
+
+    expect(rejected.status).toBe("unverified");
+  });
 });
