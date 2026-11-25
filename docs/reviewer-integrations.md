@@ -97,9 +97,9 @@ Unknown diagnostic wording remains `FAILED` until its meaning is verified.
 - **Runtime Image Pinning**:
   - `.github/workflows/pr-agent.yml` pins the runtime container image by immutable OCI digest (`docker://pragent/pr-agent@sha256:548e894a88071180832b2f4233f734d0acd0db1a879e2fcbaa70bac8b8372ebe`), corresponding to upstream release tag `0.50.0-github_action` built by `The-PR-Agent/pr-agent/.github/workflows/publish.yml@refs/tags/v0.50.0` (verified via SLSA provenance attestation).
   - **Digest-Update Procedure**:
-    1. Resolve the release tag digest: `docker buildx imagetools inspect pragent/pr-agent:<version>-github_action --format '{{.Manifest.Digest}}'`.
-    2. Verify its GitHub Artifact Attestation: `gh attestation verify "oci://index.docker.io/pragent/pr-agent@sha256:<digest>" --repo The-PR-Agent/pr-agent`.
-    3. Update `.github/workflows/pr-agent.yml` with the verified digest and tag comment.
+    1. Resolve the release tag digest (formatted as `sha256:<hex>`): `docker buildx imagetools inspect pragent/pr-agent:<version>-github_action --format '{{.Manifest.Digest}}'`.
+    2. Verify its GitHub Artifact Attestation: `gh attestation verify "oci://index.docker.io/pragent/pr-agent@<digest>" --repo The-PR-Agent/pr-agent`.
+    3. Update `.github/workflows/pr-agent.yml` with `docker://pragent/pr-agent@<digest>` and the tag comment.
     4. Run `just lint-workflows` and `just check-docs`.
     5. Confirm hosted `runner / pr-agent` produces valid provenance before merging.
 - **Artifacts Emitted**:
