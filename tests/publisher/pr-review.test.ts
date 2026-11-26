@@ -18,8 +18,8 @@ interface RawGitHubReview {
   user: { login: string } | null;
   state: string;
   commit_id: string | null;
-  submitted_at?: string | null;
-  body?: string;
+  submitted_at?: string | null | undefined;
+  body?: string | undefined;
 }
 
 function makeRawReview(overrides: Partial<RawGitHubReview> = {}): RawGitHubReview {
