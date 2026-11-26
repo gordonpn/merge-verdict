@@ -13,6 +13,7 @@ const MAX_PROVENANCE_BYTES = 64 * 1024;
 const MAX_WORKFLOW_RUNS_TO_INSPECT = 5;
 const MAX_WORKFLOW_RUN_PAGES = 3;
 const WORKFLOW_RUNS_PER_PAGE = 100;
+const ARTIFACTS_PER_PAGE = 100;
 const MAX_CANDIDATE_RUN_SCANS = 25;
 
 export const PR_AGENT_CHECK_NAMES: ReadonlySet<string> = new Set([
@@ -283,17 +284,30 @@ async function readRunProvenanceArtifact(
   runId: number,
   runAttempt: number,
 ): Promise<ReadArtifactResult> {
-  const { data: artifactList } = await retry("list_workflow_run_artifacts", () =>
-    rest.rest.actions.listWorkflowRunArtifacts({
-      owner,
-      repo,
-      run_id: runId,
-      per_page: WORKFLOW_RUNS_PER_PAGE,
-    }),
-  );
+  const artifacts: Array<{
+    id: number;
+    name: string;
+    expired: boolean;
+    created_at?: string | null;
+  }> = [];
+  for (let page = 1; ; page += 1) {
+    const { data: artifactList } = await retry("list_workflow_run_artifacts", () =>
+      rest.rest.actions.listWorkflowRunArtifacts({
+        owner,
+        repo,
+        run_id: runId,
+        per_page: ARTIFACTS_PER_PAGE,
+        page,
+      }),
+    );
+    artifacts.push(...artifactList.artifacts);
+    if (artifactList.artifacts.length < ARTIFACTS_PER_PAGE) {
+      break;
+    }
+  }
 
   const scopedArtifactName = `${PR_AGENT_ARTIFACT_PREFIX}${pullRequestNumber}`;
-  const candidateArtifacts = artifactList.artifacts
+  const candidateArtifacts = artifacts
     .filter(
       (artifact) => isCandidateArtifactForPr(artifact.name, pullRequestNumber) && !artifact.expired,
     )
