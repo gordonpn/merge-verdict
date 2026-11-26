@@ -417,3 +417,41 @@ The following capabilities are deliberately excluded from the initial deployment
    - Deterministic verification handles all definitive passes and failures without incurring external API token costs or prompt injection risks.
 3. **Dedicated GitHub App Credentials**:
    - The reusable Action executes under workflow `GITHUB_TOKEN`, eliminating the operational overhead of generating and rotating private keys during initial adoption.
+
+---
+
+## 8. Optional Webhook Relay Bridge (`pull_request_review_thread`)
+
+GitHub Actions does not natively trigger on `pull_request_review_thread` events. When zero-comment thread resolution or unresolution must immediately re-evaluate a pull request, deploy the optional Cloudflare Worker entrypoint at [worker.ts](../src/bridge/worker.ts) (`bridgeWorker`).
+
+### A. Worker Entrypoint and Behavior
+
+`bridgeWorker.fetch(request, env, ctx)` validates incoming requests fail-closed:
+
+1. Rejects non-`POST` requests with HTTP `405`.
+2. Returns HTTP `500` when required bindings are missing or invalid.
+3. Verifies `X-Hub-Signature-256` over raw request bytes via `guardWebhookSignature` before parsing JSON (HTTP `401` on failure).
+4. Ignores events other than `pull_request_review_thread` and actions other than `resolved` or `unresolved` with HTTP `200`.
+5. Validates `repository.full_name`, `repository.default_branch`, `pull_request.number`, and `pull_request.head.sha` (HTTP `400` on invalid payloads), then enforces `ALLOWED_REPOSITORIES` (HTTP `403` when restricted).
+6. Coalesces rapid bursts per repository and PR inside the configured debounce window via `createDebouncer`, passes the completion promise to `ctx.waitUntil`, returns HTTP `202`, and dispatches `POST /repos/{owner}/{repo}/actions/workflows/{workflowId}/dispatches` with `ref: defaultBranch` and `inputs: { pull_request_number: String(prNumber) }`.
+
+### B. Environment Variables and Secrets
+
+| Variable                | Required | Default             | Purpose                                                                                                   |
+| :---------------------- | :------- | :------------------ | :-------------------------------------------------------------------------------------------------------- |
+| `GITHUB_WEBHOOK_SECRET` | Yes      | None                | Secret used to verify `X-Hub-Signature-256` webhook signatures.                                           |
+| `GITHUB_DISPATCH_TOKEN` | Yes      | None                | Fine-grained token or GitHub App installation token with `Actions: write` to trigger `workflow_dispatch`. |
+| `ALLOWED_REPOSITORIES`  | No       | Unset (all allowed) | Comma-separated `owner/repo` allowlist matched case-insensitively.                                        |
+| `WORKFLOW_ID`           | No       | `merge-verdict.yml` | Target workflow filename or numeric workflow ID without slashes.                                          |
+| `DEBOUNCE_WINDOW_MS`    | No       | `5000`              | Positive integer debounce window in milliseconds (`1` to `2147483647`).                                   |
+
+### C. GitHub Webhook Configuration
+
+Configure a GitHub App or repository webhook pointing to the deployed worker URL:
+
+- **Content type**: `application/json`
+- **Secret**: Matches `GITHUB_WEBHOOK_SECRET`
+- **Subscribed events**: `Pull request review thread` (`pull_request_review_thread`)
+- **Target workflow**: Must define `on.workflow_dispatch.inputs.pull_request_number` on the repository default branch (see [.github/workflows/merge-verdict.yml](../.github/workflows/merge-verdict.yml))
+
+Live Cloudflare Worker provisioning, secret binding, and end-to-end webhook latency testing remain external operational steps outside this repository package.
