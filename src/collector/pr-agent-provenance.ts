@@ -14,6 +14,7 @@ const MAX_WORKFLOW_RUNS_TO_INSPECT = 5;
 const MAX_WORKFLOW_RUN_PAGES = 3;
 const WORKFLOW_RUNS_PER_PAGE = 100;
 const ARTIFACTS_PER_PAGE = 100;
+const MAX_ARTIFACT_PAGES = 10;
 const MAX_CANDIDATE_RUN_SCANS = 25;
 
 export const PR_AGENT_CHECK_NAMES: ReadonlySet<string> = new Set([
@@ -290,7 +291,7 @@ async function readRunProvenanceArtifact(
     expired: boolean;
     created_at?: string | null;
   }> = [];
-  for (let page = 1; ; page += 1) {
+  for (let page = 1; page <= MAX_ARTIFACT_PAGES; page += 1) {
     const { data: artifactList } = await retry("list_workflow_run_artifacts", () =>
       rest.rest.actions.listWorkflowRunArtifacts({
         owner,
@@ -303,6 +304,10 @@ async function readRunProvenanceArtifact(
     artifacts.push(...artifactList.artifacts);
     if (artifactList.artifacts.length < ARTIFACTS_PER_PAGE) {
       break;
+    }
+    // Do not select evidence from an incomplete, potentially reordered listing.
+    if (page === MAX_ARTIFACT_PAGES) {
+      return { evidence: null, hasCandidateArtifact: true };
     }
   }
 

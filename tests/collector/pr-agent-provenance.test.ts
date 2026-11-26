@@ -1137,6 +1137,72 @@ describe("collectPrAgentProvenance", () => {
     expect(rejected.status).toBe("unverified");
   });
 
+  it("fails closed without downloading when artifact pagination reaches its bound", async () => {
+    const pages: number[] = [];
+    let downloads = 0;
+    const rest = {
+      rest: {
+        actions: {
+          getWorkflowRun: async () => ({
+            data: {
+              id: 507,
+              run_attempt: 2,
+              path: ".github/workflows/pr-agent.yml",
+              status: "completed",
+              head_sha: headSha,
+              repository: { full_name: "octocat/hello-world" },
+            },
+          }),
+          listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
+          listWorkflowRunArtifacts: async ({ page = 1 }: { page?: number }) => {
+            pages.push(page);
+            if (page > 10) throw new Error("Unbounded artifact pagination");
+            return {
+              data: {
+                artifacts: Array.from({ length: 100 }, (_, id) => ({
+                  id,
+                  name: "pr-agent-review-provenance-pr-1",
+                  expired: false,
+                })),
+              },
+            };
+          },
+          downloadArtifact: async () => {
+            downloads += 1;
+            return {
+              data: makeZip(
+                "pr-agent-provenance.json",
+                JSON.stringify({
+                  schema_version: 2,
+                  workflow_path: ".github/workflows/pr-agent.yml",
+                  run_id: 507,
+                  run_attempt: 2,
+                  repository: "octocat/hello-world",
+                  pull_request_number: 1,
+                  head_sha: headSha,
+                  comment_id: 107,
+                  body_digest: digestCommentBody("valid partial receipt"),
+                }),
+              ),
+            };
+          },
+        },
+      },
+    } as unknown as Octokit;
+    const result = await collectPrAgentProvenance({
+      rest,
+      retry: directRetry,
+      owner: "octocat",
+      repo: "hello-world",
+      pullRequestNumber: 1,
+      headSha,
+      checkRunUrls: ["https://github.com/octocat/hello-world/actions/runs/507"],
+    });
+    expect(result.status).toBe("unverified");
+    expect(pages).toEqual(Array.from({ length: 10 }, (_, i) => i + 1));
+    expect(downloads).toBe(0);
+  });
+
   it("finds current-attempt provenance on a later artifact page", async () => {
     const pages: number[] = [];
     const digest = digestCommentBody("current receipt");
