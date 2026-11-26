@@ -83,9 +83,40 @@ jobs:
           PYTHON
 
       - name: DeepSeek Code Review
+        id: deepseek_review
         if: github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true'
         uses: hustcer/deepseek-review@v1
         with:
           chat-token: ${{ secrets.DEEPSEEK_API_KEY }}
           sys-prompt: ${{ steps.prompt.outputs.text }}
           watch-mention: "/review"
+
+      - name: Write issue_comment review target metadata
+        if: github.event_name == 'issue_comment' && steps.pr_state.outputs.eligible == 'true' && steps.deepseek_review.outcome == 'success'
+        env:
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          TARGET_PATH: ${{ runner.temp }}/deepseek-review-target.json
+        run: |
+          jq -n \
+            --arg workflow_path ".github/workflows/deepseek-review.yml" \
+            --arg run_id "${RUN_ID}" \
+            --arg repository "${REPOSITORY}" \
+            --arg pr_number "${PR_NUMBER}" \
+            '{
+              schema_version: 1,
+              workflow_path: $workflow_path,
+              run_id: ($run_id | tonumber),
+              repository: $repository,
+              pull_request_number: ($pr_number | tonumber)
+            }' > "${TARGET_PATH}"
+
+      - name: Upload issue_comment review target artifact
+        if: github.event_name == 'issue_comment' && steps.pr_state.outputs.eligible == 'true' && steps.deepseek_review.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deepseek-review-target-pr-${{ github.event.issue.number }}
+          path: ${{ runner.temp }}/deepseek-review-target.json
+          retention-days: 7
+          if-no-files-found: error
