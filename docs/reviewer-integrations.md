@@ -229,6 +229,29 @@ export const ReviewSnapshotSchema = z.object({
 export type ReviewSnapshot = z.infer<typeof ReviewSnapshotSchema>;
 ```
 
+### Finding locations and source links
+
+The runtime finding schema in `src/models/finding.ts` accepts an optional positive
+integer `startLineNumber`. It requires a positive integer `lineNumber` and cannot
+exceed that ending line. CodeRabbit, Copilot, Sourcery, and Codex preserve a
+multiline start only when it is strictly below the end. They select a valid
+current end and its current start together, otherwise a valid original end and
+its original start, without mixing the two ranges. Missing or invalid ends leave
+the finding visible without a line number.
+
+`rawCommentUrl` retains its existing source-link contract. In particular, Copilot
+uses the path, commit identity, and ending line from the same comment, independent
+of the thread's range. The URL anchors only the ending line; consumers should use
+`startLineNumber` and `lineNumber` for the normalized range.
+
+The collector exposes GraphQL `changedFiles` entries with `path` and nullable
+`changeType` alongside the existing `changedFilePaths`. The additive fields remain
+optional for existing typed callers; omitted range/change-type fields in legacy
+collector payloads become null. This does not provide REST `previous_filename`
+rename mappings. Issue #26 remains open for that remaining rename requirement
+and its literal 100% normalizer coverage requirement; historical provenance stays
+coordinated with #77.
+
 ## 4. Distinguishing Facts from Assumptions
 
 | Element                                                    | Status             | Supporting Evidence / Validation Requirement                                                                                                                  |

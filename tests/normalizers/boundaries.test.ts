@@ -233,6 +233,30 @@ const locations: {
     expectedStartLine: undefined,
     expectedLine: undefined,
   },
+  ...[0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY].flatMap((line) => [
+    {
+      name: `original range when current end line is invalid (${line})`,
+      path: "src/invalid-current.ts",
+      startLine: 2,
+      line,
+      originalStartLine: 8,
+      originalLine: 12,
+      isOutdated: false,
+      expectedStartLine: 8,
+      expectedLine: 12,
+    },
+    {
+      name: `file-level location when both end lines are invalid (${line})`,
+      path: "src/invalid-lines.ts",
+      startLine: 2,
+      line,
+      originalStartLine: 8,
+      originalLine: line,
+      isOutdated: false,
+      expectedStartLine: undefined,
+      expectedLine: undefined,
+    },
+  ]),
 ];
 
 describe.each(inlineAdapters)(
