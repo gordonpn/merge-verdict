@@ -18,7 +18,9 @@ The following events are directly supported by GitHub Actions workflows and will
 | PR conversation comment created, edited, deleted | `issue_comment: [created, edited, deleted]`                                      | Captures bot summary comments, deletions, and developer commands.                                                                                                                                                                               |
 | External CI check run completed                  | `check_run: [completed]`                                                         | Fires when third-party GitHub Apps (e.g. CodeRabbit, Sourcery) complete a check run; `app.slug == 'github-actions'` completions are gated to avoid duplicating `workflow_run`.                                                                  |
 | CI workflow completed                            | `workflow_run: [completed]`                                                      | Authoritative allow-list (`ci`, `coverage`, `CodeQL`, `DeepSeek Review`, `PR-Agent`) for same-repo Actions workflows; fork `workflow_run.pull_requests` may be empty and refresh on `pull_request_target`, `issue_comment`, or manual dispatch. |
-| Manual or dispatch trigger                       | `workflow_dispatch`, `repository_dispatch`                                       | Enables manual re-verification or bridge-initiated verification.                                                                                                                                                                                |
+| Manual or dispatch trigger                       | `workflow_dispatch`                                                              | Enables manual re-verification or bridge-initiated workflow dispatch.                                                                                                                                                                           |
+
+Check and workflow completion events with zero or multiple associated PRs are skipped to avoid ambiguous routing. Use `workflow_dispatch` with an explicit PR number for these cases. Fork and comment-triggered reviewer runs with empty PR associations remain tracked in #169.
 
 ### 1.2. The Thread-Resolution Gap: `pull_request_review_thread`
 
@@ -30,7 +32,7 @@ However, **GitHub Actions does not support `pull_request_review_thread` as an `o
 
 Merge Verdict addresses this platform constraint using a tiered strategy:
 
-1. **Standard In-Band Triggers (Default)**: In typical workflows, resolving a review thread is accompanied by a code commit (which fires `pull_request: synchronize`) or an explanatory comment (which fires `pull_request_review_comment: created`). These native triggers execute Merge Verdict without additional infrastructure.
+1. **Standard In-Band Triggers (Default)**: In typical workflows, resolving a review thread is accompanied by a code commit (which fires `pull_request_target: synchronize`) or an explanatory comment (which fires `pull_request_review_comment: created`). These native triggers execute Merge Verdict without additional infrastructure.
 2. **Optional Edge Webhook Bridge (High-Fidelity Mode)**: For repositories requiring instant re-evaluation upon zero-comment thread resolution:
    - A lightweight, stateless serverless worker (such as a Cloudflare Worker) is registered as a GitHub App webhook endpoint.
    - The worker verifies the GitHub webhook signature (`X-Hub-Signature-256`).
@@ -59,7 +61,7 @@ jobs:
 
 - Workflows are isolated per pull request.
 - Because `concurrency` is scoped to `jobs.evaluate`, events rejected by `jobs.evaluate.if` (bot actors, fork review events, non-PR comments, self checks, and empty or multi-PR runs) skip without publishing checks and rely on GitHub Actions evaluating `jobs.evaluate.if` before occupying the PR concurrency slot, while Section 3 snapshot verification prevents stale runs from publishing over newer state.
-- During the advisory rollout (`cancel-in-progress: false`), incoming eligible events queue behind any active run for the same PR so a fresh run evaluates once the active check publication finishes without mid-publication cancellation. Active cancellation (`cancel-in-progress: true`) requires live cancellation recovery validation first.
+- During the advisory rollout (`cancel-in-progress: false`), incoming eligible events queue behind any active run for the same PR so a pending run can evaluate once the active check publication finishes without mid-publication cancellation. GitHub keeps at most one active and one pending job per group; newer pending jobs replace older pending jobs, and execution order is not guaranteed. Active cancellation (`cancel-in-progress: true`) requires live cancellation recovery validation first.
 
 ### 2.2. Self-Triggering Loop Prevention
 
@@ -76,7 +78,7 @@ Because Merge Verdict publishes status checks, check runs, and PR review submiss
      github.actor != 'dependabot[bot]'
    ```
 2. **Review Self-Exclusion**: When processing review events (`pull_request_review`), the engine checks `review.user.login`. If the review was authored by the active Merge Verdict bot identity, processing terminates immediately with exit code 0.
-3. **Status Check Name Exclusion**: When responding to `check_run` events, the engine ignores check runs named `merge-verdict` or `runner / merge-verdict`, and the workflow gates out `github-actions` `check_run` completions so `workflow_run.workflows` (`ci`, `coverage`, `CodeQL`, `DeepSeek Review`, `PR-Agent`) acts as the authoritative allow-list for Actions workflows without self-triggering or duplicate runs. Adding a new Actions workflow that should refresh verdicts requires adding its workflow name to `on.workflow_run.workflows` in `.github/workflows/merge-verdict.yml`.
+3. **Status Check Name Exclusion**: When responding to `check_run` events, the engine ignores check runs named `merge-verdict` or `runner / merge-verdict`, and the workflow gates out `github-actions` `check_run` completions so `workflow_run.workflows` (`ci`, `coverage`, `CodeQL`, `DeepSeek Review`, `PR-Agent`) acts as the authoritative allow-list for Actions workflows without self-triggering or duplicate runs. The `CodeQL` entry uses the registered default-setup workflow name, but completion refresh from GitHub dynamic default setup still requires live validation in #74; use manual dispatch when needed. The retained inactive advanced customization workflow is named `codeql` and requires an allow-list update if activated. Adding a new Actions workflow that should refresh verdicts requires adding its workflow name to `on.workflow_run.workflows` in `.github/workflows/merge-verdict.yml`.
 
 ## 3. Snapshot Consistency and Race Condition Handling
 

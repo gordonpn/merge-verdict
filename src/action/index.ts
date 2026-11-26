@@ -119,10 +119,7 @@ function isSelfBotLogin(login: string | undefined | null): boolean {
   return SELF_BOT_ACTORS.some((bot) => bot.toLowerCase() === normalized);
 }
 
-function isBotLogin(login: string | undefined | null): boolean {
-  if (!login) {
-    return false;
-  }
+function isBotLogin(login: string): boolean {
   const normalized = login.trim().toLowerCase();
   return isSelfBotLogin(normalized) || normalized.endsWith("[bot]");
 }

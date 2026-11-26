@@ -367,6 +367,28 @@ describe("repository and pull request number extraction", () => {
 });
 
 describe("isSelfTriggeredEvent loop prevention", () => {
+  it.each([
+    ["github-actions[bot]", "maintainer", true],
+    ["maintainer", "other-app[bot]", true],
+    ["", "maintainer", true],
+    ["maintainer", undefined, false],
+  ] as const)(
+    "checks both actor %s and sender %s on bot-comment refreshes",
+    (actor, sender, skipped) => {
+      expect(
+        isSelfTriggeredEvent({
+          eventName: "issue_comment",
+          actor,
+          payload: {
+            action: "deleted",
+            ...(sender ? { sender: { login: sender } } : {}),
+            comment: { user: { login: "github-actions[bot]" } },
+          },
+        }).skipped,
+      ).toBe(skipped);
+    },
+  );
+
   it.each(["merge-verdict[bot]", "github-actions[bot]"])(
     "skips events triggered by %s",
     (botActor) => {
@@ -616,6 +638,22 @@ describe("runAction end-to-end orchestration", () => {
       ...overrides,
     };
   }
+
+  it("evaluates the API PR head under pull_request_target even when GITHUB_SHA is the base", async () => {
+    const fixture = createPullRequestFixture({ isFork: true });
+    const collectPullRequest = vi.fn().mockResolvedValue(fixture);
+    const result = await runAction({
+      env: baseEnv({ GITHUB_EVENT_NAME: "pull_request_target", GITHUB_SHA: fixture.baseSha }),
+      collector: { collectPullRequest },
+      codeEvidenceSatisfied: true,
+    });
+    expect(result.headSha).toBe(fixture.headSha);
+    expect(result.snapshot?.headSha).toBe(fixture.headSha);
+    expect(result.snapshot?.baseSha).toBe(fixture.baseSha);
+    expect(collectPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ pullRequestNumber: 42 }),
+    );
+  });
 
   it.each(["neutral", "skipped"] as const)(
     "permits a protected policy's explicit %s check conclusion",
