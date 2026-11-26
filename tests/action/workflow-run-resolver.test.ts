@@ -318,6 +318,19 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
         label: "malformed head_repository.full_name",
         patch: { head_repository: { full_name: "invalid-without-slash" } },
       },
+      {
+        label: "dot-segment head_repository.full_name",
+        patch: { head_repository: { full_name: "../hello-world" } },
+      },
+      {
+        label: "conflicting head_repository.owner.login",
+        patch: {
+          head_repository: {
+            full_name: "contributor/hello-world",
+            owner: { login: "someone-else" },
+          },
+        },
+      },
     ])("returns null without calling pulls.list when $label", async ({ patch }) => {
       const { rest, pullsList } = createRestMock();
 

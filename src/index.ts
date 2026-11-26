@@ -3,6 +3,16 @@
  */
 export const VERSION = "0.1.0";
 
+export type {
+  ResolveWorkflowRunPullRequestNumberInput,
+  WorkflowRunPayload,
+  WorkflowRunPullRequestRef,
+  WorkflowRunRepositoryRef,
+  WorkflowRunResolverArtifactItem,
+  WorkflowRunResolverPullRequestItem,
+  WorkflowRunResolverRestClient,
+} from "./action/workflow-run-resolver.js";
+export { resolveWorkflowRunPullRequestNumber } from "./action/workflow-run-resolver.js";
 export type { CollectorRetryEvent, CollectorRetryOptions } from "./collector/client.js";
 export type {
   CollectPullRequestInput,
