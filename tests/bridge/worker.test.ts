@@ -10,6 +10,7 @@ import {
   verifyWebhookSignature,
   type WorkerExecutionContext,
 } from "../../src/bridge/index.js";
+import defaultBridgeWorker from "../../src/bridge/worker.js";
 
 const WEBHOOK_SECRET = "bridge-test-secret";
 const DISPATCH_TOKEN = "ghs_test_dispatch_token";
@@ -92,6 +93,7 @@ describe("bridge index re-exports", () => {
     expect(typeof createWorkflowDispatcher).toBe("function");
     expect(typeof createWebhookHandler).toBe("function");
     expect(typeof bridgeWorker.fetch).toBe("function");
+    expect(defaultBridgeWorker).toBe(bridgeWorker);
   });
 });
 
@@ -175,11 +177,26 @@ describe("createWorkflowDispatcher", () => {
     await expect(
       dispatch({
         repository: "octocat/hello-world",
+        prNumber: 0,
+        headSha: "sha-1",
+        defaultBranch: "main",
+      }),
+    ).rejects.toThrow();
+    await expect(
+      dispatch({
+        repository: "octocat/hello-world",
         prNumber: 42,
         headSha: "sha-1",
         defaultBranch: "",
       }),
     ).rejects.toThrow();
+    expect(() =>
+      createWebhookHandler({
+        webhookSecret: WEBHOOK_SECRET,
+        windowMs: 25001,
+        dispatch: async () => {},
+      }),
+    ).toThrow(RangeError);
   });
 });
 
@@ -339,7 +356,7 @@ describe("bridgeWorker webhook handler", () => {
     ["missing GITHUB_DISPATCH_TOKEN", { GITHUB_DISPATCH_TOKEN: undefined }],
     ["empty GITHUB_DISPATCH_TOKEN", { GITHUB_DISPATCH_TOKEN: "" }],
     ["invalid DEBOUNCE_WINDOW_MS", { DEBOUNCE_WINDOW_MS: "0" }],
-    ["oversized DEBOUNCE_WINDOW_MS", { DEBOUNCE_WINDOW_MS: "2147483648" }],
+    ["oversized DEBOUNCE_WINDOW_MS", { DEBOUNCE_WINDOW_MS: "25001" }],
     ["non-integer DEBOUNCE_WINDOW_MS", { DEBOUNCE_WINDOW_MS: "12.5" }],
     ["invalid WORKFLOW_ID", { WORKFLOW_ID: "dir/workflow.yml" }],
   ])("returns 500 fail-closed when %s", async (_label, envOverrides) => {

@@ -422,7 +422,7 @@ The following capabilities are deliberately excluded from the initial deployment
 
 ## 8. Optional Webhook Relay Bridge (`pull_request_review_thread`)
 
-GitHub Actions does not natively trigger on `pull_request_review_thread` events. When zero-comment thread resolution or unresolution must immediately re-evaluate a pull request, deploy the optional Cloudflare Worker entrypoint at [worker.ts](../src/bridge/worker.ts) (`bridgeWorker`).
+GitHub Actions does not natively trigger on `pull_request_review_thread` events. When zero-comment thread resolution or unresolution must immediately re-evaluate a pull request, deploy the optional Cloudflare Worker entrypoint at [worker.ts](../src/bridge/worker.ts) (exported as both default and named `bridgeWorker`).
 
 ### A. Worker Entrypoint and Behavior
 
@@ -437,13 +437,13 @@ GitHub Actions does not natively trigger on `pull_request_review_thread` events.
 
 ### B. Environment Variables and Secrets
 
-| Variable                | Required | Default             | Purpose                                                                                                   |
-| :---------------------- | :------- | :------------------ | :-------------------------------------------------------------------------------------------------------- |
-| `GITHUB_WEBHOOK_SECRET` | Yes      | None                | Secret used to verify `X-Hub-Signature-256` webhook signatures.                                           |
-| `GITHUB_DISPATCH_TOKEN` | Yes      | None                | Fine-grained token or GitHub App installation token with `Actions: write` to trigger `workflow_dispatch`. |
-| `ALLOWED_REPOSITORIES`  | No       | Unset (all allowed) | Comma-separated `owner/repo` allowlist matched case-insensitively.                                        |
-| `WORKFLOW_ID`           | No       | `merge-verdict.yml` | Target workflow filename or numeric workflow ID without slashes.                                          |
-| `DEBOUNCE_WINDOW_MS`    | No       | `5000`              | Positive integer debounce window in milliseconds (`1` to `2147483647`).                                   |
+| Variable                | Required | Default             | Purpose                                                                                                                               |
+| :---------------------- | :------- | :------------------ | :------------------------------------------------------------------------------------------------------------------------------------ |
+| `GITHUB_WEBHOOK_SECRET` | Yes      | None                | Secret used to verify `X-Hub-Signature-256` webhook signatures.                                                                       |
+| `GITHUB_DISPATCH_TOKEN` | Yes      | None                | Fine-grained token or GitHub App installation token with `Actions: write` to trigger `workflow_dispatch`.                             |
+| `ALLOWED_REPOSITORIES`  | No       | Unset (all allowed) | Comma-separated `owner/repo` allowlist matched case-insensitively.                                                                    |
+| `WORKFLOW_ID`           | No       | `merge-verdict.yml` | Target workflow filename or numeric workflow ID without slashes.                                                                      |
+| `DEBOUNCE_WINDOW_MS`    | No       | `5000`              | Positive integer debounce window in milliseconds (`1` to `25000`, keeping dispatch within Cloudflare's 30s `ctx.waitUntil` lifetime). |
 
 ### C. GitHub Webhook Configuration
 

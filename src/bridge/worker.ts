@@ -5,7 +5,8 @@ const DEFAULT_WORKFLOW_ID = "merge-verdict.yml";
 const DEFAULT_API_BASE_URL = "https://api.github.com";
 const DEFAULT_USER_AGENT = "merge-verdict-bridge";
 const DEFAULT_DEBOUNCE_WINDOW_MS = 5000;
-const MAX_DEBOUNCE_WINDOW_MS = 2147483647;
+// Keep background dispatch within Cloudflare Workers' 30s ctx.waitUntil lifetime.
+const MAX_DEBOUNCE_WINDOW_MS = 25000;
 const GITHUB_API_VERSION = "2022-11-28";
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SUPPORTED_ACTIONS = new Set(["resolved", "unresolved"]);
@@ -234,6 +235,17 @@ export function createWorkflowDispatcher(options: WorkflowDispatcherOptions): Wo
  * repository allowlist, and debounces dispatches per repository and PR.
  */
 export function createWebhookHandler(options: WebhookHandlerOptions): WebhookHandler {
+  if (
+    options.windowMs !== undefined &&
+    (!Number.isInteger(options.windowMs) ||
+      options.windowMs < 1 ||
+      options.windowMs > MAX_DEBOUNCE_WINDOW_MS)
+  ) {
+    throw new RangeError(
+      `windowMs must be an integer between 1 and ${MAX_DEBOUNCE_WINDOW_MS} to fit ctx.waitUntil limits`,
+    );
+  }
+
   const allowedList = (options.allowedRepositories ?? [])
     .map((entry) => entry.trim().toLowerCase())
     .filter((entry) => entry.length > 0);
@@ -249,12 +261,9 @@ export function createWebhookHandler(options: WebhookHandlerOptions): WebhookHan
     dispatch: async (input) => {
       const key = `${input.repository.toLowerCase()}:${input.prNumber}`;
       const queue = branchQueues.get(key);
-      const defaultBranch = queue?.shift();
+      const defaultBranch = queue?.shift() ?? "";
       if (queue && queue.length === 0) {
         branchQueues.delete(key);
-      }
-      if (!defaultBranch) {
-        throw new Error(`Missing default branch for ${key}`);
       }
       await options.dispatch({ ...input, defaultBranch });
     },
@@ -433,3 +442,5 @@ export const bridgeWorker = {
     return handler(request, ctx);
   },
 };
+
+export default bridgeWorker;
