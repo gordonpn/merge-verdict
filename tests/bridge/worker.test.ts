@@ -339,6 +339,7 @@ describe("bridgeWorker webhook handler", () => {
     ["missing GITHUB_DISPATCH_TOKEN", { GITHUB_DISPATCH_TOKEN: undefined }],
     ["empty GITHUB_DISPATCH_TOKEN", { GITHUB_DISPATCH_TOKEN: "" }],
     ["invalid DEBOUNCE_WINDOW_MS", { DEBOUNCE_WINDOW_MS: "0" }],
+    ["oversized DEBOUNCE_WINDOW_MS", { DEBOUNCE_WINDOW_MS: "2147483648" }],
     ["non-integer DEBOUNCE_WINDOW_MS", { DEBOUNCE_WINDOW_MS: "12.5" }],
     ["invalid WORKFLOW_ID", { WORKFLOW_ID: "dir/workflow.yml" }],
   ])("returns 500 fail-closed when %s", async (_label, envOverrides) => {
@@ -473,5 +474,34 @@ describe("bridgeWorker webhook handler", () => {
         defaultBranch: "release",
       },
     ]);
+  });
+
+  it("rejects non-POST on createWebhookHandler and cleans up after failed dispatch", async () => {
+    let shouldFail = true;
+    const handler = createWebhookHandler({
+      webhookSecret: WEBHOOK_SECRET,
+      windowMs: 10,
+      dispatch: async () => {
+        if (shouldFail) {
+          throw new Error("boom");
+        }
+      },
+    });
+
+    expect((await handler(createSignedRequest("", { method: "GET" }))).status).toBe(405);
+
+    const body = JSON.stringify(createThreadPayload());
+    const { ctx: failCtx, waitUntil: failWait } = createExecutionContext();
+    expect((await handler(createSignedRequest(body), failCtx)).status).toBe(202);
+    const failedPromise = failWait.mock.calls[0]?.[0];
+    const rejectionAssertion = expect(failedPromise).rejects.toThrow("boom");
+    await vi.advanceTimersByTimeAsync(10);
+    await rejectionAssertion;
+
+    shouldFail = false;
+    const { ctx: okCtx, waitUntil: okWait } = createExecutionContext();
+    expect((await handler(createSignedRequest(body), okCtx)).status).toBe(202);
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(okWait.mock.calls[0]?.[0]).resolves.toBeUndefined();
   });
 });
