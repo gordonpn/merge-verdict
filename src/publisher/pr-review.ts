@@ -14,6 +14,9 @@ export const DEFAULT_DISMISS_MESSAGE =
 export const DEFAULT_MAX_REVIEW_PAGES = 10;
 
 const REVIEWS_PAGE_SIZE = 100;
+// Match complete relation tokens without depending on Link parameter order.
+const NEXT_RELATION_PATTERN =
+  /;\s*rel\s*=\s*(?:"(?:[^"]*\s)?next(?:\s[^"]*)?"|next)(?=\s*(?:;|,|$))/i;
 
 export interface OctokitApprovalClientOptions {
   readonly expectedAuthor?: string;
@@ -89,14 +92,14 @@ function parseNextPageLink(response: unknown): {
   }
   return {
     hasExplicitLink: true,
-    hasNextLink: /<[^>]+>;\s*rel="next"/.test(linkHeader),
+    hasNextLink: NEXT_RELATION_PATTERN.test(linkHeader),
   };
 }
 
 /**
- * Creates an ApprovalClient backed by @octokit/rest pull request review endpoints.
- * Validates constructor bounds, enforces bounded review pagination, and fails
- * closed on review ownership when no caller attestation callback is supplied.
+ * Creates a bounded Octokit approval client with caller-attested review ownership.
+ * Ownership is false when no isOwnedReview callback is supplied.
+ * Throws for invalid options, malformed responses, and truncated review lists.
  */
 export function createOctokitApprovalClient(
   octokit: Octokit,

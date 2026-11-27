@@ -292,6 +292,46 @@ describe("createOctokitApprovalClient", () => {
       expect(listReviews).toHaveBeenCalledTimes(3);
     });
 
+    it.each([
+      '; type="application/json"; rel="next"',
+      '; rel = "next"; type="application/json"',
+      "; rel=next",
+      '; rel="prev next"',
+      '; rel="next last"',
+      '; ReL="NeXt"',
+    ])("does not truncate reviews for Link parameters %s", async (parameters) => {
+      const { octokit, listReviews } = makeMockOctokit();
+      listReviews
+        .mockResolvedValueOnce({
+          data: [makeRawReview({ id: 1 })],
+          headers: { link: `<https://api.github.com/reviews?page=2>${parameters}` },
+        } as never)
+        .mockResolvedValueOnce({ data: [makeRawReview({ id: 2 })], headers: {} } as never);
+      const client = createOctokitApprovalClient(octokit);
+
+      const reviews = await client.listReviews(makeApprovalInput());
+
+      expect(reviews.map((review) => review.id)).toEqual([1, 2]);
+      expect(listReviews).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['; rel="prev"', '; rel="next-page"', '; rel="notnext"'])(
+      "stops when Link has no next relation: %s",
+      async (parameters) => {
+        const { octokit, listReviews } = makeMockOctokit();
+        listReviews.mockResolvedValueOnce({
+          data: [makeRawReview({ id: 1 })],
+          headers: { link: `<https://api.github.com/reviews?page=1>${parameters}` },
+        } as never);
+        const client = createOctokitApprovalClient(octokit);
+
+        const reviews = await client.listReviews(makeApprovalInput());
+
+        expect(reviews.map((review) => review.id)).toEqual([1]);
+        expect(listReviews).toHaveBeenCalledTimes(1);
+      },
+    );
+
     it("rejects truncated results when Link rel=next persists at the page bound", async () => {
       const { octokit, listReviews } = makeMockOctokit();
       listReviews.mockResolvedValue({
@@ -548,6 +588,24 @@ describe("createOctokitApprovalClient", () => {
 });
 
 describe("publishPullRequestApproval", () => {
+  it("reports unknown recognition when the caller supplies no recognition capability", async () => {
+    const { octokit, createReview } = makeMockOctokit();
+    const client = createOctokitApprovalClient(octokit, {
+      isOwnedReview: (review) => review.id === 99,
+    });
+
+    const outcome = await publishPullRequestApproval("github_app", client, makeApprovalInput());
+
+    expect(outcome).toEqual({
+      approvalStatus: "submitted",
+      provider: "github_app",
+      headSha: HEAD_SHA,
+      countsTowardBranchProtection: "unknown",
+      reviewId: 99,
+    });
+    expect(createReview).toHaveBeenCalledTimes(1);
+  });
+
   it("submits github_app approval on PASS and verifies branch protection recognition", async () => {
     const { octokit, createReview } = makeMockOctokit();
     const verifyBranchProtectionRecognition = vi.fn(async () => true as const);
