@@ -40,7 +40,8 @@ integration or establishes live branch-protection recognition.
 
 Review lists are bounded to `maxReviewPages` (default 10), with 100 reviews per
 page. An explicit next relation at the bound fails closed. Without Link headers,
-a full final page requires one extra empty-page probe to establish completeness.
+a full final page requires one extra empty-page probe without a next relation to
+establish completeness.
 Link relation parameters may precede or follow other parameters, use optional
 whitespace and quotes, and contain multiple case-insensitive relation tokens. Malformed review
 payloads and truncated lists throw instead of supplying partial approval evidence.

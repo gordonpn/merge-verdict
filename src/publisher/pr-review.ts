@@ -171,7 +171,11 @@ export function createOctokitApprovalClient(
             per_page: REVIEWS_PAGE_SIZE,
             page: page + 1,
           });
-          if (!Array.isArray(overflow.data) || overflow.data.length > 0) {
+          if (
+            !Array.isArray(overflow.data) ||
+            overflow.data.length > 0 ||
+            parseNextPageLink(overflow).hasNextLink
+          ) {
             throw new Error(
               `GitHub pull request reviews exceeded maxReviewPages (${maxReviewPages}).`,
             );

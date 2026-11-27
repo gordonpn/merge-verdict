@@ -315,22 +315,24 @@ describe("createOctokitApprovalClient", () => {
       expect(listReviews).toHaveBeenCalledTimes(2);
     });
 
-    it.each(['; rel="prev"', '; rel="next-page"', '; rel="notnext"'])(
-      "stops when Link has no next relation: %s",
-      async (parameters) => {
-        const { octokit, listReviews } = makeMockOctokit();
-        listReviews.mockResolvedValueOnce({
-          data: [makeRawReview({ id: 1 })],
-          headers: { link: `<https://api.github.com/reviews?page=1>${parameters}` },
-        } as never);
-        const client = createOctokitApprovalClient(octokit);
+    it.each([
+      '; rel="prev"',
+      '; rel="next-page"',
+      '; rel="notnext"',
+      '; title="see next page"; rel="prev"',
+    ])("stops when Link has no next relation: %s", async (parameters) => {
+      const { octokit, listReviews } = makeMockOctokit();
+      listReviews.mockResolvedValueOnce({
+        data: [makeRawReview({ id: 1 })],
+        headers: { link: `<https://api.github.com/reviews?page=1>${parameters}` },
+      } as never);
+      const client = createOctokitApprovalClient(octokit);
 
-        const reviews = await client.listReviews(makeApprovalInput());
+      const reviews = await client.listReviews(makeApprovalInput());
 
-        expect(reviews.map((review) => review.id)).toEqual([1]);
-        expect(listReviews).toHaveBeenCalledTimes(1);
-      },
-    );
+      expect(reviews.map((review) => review.id)).toEqual([1]);
+      expect(listReviews).toHaveBeenCalledTimes(1);
+    });
 
     it("rejects truncated results when Link rel=next persists at the page bound", async () => {
       const { octokit, listReviews } = makeMockOctokit();
@@ -359,6 +361,21 @@ describe("createOctokitApprovalClient", () => {
       await expect(
         client.listReviews({ owner: "owner", repo: "repo", pullNumber: 42 }),
       ).rejects.toThrow(/maxReviewPages/);
+    });
+
+    it("rejects an empty overflow page that still advertises more reviews", async () => {
+      const fullPage = Array.from({ length: 100 }, (_, index) => makeRawReview({ id: index + 1 }));
+      const { octokit, listReviews } = makeMockOctokit();
+      listReviews
+        .mockResolvedValueOnce({ data: fullPage, headers: {} } as never)
+        .mockResolvedValueOnce({
+          data: [],
+          headers: { link: '<https://api.github.com/reviews?page=3>; rel="next"' },
+        } as never);
+      const client = createOctokitApprovalClient(octokit, { maxReviewPages: 1 });
+
+      await expect(client.listReviews(makeApprovalInput())).rejects.toThrow(/maxReviewPages/);
+      expect(listReviews).toHaveBeenCalledTimes(2);
     });
 
     it.each([
