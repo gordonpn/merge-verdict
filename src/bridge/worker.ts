@@ -5,6 +5,7 @@ const DEFAULT_WORKFLOW_ID = "merge-verdict.yml";
 const DEFAULT_API_BASE_URL = "https://api.github.com";
 const DEFAULT_USER_AGENT = "merge-verdict-bridge";
 const DEFAULT_DEBOUNCE_WINDOW_MS = 5000;
+const DISPATCH_TIMEOUT_MS = 4000;
 // Keep background dispatch within Cloudflare Workers' 30s ctx.waitUntil lifetime.
 const MAX_DEBOUNCE_WINDOW_MS = 25000;
 const GITHUB_API_VERSION = "2022-11-28";
@@ -174,7 +175,8 @@ function parseThreadPayload(
  *
  * Accepts a bearer token, optional workflow filename or numeric ID (default
  * `merge-verdict.yml`), API base URL, user agent, and fetch implementation.
- * Throws on invalid configuration or inputs, and on non-2xx API responses.
+ * Throws on invalid configuration or inputs, network failure, a four-second
+ * request timeout, and non-2xx API responses.
  */
 export function createWorkflowDispatcher(options: WorkflowDispatcherOptions): WorkflowDispatcher {
   if (typeof options.token !== "string" || options.token.trim().length === 0) {
@@ -206,6 +208,7 @@ export function createWorkflowDispatcher(options: WorkflowDispatcherOptions): Wo
     const fetchFn = options.fetch ?? globalThis.fetch;
     const response = await fetchFn(url, {
       method: "POST",
+      signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${options.token}`,
         Accept: "application/vnd.github+json",

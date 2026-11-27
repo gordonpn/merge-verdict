@@ -467,6 +467,9 @@ in [the debouncer guide](bridge-debouncer.md). Three-event bursts retain the lat
 received head and default branch. Updating the cached configuration creates a new
 handler; timers and `waitUntil` promises already held by the old handler continue
 using its captured configuration. Process termination can still lose queued work.
-The maximum window leaves five seconds for the outgoing request, without a
-guaranteed network latency bound. No retry, durable delivery, or ten-second hosted
+The outgoing request aborts after four seconds so a stalled API call cannot hold
+later dispatch windows indefinitely. The maximum 25-second window leaves the
+four-second request budget and one second of scheduling headroom. Prior queued
+windows can still delay dispatches under sustained traffic, so this does not
+guarantee completion within the background lifetime. No retry, durable delivery, or ten-second hosted
 delivery guarantee is established by unit tests.

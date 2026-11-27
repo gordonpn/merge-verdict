@@ -9,6 +9,7 @@ import {
   guardWebhookSignature,
   verifyWebhookSignature,
   type WorkerExecutionContext,
+  type WorkflowDispatchInput,
 } from "../../src/bridge/index.js";
 import defaultBridgeWorker from "../../src/bridge/worker.js";
 
@@ -71,6 +72,15 @@ function createEnv(overrides: Partial<BridgeEnv> = {}): BridgeEnv {
     GITHUB_WEBHOOK_SECRET: WEBHOOK_SECRET,
     GITHUB_DISPATCH_TOKEN: DISPATCH_TOKEN,
     ...overrides,
+  };
+}
+
+function createDispatchInput(): WorkflowDispatchInput {
+  return {
+    repository: "octocat/hello-world",
+    prNumber: 42,
+    headSha: "sha-1",
+    defaultBranch: "main",
   };
 }
 
@@ -154,6 +164,28 @@ describe("createWorkflowDispatcher", () => {
 
     await expect(promise).rejects.toThrow(/422/);
     await expect(promise).rejects.not.toThrow(DISPATCH_TOKEN);
+  });
+
+  it("bounds stalled dispatch requests with a four-second abort signal", async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+    const failure = new DOMException("Dispatch timed out", "TimeoutError");
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      const signal = init?.signal;
+      if (!signal) throw new Error("Missing timeout signal");
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    const dispatch = createWorkflowDispatcher({ token: DISPATCH_TOKEN, fetch: fetchMock });
+
+    const completion = dispatch(createDispatchInput());
+    const rejected = expect(completion).rejects.toBe(failure);
+    controller.abort(failure);
+    await rejected;
+
+    expect(timeout).toHaveBeenCalledExactlyOnceWith(4000);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
   });
 
   it("validates dispatcher configuration and dispatch inputs", async () => {
