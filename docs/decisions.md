@@ -2,6 +2,13 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-26: Preserve bounded approval pagination across Link parameter variants
+
+- Decision: Recognize the `next` relation independently of Link parameter order, optional whitespace, quoting, casing, and multiple relation tokens, while retaining the existing page cap and no-header overflow probe.
+- Rationale: A present Link header with a missed next relation silently returned incomplete approval evidence. Regression tests reproduce six variants and assert exact returned review IDs, with negative relation-token controls. [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288.html#section-2.1.1) requires case-insensitive registered relation comparison.
+- Rejected alternatives: The installed Octokit pagination iterator uses the same restrictive relation pattern and would preserve the defect. Adding a Link parser dependency is unnecessary for relation detection; the adapter continues to request only its fixed GitHub endpoint and sequential page numbers.
+- Origin: [Approval adapter review](https://github.com/gordonpn/merge-verdict/pull/182).
+
 ## 2026-11-23: Bind PR-Agent provenance to the comment write response
 
 - Decision: Configure upstream's host-only local file sink for review output, validate its repository, PR number, and head SHA, publish that generated Markdown using an independently pinned publisher revision, and attest the ID and exact body returned by that write. Accept only provenance schema version 2. Order discovered check-linked and comment-triggered runs together before reading artifacts, preserving known check-linked runs beyond fallback scan limits. Unexpected discovery errors abort rather than accepting potentially older direct evidence.
