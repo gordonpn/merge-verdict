@@ -7,7 +7,11 @@ import type {
 } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
-import { rateLimitCheckTimestamp, stripMarkdownPunctuation } from "./utils.js";
+import {
+  rateLimitCheckTimestamp,
+  resolveThreadLineRange,
+  stripMarkdownPunctuation,
+} from "./utils.js";
 
 const SOURCERY_LOGINS = new Set(["sourcery-ai", "sourcery-ai[bot]"]);
 const RATE_LIMIT_PATTERNS = [
@@ -149,12 +153,13 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
 
     const isResolved = thread.isResolved && isAcknowledgedInAncestry;
     const isBlocking = !isResolved && (severity === "HIGH" || severity === "MEDIUM");
+    const lineRange = resolveThreadLineRange(thread);
 
     const finding: NormalizedFinding = {
       id: thread.id,
       reviewerId: "sourcery-ai",
       threadId: thread.id,
-      title: extractTitle(firstComment.body, thread.path, thread.line ?? thread.originalLine),
+      title: extractTitle(firstComment.body, thread.path, lineRange.lineNumber ?? null),
       description: firstComment.body,
       severity,
       isBlocking,
@@ -163,9 +168,11 @@ export function normalizeSourceryReviewer(input: NormalizerInput): ReviewerExecu
     if (thread.path) {
       finding.filePath = thread.path;
     }
-    const lineNum = thread.line ?? thread.originalLine;
-    if (typeof lineNum === "number" && lineNum > 0) {
-      finding.lineNumber = lineNum;
+    if (lineRange.startLineNumber !== undefined) {
+      finding.startLineNumber = lineRange.startLineNumber;
+    }
+    if (lineRange.lineNumber !== undefined) {
+      finding.lineNumber = lineRange.lineNumber;
     }
     if (thread.resolvedByLogin) {
       finding.resolvedBy = thread.resolvedByLogin;

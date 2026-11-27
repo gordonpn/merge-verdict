@@ -35,7 +35,9 @@ interface ReviewThreadCommentNode {
   readonly body: string;
   readonly author: { readonly login: string } | null;
   readonly path: string | null;
+  readonly startLine?: number | null;
   readonly line: number | null;
+  readonly originalStartLine?: number | null;
   readonly originalLine: number | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -54,7 +56,9 @@ interface ReviewThreadNode {
   readonly isOutdated: boolean;
   readonly resolvedBy: { readonly login: string } | null;
   readonly path: string | null;
+  readonly startLine?: number | null;
   readonly line: number | null;
+  readonly originalStartLine?: number | null;
   readonly originalLine: number | null;
   readonly comments: ReviewThreadCommentConnection;
 }
@@ -76,7 +80,7 @@ interface ChangedFilesResponse {
   readonly repository: {
     readonly pullRequest: {
       readonly files: {
-        readonly nodes: { readonly path: string }[];
+        readonly nodes: { readonly path: string; readonly changeType?: string | null }[];
         readonly pageInfo: PageInfo;
       };
     } | null;
@@ -135,7 +139,9 @@ export interface GitHubReviewThreadComment {
   readonly body: string;
   readonly bodyDigest: string;
   readonly path: string | null;
+  readonly startLine?: number | null;
   readonly line: number | null;
+  readonly originalStartLine?: number | null;
   readonly originalLine: number | null;
   /** Revision matching originalLine and path; optional for existing callers and fixtures. */
   readonly originalCommitSha?: string | null;
@@ -150,9 +156,16 @@ export interface GitHubReviewThread {
   readonly resolvedByLogin: string | null;
   readonly isOutdated: boolean;
   readonly path: string | null;
+  readonly startLine?: number | null;
   readonly line: number | null;
+  readonly originalStartLine?: number | null;
   readonly originalLine: number | null;
   readonly comments: readonly GitHubReviewThreadComment[];
+}
+
+export interface GitHubChangedFile {
+  readonly path: string;
+  readonly changeType: string | null;
 }
 
 export interface GitHubConversationComment {
@@ -239,6 +252,7 @@ export interface GitHubPullRequestData {
   readonly evaluationSha: string;
   readonly policyVersion: string;
   readonly changedFilePaths: readonly string[];
+  readonly changedFiles?: readonly GitHubChangedFile[];
   readonly reviewThreads: readonly GitHubReviewThread[];
   readonly conversationComments: readonly GitHubConversationComment[];
   readonly reviews: readonly GitHubReviewSubmission[];
@@ -388,7 +402,9 @@ function mapThreadComment(comment: ReviewThreadCommentNode): GitHubReviewThreadC
     body: comment.body,
     bodyDigest: digestBody(comment.body),
     path: comment.path,
+    startLine: comment.startLine ?? null,
     line: comment.line,
+    originalStartLine: comment.originalStartLine ?? null,
     originalLine: comment.originalLine,
     commitSha: comment.commit?.oid ?? null,
     originalCommitSha: comment.originalCommit?.oid ?? null,
@@ -535,7 +551,9 @@ async function collectReviewThreads(
           resolvedByLogin: thread.resolvedBy?.login ?? null,
           isOutdated: thread.isOutdated,
           path: thread.path,
+          startLine: thread.startLine ?? null,
           line: thread.line,
+          originalStartLine: thread.originalStartLine ?? null,
           originalLine: thread.originalLine,
           comments: await collectThreadComments(client, thread, retry),
         })),
@@ -550,14 +568,14 @@ async function collectReviewThreads(
   }
 }
 
-async function collectChangedFilePaths(
+async function collectChangedFiles(
   client: GraphqlClient,
   owner: string,
   repo: string,
   pullRequestNumber: number,
   retry: RetryRequest,
-): Promise<string[]> {
-  const paths: string[] = [];
+): Promise<GitHubChangedFile[]> {
+  const files: GitHubChangedFile[] = [];
   let pages = 0;
   let cursor: string | null = null;
 
@@ -580,12 +598,17 @@ async function collectChangedFilePaths(
     checkPaginationBounds(
       "changed_files",
       pages,
-      paths.length + connection.nodes.length,
+      files.length + connection.nodes.length,
       connection.pageInfo.hasNextPage,
     );
-    paths.push(...connection.nodes.map((file) => file.path));
+    files.push(
+      ...connection.nodes.map((file) => ({
+        path: file.path,
+        changeType: file.changeType ?? null,
+      })),
+    );
     if (!connection.pageInfo.hasNextPage) {
-      return paths;
+      return files;
     }
     cursor = requireNextCursor(connection.pageInfo, cursor);
   }
@@ -692,7 +715,7 @@ export class GitHubCollector {
     let ancestryItems = 0;
 
     const [
-      changedFilePaths,
+      changedFiles,
       comments,
       reviews,
       checkRuns,
@@ -701,7 +724,7 @@ export class GitHubCollector {
       policyContent,
       commits,
     ] = await Promise.all([
-      collectChangedFilePaths(this.graph, owner, repo, pullRequestNumber, retry),
+      collectChangedFiles(this.graph, owner, repo, pullRequestNumber, retry),
       this.rest.paginate(
         this.rest.rest.issues.listComments,
         {
@@ -839,7 +862,8 @@ export class GitHubCollector {
       authorLogin: pullRequest.user?.login ?? null,
       evaluationSha,
       policyVersion,
-      changedFilePaths,
+      changedFilePaths: changedFiles.map((file) => file.path),
+      changedFiles,
       reviewThreads,
       conversationComments: comments.map((comment) => ({
         id: comment.id,
