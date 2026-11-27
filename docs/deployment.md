@@ -441,7 +441,7 @@ GitHub Actions does not natively trigger on `pull_request_review_thread` events.
 | :---------------------- | :------- | :------------------ | :------------------------------------------------------------------------------------------------------------------------------------ |
 | `GITHUB_WEBHOOK_SECRET` | Yes      | None                | Secret used to verify `X-Hub-Signature-256` webhook signatures.                                                                       |
 | `GITHUB_DISPATCH_TOKEN` | Yes      | None                | Fine-grained token or GitHub App installation token with `Actions: write` to trigger `workflow_dispatch`.                             |
-| `ALLOWED_REPOSITORIES`  | No       | Unset (all allowed) | Comma-separated `owner/repo` allowlist matched case-insensitively.                                                                    |
+| `ALLOWED_REPOSITORIES`  | No       | Unset (all allowed) | Comma-separated `owner/repo` allowlist matched case-insensitively. Empty, whitespace-only, or comma-only values also allow all.       |
 | `WORKFLOW_ID`           | No       | `merge-verdict.yml` | Target workflow filename or numeric workflow ID without slashes.                                                                      |
 | `DEBOUNCE_WINDOW_MS`    | No       | `5000`              | Positive integer debounce window in milliseconds (`1` to `25000`, keeping dispatch within Cloudflare's 30s `ctx.waitUntil` lifetime). |
 
@@ -455,3 +455,18 @@ Configure a GitHub App or repository webhook pointing to the deployed worker URL
 - **Target workflow**: Must define `on.workflow_dispatch.inputs.pull_request_number` on the repository default branch (see [.github/workflows/merge-verdict.yml](../.github/workflows/merge-verdict.yml))
 
 Live Cloudflare Worker provisioning, secret binding, and end-to-end webhook latency testing remain external operational steps outside this repository package.
+
+The relay requests a refresh by PR number, not a verdict pinned to the webhook's
+head SHA. The Action fetches current PR state before evaluation. The webhook head
+is retained for process-local coalescing and the acceptance response, but is not
+an input to `workflow_dispatch`. This does not satisfy a deployment contract that
+requires the triggering SHA in dispatch inputs.
+
+Debouncing uses the fixed-window and shared completion promise contract documented
+in [the debouncer guide](bridge-debouncer.md). Three-event bursts retain the latest
+received head and default branch. Updating the cached configuration creates a new
+handler; timers and `waitUntil` promises already held by the old handler continue
+using its captured configuration. Process termination can still lose queued work.
+The maximum window leaves five seconds for the outgoing request, without a
+guaranteed network latency bound. No retry, durable delivery, or ten-second hosted
+delivery guarantee is established by unit tests.

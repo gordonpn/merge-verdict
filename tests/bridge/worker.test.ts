@@ -477,8 +477,15 @@ describe("bridgeWorker webhook handler", () => {
     );
 
     const { ctx, waitUntil } = createExecutionContext();
+    const thirdBody = JSON.stringify(
+      createThreadPayload({
+        repository: { full_name: "octocat/hello-world", default_branch: "stable" },
+        pull_request: { number: 12, head: { sha: "sha-3" } },
+      }),
+    );
     expect((await handler(createSignedRequest(firstBody), ctx)).status).toBe(202);
     expect((await handler(createSignedRequest(secondBody))).status).toBe(202);
+    expect((await handler(createSignedRequest(thirdBody))).status).toBe(202);
 
     await vi.advanceTimersByTimeAsync(50);
     await waitUntil.mock.calls[0]?.[0];
@@ -487,8 +494,8 @@ describe("bridgeWorker webhook handler", () => {
       {
         repository: "octocat/hello-world",
         prNumber: 12,
-        headSha: "sha-2",
-        defaultBranch: "release",
+        headSha: "sha-3",
+        defaultBranch: "stable",
       },
     ]);
   });
