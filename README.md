@@ -89,6 +89,13 @@ packaging are implemented separately. Generated `dist/` artifacts remain ignored
 
 ## Documentation Index
 
+The exported `resolveWorkflowRunPullRequestNumber` helper resolves one unambiguous
+PR from direct references, fork head coordinates, or allowlisted comment-run
+artifacts. REST lookups inspect up to 10 pages and 1000 items and return `null`
+when pagination remains incomplete. The helper is not yet wired into the Action
+event handler; [reviewer workflow validation](docs/reviewer-workflow-validation.md)
+records the integration boundary.
+
 - [Requirements Specification](docs/requirements.md): Functional and non-functional requirements, outcome states, and acceptance criteria.
 - [Architecture Design](docs/architecture.md): Subsystems, component responsibilities, data flow, and Mermaid diagrams.
 - [Verification Policy](docs/verification-policy.md): Verification conditions, severity handling, staleness rules, and decision matrix.

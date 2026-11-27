@@ -2,6 +2,14 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-26: Bound workflow-run resolver lookups before choosing a target
+
+- Decision: Follow REST pagination up to the collector's existing limits of 10 pages and 1000 items. Return no target when a listing remains incomplete. Preserve the exported narrow client with optional page and response-link fields.
+- Rationale: A first-page candidate does not prove uniqueness when another match can occur later. Installed Octokit 22.0.1 supports `paginate`, but the resolver accepts endpoint callables without Octokit's request metadata or pagination method. Keeping that contract avoids requiring a full SDK client solely to follow pages. API errors remain visible to callers.
+- Rejected alternatives: Accepting the first match risks false uniqueness; unbounded pagination allows unlimited work; replacing the public client with an SDK-specific interface would break existing adapters. The collector's private pagination helper is coupled to its own error contract, so the resolver retains its existing absence result for bounded unresolved lookups.
+- Evidence and limits: Regression tests reproduce missing later-page targets, cross-page ambiguity, incomplete page/item limits, and later-page failures. This is a library component; Action wiring and hosted refresh proof remain separate work.
+- Origin: [Workflow-run resolution follow-up](https://github.com/gordonpn/merge-verdict/issues/169), [component pull request](https://github.com/gordonpn/merge-verdict/pull/183).
+
 ## 2026-11-23: Bind PR-Agent provenance to the comment write response
 
 - Decision: Configure upstream's host-only local file sink for review output, validate its repository, PR number, and head SHA, publish that generated Markdown using an independently pinned publisher revision, and attest the ID and exact body returned by that write. Accept only provenance schema version 2. Order discovered check-linked and comment-triggered runs together before reading artifacts, preserving known check-linked runs beyond fallback scan limits. Unexpected discovery errors abort rather than accepting potentially older direct evidence.

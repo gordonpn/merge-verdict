@@ -7,6 +7,35 @@ const REPO_SEGMENT_PATTERN = /^[A-Za-z0-9_.-]+$/;
 const POSITIVE_INTEGER_TEXT_PATTERN = /^[1-9][0-9]*$/;
 const PULLS_LIST_PAGE_SIZE = 100;
 const ARTIFACTS_LIST_PAGE_SIZE = 100;
+const MAX_CONNECTION_PAGES = 10;
+const MAX_CONNECTION_ITEMS = 1000;
+
+interface ResolverPage<T> {
+  readonly data: readonly T[];
+  readonly headers?: { readonly link?: string };
+}
+
+/** Return all items, or null when pagination exceeds the page or item bounds. */
+async function collectResolverPages<T>(
+  readPage: (page: number) => Promise<ResolverPage<T>>,
+): Promise<readonly T[] | null> {
+  const items: T[] = [];
+  for (let page = 1; page <= MAX_CONNECTION_PAGES; page += 1) {
+    const response = await readPage(page);
+    if (items.length + response.data.length > MAX_CONNECTION_ITEMS) {
+      return null;
+    }
+    items.push(...response.data);
+    const hasNextPage = /<[^>]+>;\s*rel="next"/.test(response.headers?.link ?? "");
+    if (!hasNextPage) {
+      return items;
+    }
+    if (items.length >= MAX_CONNECTION_ITEMS) {
+      return null;
+    }
+  }
+  return null;
+}
 
 /**
  * Pull request reference embedded in a `workflow_run` webhook payload.
@@ -83,7 +112,8 @@ export interface WorkflowRunResolverRestClient {
       readonly state: "open";
       readonly head: string;
       readonly per_page: number;
-    }): Promise<{ readonly data: readonly WorkflowRunResolverPullRequestItem[] }>;
+      readonly page?: number;
+    }): Promise<ResolverPage<WorkflowRunResolverPullRequestItem>>;
   };
   readonly actions: {
     listWorkflowRunArtifacts(params: {
@@ -91,10 +121,12 @@ export interface WorkflowRunResolverRestClient {
       readonly repo: string;
       readonly run_id: number;
       readonly per_page?: number;
+      readonly page?: number;
     }): Promise<{
       readonly data: {
         readonly artifacts: readonly WorkflowRunResolverArtifactItem[];
       };
+      readonly headers?: { readonly link?: string };
     }>;
   };
 }
@@ -182,13 +214,19 @@ async function resolveForkPullRequestNumber(
     return null;
   }
 
-  const { data: openPulls } = await rest.pulls.list({
-    owner,
-    repo,
-    state: "open",
-    head: `${headRepo.owner}:${headBranch}`,
-    per_page: PULLS_LIST_PAGE_SIZE,
-  });
+  const openPulls = await collectResolverPages((page) =>
+    rest.pulls.list({
+      owner,
+      repo,
+      state: "open",
+      head: `${headRepo.owner}:${headBranch}`,
+      per_page: PULLS_LIST_PAGE_SIZE,
+      ...(page > 1 ? { page } : {}),
+    }),
+  );
+  if (openPulls === null) {
+    return null;
+  }
 
   const normalizedHeadSha = headSha.toLowerCase();
   const normalizedHeadRepo = headRepo.fullName.toLowerCase();
@@ -241,15 +279,25 @@ async function resolveIssueCommentPullRequestNumber(
     }
   }
 
-  const { data } = await rest.actions.listWorkflowRunArtifacts({
-    owner,
-    repo,
-    run_id: runId,
-    per_page: ARTIFACTS_LIST_PAGE_SIZE,
+  const artifacts = await collectResolverPages(async (page) => {
+    const response = await rest.actions.listWorkflowRunArtifacts({
+      owner,
+      repo,
+      run_id: runId,
+      per_page: ARTIFACTS_LIST_PAGE_SIZE,
+      ...(page > 1 ? { page } : {}),
+    });
+    return {
+      data: response.data.artifacts,
+      ...(response.headers ? { headers: response.headers } : {}),
+    };
   });
+  if (artifacts === null) {
+    return null;
+  }
 
   const matchedPrNumbers = new Set<number>();
-  for (const artifact of data.artifacts) {
+  for (const artifact of artifacts) {
     if (artifact.expired === true || typeof artifact.name !== "string") {
       continue;
     }

@@ -4,8 +4,18 @@ import {
   type ResolveWorkflowRunPullRequestNumberInput,
   resolveWorkflowRunPullRequestNumber,
   type WorkflowRunPayload,
+  type WorkflowRunResolverArtifactItem,
+  type WorkflowRunResolverPullRequestItem,
   type WorkflowRunResolverRestClient,
 } from "../../src/action/workflow-run-resolver.js";
+
+function makeMatchingPullRequest(number = 42): WorkflowRunResolverPullRequestItem {
+  return { number, head: { sha: "a".repeat(40), repo: { full_name: "contributor/hello-world" } } };
+}
+
+function makeTargetArtifact(number = 42): WorkflowRunResolverArtifactItem {
+  return { name: `deepseek-review-target-pr-${number}`, expired: false };
+}
 
 function createRestMock(overrides?: {
   pullsList?: WorkflowRunResolverRestClient["pulls"]["list"];
@@ -161,6 +171,58 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
   });
 
   describe("fork pull_request workflow_run resolution", () => {
+    it.each([false, true])(
+      "checks later pages before resolving a unique match (ambiguous: %s)",
+      async (ambiguous) => {
+        const match = makeMatchingPullRequest();
+        const { rest, pullsList } = createRestMock({
+          pullsList: async (params) =>
+            params.page === 2
+              ? { data: ambiguous ? [{ ...match, number: 43 }] : [match] }
+              : {
+                  data: ambiguous ? [match] : [],
+                  headers: { link: '<https://api.github.com/next>; rel="next"' },
+                },
+        });
+
+        const result = await resolveWorkflowRunPullRequestNumber({
+          owner: "octocat",
+          repo: "hello-world",
+          workflowRun: makeForkPullRequestWorkflowRun(),
+          rest,
+        });
+
+        expect(result).toBe(ambiguous ? null : 42);
+        expect(pullsList).toHaveBeenCalledTimes(2);
+        expect(pullsList).toHaveBeenLastCalledWith({
+          owner: "octocat",
+          repo: "hello-world",
+          state: "open",
+          head: "contributor:feat/fork-change",
+          per_page: 100,
+          page: 2,
+        });
+      },
+    );
+
+    it("returns null when pagination remains incomplete at the page cap", async () => {
+      const { rest, pullsList } = createRestMock({
+        pullsList: async () => ({
+          data: [makeMatchingPullRequest()],
+          headers: { link: '<https://api.github.com/next>; rel="next"' },
+        }),
+      });
+
+      const result = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: makeForkPullRequestWorkflowRun(),
+        rest,
+      });
+
+      expect(result).toBeNull();
+      expect(pullsList).toHaveBeenCalledTimes(10);
+    });
     it("queries open PRs by forkOwner:headBranch and returns the single exact case-insensitive SHA and head repo match", async () => {
       const headSha = "aBcDeF0123456789aBcDeF0123456789aBcDeF01";
       const { rest, pullsList, listWorkflowRunArtifacts } = createRestMock({
@@ -347,6 +409,63 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
   });
 
   describe("issue_comment workflow_run resolution", () => {
+    it.each([false, true])(
+      "checks later artifact pages before resolving (ambiguous: %s)",
+      async (ambiguous) => {
+        const artifact = makeTargetArtifact();
+        const { rest, listWorkflowRunArtifacts } = createRestMock({
+          listWorkflowRunArtifacts: async (params) =>
+            params.page === 2
+              ? {
+                  data: {
+                    artifacts: [
+                      ambiguous ? { ...artifact, name: "deepseek-review-target-pr-43" } : artifact,
+                    ],
+                  },
+                }
+              : {
+                  data: { artifacts: ambiguous ? [artifact] : [] },
+                  headers: { link: '<https://api.github.com/next>; rel="next"' },
+                },
+        });
+
+        const result = await resolveWorkflowRunPullRequestNumber({
+          owner: "octocat",
+          repo: "hello-world",
+          workflowRun: makeIssueCommentWorkflowRun(),
+          rest,
+        });
+
+        expect(result).toBe(ambiguous ? null : 42);
+        expect(listWorkflowRunArtifacts).toHaveBeenCalledTimes(2);
+        expect(listWorkflowRunArtifacts).toHaveBeenLastCalledWith({
+          owner: "octocat",
+          repo: "hello-world",
+          run_id: 2002,
+          per_page: 100,
+          page: 2,
+        });
+      },
+    );
+
+    it("returns null for incomplete artifact pagination at the page cap", async () => {
+      const { rest, listWorkflowRunArtifacts } = createRestMock({
+        listWorkflowRunArtifacts: async () => ({
+          data: { artifacts: [makeTargetArtifact()] },
+          headers: { link: '<https://api.github.com/next>; rel="next"' },
+        }),
+      });
+
+      const result = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: makeIssueCommentWorkflowRun(),
+        rest,
+      });
+
+      expect(result).toBeNull();
+      expect(listWorkflowRunArtifacts).toHaveBeenCalledTimes(10);
+    });
     it("resolves pr-agent.yml run from unexpired pr-agent-review-provenance-pr-<N> artifact", async () => {
       const { rest, listWorkflowRunArtifacts, pullsList } = createRestMock({
         listWorkflowRunArtifacts: async () => ({
@@ -557,6 +676,79 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
       expect(listWorkflowRunArtifacts).not.toHaveBeenCalled();
     });
   });
+
+  it.each(["pull_request", "issue_comment"])(
+    "propagates later-page API failures for %s",
+    async (event) => {
+      const failure = new Error("API unavailable");
+      const { rest, pullsList, listWorkflowRunArtifacts } = createRestMock({
+        pullsList: async (params) => {
+          if (params.page === 2) throw failure;
+          return { data: [], headers: { link: '<https://api.github.com/next>; rel="next"' } };
+        },
+        listWorkflowRunArtifacts: async (params) => {
+          if (params.page === 2) throw failure;
+          return {
+            data: { artifacts: [] },
+            headers: { link: '<https://api.github.com/next>; rel="next"' },
+          };
+        },
+      });
+      const workflowRun =
+        event === "pull_request" ? makeForkPullRequestWorkflowRun() : makeIssueCommentWorkflowRun();
+
+      await expect(
+        resolveWorkflowRunPullRequestNumber({
+          owner: "octocat",
+          repo: "hello-world",
+          workflowRun,
+          rest,
+        }),
+      ).rejects.toBe(failure);
+      expect(event === "pull_request" ? pullsList : listWorkflowRunArtifacts).toHaveBeenCalledTimes(
+        2,
+      );
+    },
+  );
+
+  it("refuses an incomplete 1000-item artifact listing without requesting more", async () => {
+    const { rest, listWorkflowRunArtifacts } = createRestMock({
+      listWorkflowRunArtifacts: async () => ({
+        data: { artifacts: Array.from({ length: 1000 }, () => makeTargetArtifact()) },
+        headers: { link: '<https://api.github.com/next>; rel="next"' },
+      }),
+    });
+
+    const result = await resolveWorkflowRunPullRequestNumber({
+      owner: "octocat",
+      repo: "hello-world",
+      workflowRun: makeIssueCommentWorkflowRun(),
+      rest,
+    });
+
+    expect(result).toBeNull();
+    expect(listWorkflowRunArtifacts).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([999, 1000, 1001])(
+    "bounds artifact accumulation to 1000 items (%s returned)",
+    async (size) => {
+      const { rest } = createRestMock({
+        listWorkflowRunArtifacts: async () => ({
+          data: { artifacts: Array.from({ length: size }, () => makeTargetArtifact()) },
+        }),
+      });
+
+      const result = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: makeIssueCommentWorkflowRun(),
+        rest,
+      });
+
+      expect(result).toBe(size > 1000 ? null : 42);
+    },
+  );
 
   it("returns null for other workflow_run events with empty pull_requests without API calls", async () => {
     const { rest, pullsList, listWorkflowRunArtifacts } = createRestMock();
