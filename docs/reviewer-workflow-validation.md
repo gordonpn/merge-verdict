@@ -39,6 +39,35 @@ After a cancellation, timeout, missing credential, or unsupported direct event, 
 
 ## Remaining Live Validation
 
+### Workflow-run resolver component
+
+`resolveWorkflowRunPullRequestNumber` is exported as a library helper. The Action
+event handler and workflow trigger guards do not yet call it. Manual
+`workflow_dispatch` remains the refresh path until that integration is delivered.
+
+The helper rejects explicit `workflow_run.repository.full_name` mismatches
+(including blank values) before direct or fallback lookups, and rejects multiple
+direct PR references without fallback. Fork lookups intentionally query
+`state: "open"` PRs and require a unique exact head SHA and repository match
+across all returned pages. Comment-run lookups require an allowlisted workflow
+path, same-repository run, and a unique target artifact name with explicit
+`expired === false`. The name selects a refresh target; it does not authenticate
+review evidence or authorize approval. DeepSeek's job guard requires
+`github.event.issue.pull_request` before eligibility lookup or artifact
+creation, excluding ordinary issue comments.
+
+Both REST lookups follow pagination for at most 10 pages and 1000 items, matching
+the collector's resource limits. Next-page detection parses `Link` parameters
+outside URI brackets and quoted parameter values, ignoring `rel=next` text
+inside URLs or quoted values, and matches the RFC 8288 `next` relation token
+case-insensitively across parameter ordering, quoting, and multi-token
+relations. Incomplete listings return `null` even if a candidate was
+already found; a later page could contain another match. API failures propagate.
+Custom REST clients must preserve response `headers.link` to expose subsequent
+pages. A missing, empty, or whitespace-only link is treated as a complete
+response, whereas a malformed non-empty `Link` header fails closed (`null`)
+rather than treating a potentially truncated listing as complete.
+
 Track outcomes against the exact workflow revision, event, PR origin, actor association, and head SHA. Record run and artifact URLs, expected versus observed status, effective permissions, review author, and reviewed commit. Never record tokens, API keys, secret values, or unsanitized provider payloads.
 
 | Trial                                                                 | Expected evidence                                                                                                                  | Status in this document                      |
