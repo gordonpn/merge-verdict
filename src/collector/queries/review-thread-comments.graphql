@@ -9,7 +9,9 @@ query ReviewThreadComments($threadId: ID!, $cursor: String) {
             login
           }
           path
+          startLine
           line
+          originalStartLine
           originalLine
           createdAt
           updatedAt

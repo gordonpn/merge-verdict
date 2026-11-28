@@ -7,7 +7,7 @@ import type {
 } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
-import { parseIsoTimestamp, stripMarkdownPunctuation } from "./utils.js";
+import { parseIsoTimestamp, resolveThreadLineRange, stripMarkdownPunctuation } from "./utils.js";
 
 const COPILOT_LOGINS = new Set([
   "copilot-pull-request-reviewer[bot]",
@@ -82,16 +82,13 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
 
     const severity: Severity = thread.isResolved ? "LOW" : "HIGH";
     const isBlocking = !thread.isResolved;
+    const lineRange = resolveThreadLineRange(thread);
 
     const finding: NormalizedFinding = {
       id: thread.id,
       reviewerId: "copilot",
       threadId: thread.id,
-      title: extractCopilotTitle(
-        firstComment.body,
-        thread.path,
-        thread.line ?? thread.originalLine,
-      ),
+      title: extractCopilotTitle(firstComment.body, thread.path, lineRange.lineNumber ?? null),
       description: firstComment.body,
       severity,
       isBlocking,
@@ -100,9 +97,11 @@ export function normalizeCopilotReviewer(input: NormalizerInput): ReviewerExecut
     if (thread.path) {
       finding.filePath = thread.path;
     }
-    const lineNum = thread.line ?? thread.originalLine;
-    if (typeof lineNum === "number" && lineNum > 0) {
-      finding.lineNumber = lineNum;
+    if (lineRange.startLineNumber !== undefined) {
+      finding.startLineNumber = lineRange.startLineNumber;
+    }
+    if (lineRange.lineNumber !== undefined) {
+      finding.lineNumber = lineRange.lineNumber;
     }
     if (thread.resolvedByLogin) {
       finding.resolvedBy = thread.resolvedByLogin;

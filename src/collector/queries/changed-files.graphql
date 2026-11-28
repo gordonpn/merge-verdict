@@ -4,6 +4,7 @@ query ChangedFiles($owner: String!, $repo: String!, $number: Int!, $cursor: Stri
       files(first: 100, after: $cursor) {
         nodes {
           path
+          changeType
         }
         pageInfo {
           hasNextPage

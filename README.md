@@ -15,6 +15,16 @@ Merge Verdict solves this reconciliation bottleneck. It acts as an automated ver
 
 The developer remains responsible for executing the merge. Automatic merging is explicitly out of scope.
 
+An optional signed webhook relay handles thread-only resolution changes. Its
+[deployment guide](docs/deployment.md#8-optional-webhook-relay-bridge-pull_request_review_thread)
+defines the allowlist, fixed-window debounce, and delivery limits. Local tests do
+not establish a deployed relay or a hosted delivery latency guarantee.
+
+The standalone publisher exports `createOctokitApprovalClient` for authenticated
+Octokit review operations and `publishPullRequestApproval` for provider dispatch.
+Ownership attestation and deployment-specific capabilities remain caller supplied;
+see the [approval provider contract](docs/approval-providers.md).
+
 ## What Merge Verdict Does and Does Not Do
 
 ### What It Does
@@ -88,6 +98,13 @@ point exports the core library. GitHub Action event handling and `action.yml`
 packaging are implemented separately. Generated `dist/` artifacts remain ignored.
 
 ## Documentation Index
+
+The exported `resolveWorkflowRunPullRequestNumber` helper resolves one unambiguous
+PR from direct references, fork head coordinates, or allowlisted comment-run
+artifacts. REST lookups inspect up to 10 pages and 1000 items and return `null`
+when pagination remains incomplete. The helper is not yet wired into the Action
+event handler; [reviewer workflow validation](docs/reviewer-workflow-validation.md)
+records the integration boundary.
 
 - [Requirements Specification](docs/requirements.md): Functional and non-functional requirements, outcome states, and acceptance criteria.
 - [Architecture Design](docs/architecture.md): Subsystems, component responsibilities, data flow, and Mermaid diagrams.

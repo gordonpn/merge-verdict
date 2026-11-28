@@ -13,6 +13,8 @@ const MAX_PROVENANCE_BYTES = 64 * 1024;
 const MAX_WORKFLOW_RUNS_TO_INSPECT = 5;
 const MAX_WORKFLOW_RUN_PAGES = 3;
 const WORKFLOW_RUNS_PER_PAGE = 100;
+const ARTIFACTS_PER_PAGE = 100;
+const MAX_ARTIFACT_PAGES = 10;
 const MAX_CANDIDATE_RUN_SCANS = 25;
 
 export const PR_AGENT_CHECK_NAMES: ReadonlySet<string> = new Set([
@@ -41,7 +43,7 @@ const PrAgentProvenanceArtifactSchema = z.object({
   schema_version: z.literal(2),
   workflow_path: z.literal(PR_AGENT_WORKFLOW_PATH),
   run_id: z.number().int().positive(),
-  run_attempt: z.number().int().positive().optional(),
+  run_attempt: z.number().int().positive(),
   repository: z.string().min(1),
   pull_request_number: z.number().int().positive(),
   head_sha: z.string().regex(/^[a-f0-9]{40}$/i),
@@ -190,6 +192,89 @@ interface ReadArtifactResult {
   readonly hasCandidateArtifact: boolean;
 }
 
+function parsePositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function artifactTimestampMs(artifact: { readonly created_at?: string | null }): number {
+  if (typeof artifact.created_at !== "string") {
+    return 0;
+  }
+  const parsed = Date.parse(artifact.created_at);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+async function readCandidateArtifact(
+  rest: Octokit,
+  retry: RetryRequest,
+  owner: string,
+  repo: string,
+  expectedRepository: string,
+  pullRequestNumber: number,
+  canonicalHeadSha: string,
+  runId: number,
+  runAttempt: number,
+  artifactId: number,
+): Promise<PrAgentProvenanceEvidence | null> {
+  let downloadResponse: Awaited<ReturnType<typeof rest.rest.actions.downloadArtifact>>;
+  try {
+    downloadResponse = await retry("download_pr_agent_provenance_artifact", () =>
+      rest.rest.actions.downloadArtifact({
+        owner,
+        repo,
+        artifact_id: artifactId,
+        archive_format: "zip",
+      }),
+    );
+  } catch (error) {
+    if (extractStatusCode(error) === 410) {
+      return null;
+    }
+    throw error;
+  }
+
+  const archiveBytes = toUint8Array(downloadResponse.data);
+  if (!archiveBytes) {
+    return null;
+  }
+  const jsonText = extractZipEntryText(archiveBytes, PR_AGENT_ARTIFACT_ENTRY, MAX_PROVENANCE_BYTES);
+  if (!jsonText) {
+    return null;
+  }
+
+  let rawJson: unknown;
+  try {
+    rawJson = JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+
+  const parsed = PrAgentProvenanceArtifactSchema.safeParse(rawJson);
+  if (!parsed.success) {
+    return null;
+  }
+
+  const artifact = parsed.data;
+  if (
+    artifact.run_id !== runId ||
+    artifact.run_attempt !== runAttempt ||
+    artifact.repository.toLowerCase() !== expectedRepository ||
+    artifact.pull_request_number !== pullRequestNumber ||
+    canonicalizeCommitSha(artifact.head_sha) !== canonicalHeadSha
+  ) {
+    return null;
+  }
+
+  return {
+    status: "verified",
+    workflowPath: artifact.workflow_path,
+    runId: artifact.run_id,
+    headSha: canonicalHeadSha,
+    commentId: artifact.comment_id,
+    bodyDigest: artifact.body_digest.toLowerCase(),
+  };
+}
+
 async function readRunProvenanceArtifact(
   rest: Octokit,
   retry: RetryRequest,
@@ -198,87 +283,69 @@ async function readRunProvenanceArtifact(
   pullRequestNumber: number,
   canonicalHeadSha: string,
   runId: number,
+  runAttempt: number,
 ): Promise<ReadArtifactResult> {
-  const { data: artifactList } = await retry("list_workflow_run_artifacts", () =>
-    rest.rest.actions.listWorkflowRunArtifacts({
-      owner,
-      repo,
-      run_id: runId,
-      per_page: 20,
-    }),
-  );
+  const artifacts: Array<{
+    id: number;
+    name: string;
+    expired: boolean;
+    created_at?: string | null;
+  }> = [];
+  for (let page = 1; page <= MAX_ARTIFACT_PAGES; page += 1) {
+    const { data: artifactList } = await retry("list_workflow_run_artifacts", () =>
+      rest.rest.actions.listWorkflowRunArtifacts({
+        owner,
+        repo,
+        run_id: runId,
+        per_page: ARTIFACTS_PER_PAGE,
+        page,
+      }),
+    );
+    artifacts.push(...artifactList.artifacts);
+    if (artifactList.artifacts.length < ARTIFACTS_PER_PAGE) {
+      break;
+    }
+    // Do not select evidence from an incomplete, potentially reordered listing.
+    if (page === MAX_ARTIFACT_PAGES) {
+      return { evidence: null, hasCandidateArtifact: true };
+    }
+  }
 
   const scopedArtifactName = `${PR_AGENT_ARTIFACT_PREFIX}${pullRequestNumber}`;
-  const candidateArtifacts = artifactList.artifacts.filter(
-    (artifact) => isCandidateArtifactForPr(artifact.name, pullRequestNumber) && !artifact.expired,
-  );
-  const provenanceArtifact =
-    candidateArtifacts.find((artifact) => artifact.name === scopedArtifactName) ??
-    candidateArtifacts[0];
-  if (!provenanceArtifact) {
+  const candidateArtifacts = artifacts
+    .filter(
+      (artifact) => isCandidateArtifactForPr(artifact.name, pullRequestNumber) && !artifact.expired,
+    )
+    .sort(
+      (a, b) =>
+        Number(b.name === scopedArtifactName) - Number(a.name === scopedArtifactName) ||
+        artifactTimestampMs(b) - artifactTimestampMs(a) ||
+        b.id - a.id,
+    );
+  if (candidateArtifacts.length === 0) {
     return { evidence: null, hasCandidateArtifact: false };
   }
 
-  let downloadResponse: Awaited<ReturnType<typeof rest.rest.actions.downloadArtifact>>;
-  try {
-    downloadResponse = await retry("download_pr_agent_provenance_artifact", () =>
-      rest.rest.actions.downloadArtifact({
-        owner,
-        repo,
-        artifact_id: provenanceArtifact.id,
-        archive_format: "zip",
-      }),
-    );
-  } catch (error) {
-    if (extractStatusCode(error) === 410) {
-      return { evidence: null, hasCandidateArtifact: true };
-    }
-    throw error;
-  }
-
-  const archiveBytes = toUint8Array(downloadResponse.data);
-  if (!archiveBytes) {
-    return { evidence: null, hasCandidateArtifact: true };
-  }
-  const jsonText = extractZipEntryText(archiveBytes, PR_AGENT_ARTIFACT_ENTRY, MAX_PROVENANCE_BYTES);
-  if (!jsonText) {
-    return { evidence: null, hasCandidateArtifact: true };
-  }
-
-  let rawJson: unknown;
-  try {
-    rawJson = JSON.parse(jsonText);
-  } catch {
-    return { evidence: null, hasCandidateArtifact: true };
-  }
-
-  const parsed = PrAgentProvenanceArtifactSchema.safeParse(rawJson);
-  if (!parsed.success) {
-    return { evidence: null, hasCandidateArtifact: true };
-  }
-
-  const artifact = parsed.data;
   const expectedRepository = `${owner}/${repo}`.toLowerCase();
-  if (
-    artifact.run_id !== runId ||
-    artifact.repository.toLowerCase() !== expectedRepository ||
-    artifact.pull_request_number !== pullRequestNumber ||
-    canonicalizeCommitSha(artifact.head_sha) !== canonicalHeadSha
-  ) {
-    return { evidence: null, hasCandidateArtifact: true };
+  for (const provenanceArtifact of candidateArtifacts) {
+    const evidence = await readCandidateArtifact(
+      rest,
+      retry,
+      owner,
+      repo,
+      expectedRepository,
+      pullRequestNumber,
+      canonicalHeadSha,
+      runId,
+      runAttempt,
+      provenanceArtifact.id,
+    );
+    if (evidence) {
+      return { evidence, hasCandidateArtifact: true };
+    }
   }
 
-  return {
-    evidence: {
-      status: "verified",
-      workflowPath: artifact.workflow_path,
-      runId: artifact.run_id,
-      headSha: canonicalHeadSha,
-      commentId: artifact.comment_id,
-      bodyDigest: artifact.body_digest.toLowerCase(),
-    },
-    hasCandidateArtifact: true,
-  };
+  return { evidence: null, hasCandidateArtifact: true };
 }
 
 function runTimestampMs(run: {
@@ -304,6 +371,7 @@ export async function collectPrAgentProvenance(
   const inspectedRunIds = new Set<number>();
   interface CandidateWorkflowRun {
     readonly id: number;
+    readonly runAttempt: number;
     readonly headShaMatches: boolean;
     readonly timestampMs: number;
   }
@@ -321,14 +389,17 @@ export async function collectPrAgentProvenance(
       const { data: run } = await retry("get_pr_agent_workflow_run", () =>
         rest.rest.actions.getWorkflowRun({ owner, repo, run_id: runId }),
       );
+      const runAttempt = parsePositiveInteger(run.run_attempt);
       if (
         run.path === PR_AGENT_WORKFLOW_PATH &&
         run.status === "completed" &&
-        run.repository.full_name.toLowerCase() === expectedRepository
+        run.repository.full_name.toLowerCase() === expectedRepository &&
+        runAttempt !== null
       ) {
         inspectedRunIds.add(run.id);
         candidateRuns.push({
           id: run.id,
+          runAttempt,
           headShaMatches: canonicalizeCommitSha(run.head_sha) === canonicalHeadSha,
           timestampMs: runTimestampMs(run),
         });
@@ -362,14 +433,17 @@ export async function collectPrAgentProvenance(
         ) {
           continue;
         }
+        const runAttempt = parsePositiveInteger(run.run_attempt);
         if (
           run.path === PR_AGENT_WORKFLOW_PATH &&
           run.repository.full_name.toLowerCase() === expectedRepository &&
+          runAttempt !== null &&
           !inspectedRunIds.has(run.id)
         ) {
           inspectedRunIds.add(run.id);
           candidateRuns.push({
             id: run.id,
+            runAttempt,
             headShaMatches:
               typeof run.head_sha === "string" &&
               canonicalizeCommitSha(run.head_sha) === canonicalHeadSha,
@@ -416,6 +490,7 @@ export async function collectPrAgentProvenance(
         pullRequestNumber,
         canonicalHeadSha,
         candidate.id,
+        candidate.runAttempt,
       );
       if (result.hasCandidateArtifact && !checkLinked) {
         inspectedMatchingRuns += 1;

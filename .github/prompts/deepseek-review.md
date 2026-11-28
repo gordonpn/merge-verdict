@@ -26,10 +26,17 @@ Act as a skeptical correctness reviewer. Assume the implementation may be subtly
 - If a recurring incorrect assumption or architectural conflict is identified in the diff, recommend recording it in repository documentation.
 - Require evidence before turning any finding into a persistent rule.
 
+# Verdict Criteria
+
+- **BLOCK**: Confirmed security vulnerability, data corruption, or broken invariant that makes merging unsafe.
+- **REQUEST CHANGES**: Confirmed functional defect, regression, broken trust boundary, or unmet acceptance criterion grounded in a concrete failure scenario from the diff. Do not choose `REQUEST CHANGES` for documented tradeoffs or explicitly deferred follow-ups that do not themselves confirm a defect or regression. Confirmed defects and regressions remain reportable even when their repair is deferred or described as a tradeoff. Do not choose `REQUEST CHANGES` for speculative "confirm/verify" questions or `LOW` / `ADVISORY` observations.
+- **APPROVE WITH MINOR FINDINGS**: No `BLOCKER`, `HIGH`, or `MEDIUM` defect confirmed, and only minor (`LOW` or `ADVISORY`) improvements are noted.
+- **APPROVE**: No confirmed issues remain in `Material Findings`.
+
 # Output
 
-- **Verdict:** APPROVE / APPROVE WITH MINOR FINDINGS / REQUEST CHANGES / BLOCK
-- **Material Findings:** severity, evidence, failure scenario, smallest robust fix
+- Start the review with the exact level-two heading `## Verdict: <verdict>`, replacing `<verdict>` with exactly one of `APPROVE`, `APPROVE WITH MINOR FINDINGS`, `REQUEST CHANGES`, or `BLOCK`. Do not use a bold paragraph or list item for the verdict.
+- Follow it with the exact level-two heading `## Material Findings`. Under that heading, write `None.` when no defect is confirmed; otherwise choose one format for the entire section: either one bullet (`- SEVERITY: ...`) per finding or one numbered level-three subsection (`### 1. SEVERITY: ...`) per finding. Do not mix finding formats within a section; bullets beneath a numbered subsection are supporting detail, not separate findings. Prefix each finding with an explicit severity (`BLOCKER:`, `HIGH:`, `MEDIUM:`, `LOW:`, or `ADVISORY:`) followed by evidence, failure scenario, and smallest robust fix. Keep speculative, unverified, or "no fix required" observations out of `Material Findings` and place them under `Unverified Assumptions` or `Missing Verification`.
 - **Unverified Assumptions**
 - **Missing Verification**
 - **ADR / Documentation Impact**

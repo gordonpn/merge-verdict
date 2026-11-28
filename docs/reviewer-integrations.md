@@ -87,20 +87,29 @@ Unknown diagnostic wording remains `FAILED` until its meaning is verified.
   - In `.github/workflows/deepseek-review.yml`, DeepSeek Review is opt-in (`vars.ENABLE_DEEPSEEK_REVIEW == 'true'`) and triggers on `pull_request` (`opened`, `ready_for_review`, and `synchronize` for non-draft same-repository non-bot PRs) and on open-PR `issue_comment` (`created`, `edited`) `/review` requests from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts targeting non-draft same-repository non-bot PRs. When enabled, eligible runs validate `DEEPSEEK_API_KEY` and fail explicitly if it is missing, empty, or whitespace-only.
 - **Merge Verdict Policy Rule**:
   - The adapter extracts the commit SHA associated with the review (`review.commit_id`).
-  - Material findings support bullets, numbered lists, and numbered level-three subsections within the material findings section. Subsection descriptions retain their supporting text and nested bullets. Parsing stops at sibling sections or non-finding level-three headings. Finding severity and blocking state follow the overall verdict.
-  - It parses the Markdown heading `## Verdict:` to extract the decision.
+  - Material findings support bullets, numbered lists, and numbered level-three subsections within the material findings section. Subsection descriptions retain their supporting text and nested bullets. Parsing stops at sibling sections or non-finding level-three headings. The producer prompt requires one consistent format throughout the material findings section: list entries or numbered subsections, without mixing them or using standalone paragraphs. Bullets beneath a numbered subsection are supporting detail of that finding. Bold labels support both `**LOW:**` and `**LOW**:` colon placement. Each finding preserves an explicit severity prefix (`BLOCKER`, `CRITICAL` mapped to `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`, `ADVISORY`, or `INFO` mapped to `ADVISORY`) when present and falls back to the verdict-derived default otherwise (`BLOCK` to `BLOCKER`, `REQUEST CHANGES` to `HIGH`, `APPROVE WITH MINOR FINDINGS` to `LOW`, `APPROVE` to `MEDIUM`); under `REQUEST CHANGES` or `BLOCK`, `BLOCKER`/`HIGH`/`MEDIUM` findings block while `LOW`/`ADVISORY` remain non-blocking, and all material findings stay open (`isResolved: false`) so policy evaluation can still apply `blocking_severity_threshold` and `allow_advisory_exemptions` and the check report lists them as open findings, whereas under `APPROVE` or `APPROVE WITH MINOR FINDINGS`, findings are marked `isResolved: true`.
+  - The producer prompt requires the exact level-two headings `## Verdict: <verdict>` and `## Material Findings`, with one supported verdict in place of `<verdict>`. The adapter parses the Markdown heading `## Verdict:` to extract the decision; a bold verdict paragraph is not a supported substitute.
   - If the review commit does not match the latest head commit, or if the verdict is `REQUEST CHANGES` or `BLOCK`, verification fails.
 
 ### 2.5. PR-Agent
 
-- **Identity**: Repository GitHub Actions workflow (`.github/workflows/pr-agent.yml`) using `The-PR-Agent/pr-agent`.
+- **Identity**: Repository GitHub Actions workflow (`.github/workflows/pr-agent.yml`) using `docker://pragent/pr-agent` (`The-PR-Agent/pr-agent`).
+- **Runtime Image Pinning**:
+  - `.github/workflows/pr-agent.yml` pins the runtime container image by immutable OCI digest (`docker://pragent/pr-agent@sha256:548e894a88071180832b2f4233f734d0acd0db1a879e2fcbaa70bac8b8372ebe`), corresponding to upstream release tag `0.50.0-github_action` built by `The-PR-Agent/pr-agent/.github/workflows/publish.yml@refs/tags/v0.50.0` (verified via SLSA provenance attestation).
+  - **Invocation Contract**: The [pinned wrapper metadata](https://github.com/The-PR-Agent/pr-agent/blob/e673a02076ce09a4726c3d0c3cc85780e59ca52b/action.yaml) declares no outputs, entrypoint override, or arguments. Its only inputs are optional artifact context inputs, unused by this workflow. The `github_action` image starts `pr_agent.servers.github_action_runner`; it reads the dotted environment settings directly. Downstream publication consumes the host file sink and `steps.pr_agent.outcome`, not action outputs. [Hosted run 45549723891](https://github.com/gordonpn/merge-verdict/actions/runs/45549723891) exercised the pinned digest, persistent state, publication, and provenance upload.
+  - **Digest-Update Procedure**:
+    1. Resolve the release tag digest (formatted as `sha256:<hex>`): `docker buildx imagetools inspect pragent/pr-agent:<version>-github_action --format '{{.Manifest.Digest}}'`.
+    2. Verify its GitHub Artifact Attestation: `gh attestation verify "oci://index.docker.io/pragent/pr-agent@<digest>" --repo The-PR-Agent/pr-agent --signer-workflow The-PR-Agent/pr-agent/.github/workflows/publish.yml --source-ref "refs/tags/v<version>"`.
+    3. Update `.github/workflows/pr-agent.yml` with `docker://pragent/pr-agent@<digest>` and the tag comment. Update this section's pinned digest, release tag, source/provenance relationship, and invocation evidence to match the verified image.
+    4. Run `just lint-workflows` and `just check-docs`.
+    5. Confirm hosted `runner / pr-agent` produces valid provenance before merging.
 - **Artifacts Emitted**:
   - PR conversation comments with marker `<!-- pr-agent:review:full -->` and persistent state marker `<!-- pr-agent-review-state:v1 -->`.
   - Markdown tables detailing ticket compliance when enabled (`PR_REVIEWER.REQUIRE_TICKET_ANALYSIS_REVIEW`).
   - Workflow artifact `pr-agent-review-provenance-pr-<number>` (with collector compatibility for legacy `pr-agent-review-provenance`, containing `pr-agent-provenance.json`) emitted by `.github/workflows/pr-agent.yml` binding `workflow_path`, `run_id`, `repository`, `pull_request_number`, `head_sha`, `comment_id`, and `body_digest`.
 - **Observed Behavior on Reference PRs**:
   - Opt-in via `vars.ENABLE_PR_AGENT == 'true'`, triggering on `pull_request` (`opened`, `ready_for_review`, and `synchronize` with `HANDLE_PUSH_TRIGGER` running `/review` for non-draft same-repository non-bot PRs) and on open-PR `issue_comment` (`created`, `edited`) leading slash commands (`/review`, `/describe`, `/improve`, `/ask`) from repository `OWNER`, `MEMBER`, or `COLLABORATOR` non-bot accounts targeting non-draft same-repository non-bot PRs. When enabled, eligible runs validate `DEEPSEEK_API_KEY` and fail explicitly if it is missing, empty, or whitespace-only.
-  - Repository producer defaults in `.github/workflows/pr-agent.yml` set `PR_REVIEWER.REQUIRE_TICKET_ANALYSIS_REVIEW: "false"`, `PR_REVIEWER.PERSISTENT_FINDING_STATE: "true"`, `PR_REVIEWER.NUM_MAX_FINDINGS: "10"`, and `PR_REVIEWER.MAX_PREVIOUS_FINDINGS_CHARS: "0"`. Disabling producer-side ticket analysis avoids turning partial-milestone `Refs #...` tracking epics into spurious non-compliance blocks while Merge Verdict checks issue links via `verification.require_issue_links`. Raising `NUM_MAX_FINDINGS` above the upstream default (`3`) avoids `len(current_findings) < max_findings` marking 3-finding reviews as `complete: false` (`kind: "partial"`), and setting `MAX_PREVIOUS_FINDINGS_CHARS: "0"` stops the LLM prompt from echoing superseded `ACTIVE` finding prose across pushes while keeping structured `finding_id` state reconciliation intact.
+  - Repository producer defaults in `.github/workflows/pr-agent.yml` set `PR_REVIEWER.REQUIRE_TICKET_ANALYSIS_REVIEW: "false"`, `PR_REVIEWER.PERSISTENT_FINDING_STATE: "true"`, `PR_REVIEWER.NUM_MAX_FINDINGS: "10"`, `PR_REVIEWER.MAX_PREVIOUS_FINDINGS_CHARS: "0"`, and `PR_REVIEWER.EXTRA_INSTRUCTIONS` instructing the reviewer to report only concrete defects in `key_issues_to_review` (excluding confirmed-safe behavior, accepted design choices that cause no concrete defect, and speculative confirm/verify notes, while retaining documented tradeoffs that cause concrete correctness, security, data-loss, or contract defects). Disabling producer-side ticket analysis avoids turning partial-milestone `Refs #...` tracking epics into spurious non-compliance blocks while Merge Verdict checks issue links via `verification.require_issue_links`. Raising `NUM_MAX_FINDINGS` above the upstream default (`3`) avoids `len(current_findings) < max_findings` marking 3-finding reviews as `complete: false` (`kind: "partial"`), and setting `MAX_PREVIOUS_FINDINGS_CHARS: "0"` stops the LLM prompt from echoing superseded `ACTIVE` finding prose across pushes while keeping structured `finding_id` state reconciliation intact.
 - **Merge Verdict Policy Rule**:
   - The adapter checks whether required ticket compliance sections indicate non-compliance or unresolved concerns whenever ticket compliance sections appear in a comment.
   - Non-compliant requirement bullets become HIGH blocking findings. Compliant and human-verification sections do not become findings. Structured finding states RESOLVED and FIXED clear a concern; other states remain unresolved.
@@ -228,6 +237,29 @@ export const ReviewSnapshotSchema = z.object({
 });
 export type ReviewSnapshot = z.infer<typeof ReviewSnapshotSchema>;
 ```
+
+### Finding locations and source links
+
+The runtime finding schema in `src/models/finding.ts` accepts an optional positive
+integer `startLineNumber`. It requires a positive integer `lineNumber` and cannot
+exceed that ending line. CodeRabbit, Copilot, Sourcery, and Codex preserve a
+multiline start only when it is strictly below the end. They select a valid
+current end and its current start together, otherwise a valid original end and
+its original start, without mixing the two ranges. Missing or invalid ends leave
+the finding visible without a line number.
+
+`rawCommentUrl` retains its existing source-link contract. In particular, Copilot
+uses the path, commit identity, and ending line from the same comment, independent
+of the thread's range. The URL anchors only the ending line; consumers should use
+`startLineNumber` and `lineNumber` for the normalized range.
+
+The collector exposes GraphQL `changedFiles` entries with `path` and nullable
+`changeType` alongside the existing `changedFilePaths`. The additive fields remain
+optional for existing typed callers; omitted range/change-type fields in legacy
+collector payloads become null. This does not provide REST `previous_filename`
+rename mappings. Issue #26 remains open for that remaining rename requirement
+and its literal 100% normalizer coverage requirement; historical provenance stays
+coordinated with #77.
 
 ## 4. Distinguishing Facts from Assumptions
 

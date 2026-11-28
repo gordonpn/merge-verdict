@@ -2,6 +2,29 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-26: Bound relay dispatch request lifetime
+
+- Decision: Abort a GitHub workflow-dispatch request after four seconds using the runtime's `AbortSignal.timeout` API. Preserve rejection through the existing completion promise and `ctx.waitUntil`.
+- Rationale: A stalled fetch otherwise prevents later windows for the same PR from dispatching. Four seconds leaves one second of scheduling headroom after the maximum 25-second debounce window within the 30-second background lifetime. This bounds one request without introducing a new dependency or retry policy.
+- Rejected alternatives: Leaving network duration unbounded permits indefinite queue stalls; a custom timer duplicates a native API; automatic retries add requests and can exceed the background lifetime.
+- Evidence and limits: A regression test reproduces the missing signal, verifies the four-second budget and rejection propagation. Prior serialized windows can still delay later dispatches under sustained traffic. Unit tests and Node consumers do not establish Cloudflare delivery or a hosted latency guarantee.
+- Origin: [Optional relay](https://github.com/gordonpn/merge-verdict/issues/5), [worker component](https://github.com/gordonpn/merge-verdict/pull/181).
+
+## 2026-11-26: Preserve bounded approval pagination across Link parameter variants
+
+- Decision: Recognize the `next` relation independently of Link parameter order, optional whitespace, quoting, casing, and multiple relation tokens, while retaining the existing page cap and no-header overflow probe.
+- Rationale: A present Link header with a missed next relation silently returned incomplete approval evidence. Regression tests reproduce six variants and assert exact returned review IDs, with negative relation-token controls. [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288.html#section-2.1.1) requires case-insensitive registered relation comparison.
+- Rejected alternatives: The installed Octokit pagination iterator uses the same restrictive relation pattern and would preserve the defect. Adding a Link parser dependency is unnecessary for relation detection; the adapter continues to request only its fixed GitHub endpoint and sequential page numbers.
+- Origin: [Approval adapter review](https://github.com/gordonpn/merge-verdict/pull/182).
+
+## 2026-11-26: Bound workflow-run resolver lookups before choosing a target
+
+- Decision: Follow REST pagination up to the collector's existing limits of 10 pages and 1000 items. Return no target when a listing remains incomplete. Preserve the exported narrow client with optional page and response-link fields.
+- Rationale: A first-page candidate does not prove uniqueness when another match can occur later. Installed Octokit 22.0.1 supports `paginate`, but the resolver accepts endpoint callables without Octokit's request metadata or pagination method. Keeping that contract avoids requiring a full SDK client solely to follow pages. API errors remain visible to callers.
+- Rejected alternatives: Accepting the first match risks false uniqueness; unbounded pagination allows unlimited work; replacing the public client with an SDK-specific interface would break existing adapters. The collector's private pagination helper is coupled to its own error contract, so the resolver retains its existing absence result for bounded unresolved lookups.
+- Evidence and limits: Regression tests reproduce missing later-page targets, cross-page ambiguity, incomplete page/item limits, and later-page failures. This is a library component; Action wiring and hosted refresh proof remain separate work.
+- Origin: [Workflow-run resolution follow-up](https://github.com/gordonpn/merge-verdict/issues/169), [component pull request](https://github.com/gordonpn/merge-verdict/pull/183).
+
 ## 2026-11-23: Bind PR-Agent provenance to the comment write response
 
 - Decision: Configure upstream's host-only local file sink for review output, validate its repository, PR number, and head SHA, publish that generated Markdown using an independently pinned publisher revision, and attest the ID and exact body returned by that write. Accept only provenance schema version 2. Order discovered check-linked and comment-triggered runs together before reading artifacts, preserving known check-linked runs beyond fallback scan limits. Unexpected discovery errors abort rather than accepting potentially older direct evidence.

@@ -109,7 +109,7 @@ jobs:
       - name: PR Agent Action
         id: pr_agent
         if: github.event_name != 'issue_comment' || steps.pr_state.outputs.eligible == 'true'
-        uses: The-PR-Agent/pr-agent@e673a02076ce09a4726c3d0c3cc85780e59ca52b # v0.50.0
+        uses: docker://pragent/pr-agent@sha256:548e894a88071180832b2f4233f734d0acd0db1a879e2fcbaa70bac8b8372ebe # 0.50.0-github_action
         env:
           GITHUB_ACTION_CONFIG.HANDLE_PUSH_TRIGGER: "true"
           GITHUB_ACTION_CONFIG.PUSH_COMMANDS: '["/review"]'
@@ -117,6 +117,7 @@ jobs:
           PR_REVIEWER.PERSISTENT_FINDING_STATE: "true"
           PR_REVIEWER.NUM_MAX_FINDINGS: "10"
           PR_REVIEWER.MAX_PREVIOUS_FINDINGS_CHARS: "0"
+          PR_REVIEWER.EXTRA_INSTRUCTIONS: "Report only concrete correctness, security, data-loss, or contract defects in key_issues_to_review. Do not list confirmed-safe behavior, accepted design choices that cause no concrete defect, or speculative confirm/verify observations as key issues. Documented tradeoffs that cause concrete correctness, security, data-loss, or contract defects must still be reported."
           PUSH_OUTPUTS.ENABLE: "true"
           PUSH_OUTPUTS.CHANNELS: '["file"]'
           PUSH_OUTPUTS.TOOLS: '["review"]'
