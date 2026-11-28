@@ -29,24 +29,166 @@ describe("normalizeDeepSeekReviewer", () => {
   }
 
   it.each([
+    [
+      "APPROVE",
+      [
+        ["MEDIUM", false, true],
+        ["LOW", false, true],
+      ],
+    ],
+    [
+      "APPROVE WITH MINOR FINDINGS",
+      [
+        ["MEDIUM", false, true],
+        ["LOW", false, true],
+      ],
+    ],
+    [
+      "REQUEST CHANGES",
+      [
+        ["MEDIUM", true, false],
+        ["LOW", false, false],
+      ],
+    ],
+    [
+      "BLOCK",
+      [
+        ["MEDIUM", true, false],
+        ["LOW", false, false],
+      ],
+    ],
+  ] as const)(
+    "preserves %s severity and blocking rules for explicitly labeled subsection findings",
+    (verdict, expected) => {
+      const review = makeSubsectionReview(verdict, "## Missing Verification");
+
+      const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+      expect(result.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual(
+        expected,
+      );
+      expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+    },
+  );
+
+  it.each([
     ["APPROVE", "MEDIUM", false],
     ["APPROVE WITH MINOR FINDINGS", "LOW", false],
     ["REQUEST CHANGES", "HIGH", true],
     ["BLOCK", "BLOCKER", true],
   ] as const)(
-    "preserves %s severity rules for subsection findings",
+    "falls back to %s verdict defaults for unlabeled subsection and bullet findings",
     (verdict, severity, blocking) => {
-      const review = makeSubsectionReview(verdict, "## Missing Verification");
+      const subsectionReview: GitHubReviewSubmission = {
+        ...makeSubsectionReview(verdict, "## Missing Verification"),
+        body: [
+          `## Verdict: ${verdict}`,
+          "",
+          "## Material Findings",
+          "",
+          "### 1. Missing boundary check",
+          "Validate user input cleanly.",
+          "### 2. Follow up on docs",
+          "Document the edge case.",
+        ].join("\n"),
+        bodyDigest: `unlabeled-sub-${verdict}`,
+      };
+      const bulletReview: GitHubReviewSubmission = {
+        ...makeSubsectionReview(verdict, "## Missing Verification"),
+        body: [
+          `## Verdict: ${verdict}`,
+          "",
+          "## Material Findings",
+          "",
+          "* Missing boundary check",
+          "* Follow up on docs",
+        ].join("\n"),
+        bodyDigest: `unlabeled-bullet-${verdict}`,
+      };
 
-      const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+      for (const review of [subsectionReview, bulletReview]) {
+        const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
 
-      expect(result.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual([
-        [severity, blocking, !blocking],
-        [severity, blocking, !blocking],
-      ]);
-      expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+        expect(result.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual([
+          [severity, blocking, !blocking],
+          [severity, blocking, !blocking],
+        ]);
+        expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+      }
     },
   );
+
+  it("extracts explicit severities across delimiters and ignores unlabeled prose words", () => {
+    const requestChangesBody = [
+      "## Verdict: REQUEST CHANGES",
+      "",
+      "## Material Findings",
+      "",
+      "### 1. BLOCKER - Missing auth check",
+      "Auth bypassed.",
+      "### 2. CRITICAL: Secret logged",
+      "Token written to stderr.",
+      `### 3. HIGH \u2014 Unchecked integer overflow`,
+      "Bounds skipped.",
+      `### 4. [MEDIUM] \u2013 Missing pagination cap`,
+      "Limit omitted.",
+      "### 5. **LOW** - Rename internal helper",
+      "Minor naming cleanup.",
+      "### 6. ADVISORY: Document timeout default",
+      "Add note.",
+      "### 7. INFO - Confirmed safe fallback",
+      "Informational only.",
+      "### 8. Low-level socket leak left unguarded",
+      "Cleanup omitted on error path.",
+    ].join("\n");
+
+    const requestChanges = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          ...makeSubsectionReview("REQUEST CHANGES", "## Missing Verification"),
+          body: requestChangesBody,
+          bodyDigest: "explicit-severities-rc",
+        },
+      ],
+    });
+
+    expect(requestChanges.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual([
+      ["BLOCKER", true, false],
+      ["BLOCKER", true, false],
+      ["HIGH", true, false],
+      ["MEDIUM", true, false],
+      ["LOW", false, false],
+      ["ADVISORY", false, false],
+      ["ADVISORY", false, false],
+      ["HIGH", true, false],
+    ]);
+
+    const minorApproval = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          ...makeSubsectionReview("APPROVE WITH MINOR FINDINGS", "## Missing Verification"),
+          body: [
+            "## Verdict: APPROVE WITH MINOR FINDINGS",
+            "",
+            "## Material Findings",
+            "",
+            "* High latency under load when retrying",
+            "* Info disclosure check skipped in mock",
+            "* MEDIUM - Non-blocking minor refactor",
+          ].join("\n"),
+          bodyDigest: "explicit-severities-minor",
+        },
+      ],
+    });
+
+    expect(minorApproval.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual([
+      ["LOW", false, true],
+      ["LOW", false, true],
+      ["MEDIUM", false, true],
+    ]);
+  });
 
   it.each([" ", "\u00a0", "\u3000"])("handles long %j prefixes and Unicode titles", (spacing) => {
     const body = readFileSync(
@@ -81,8 +223,8 @@ describe("normalizeDeepSeekReviewer", () => {
         "LOW - Clarify the diagnostic\nDescribe the rejected input without exposing its value.",
       ]);
       expect(result.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual([
-        ["HIGH", true, false],
-        ["HIGH", true, false],
+        ["MEDIUM", true, false],
+        ["LOW", false, false],
       ]);
     },
   );
