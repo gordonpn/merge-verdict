@@ -64,7 +64,9 @@ case-insensitively across parameter ordering, quoting, and multi-token
 relations. Incomplete listings return `null` even if a candidate was
 already found; a later page could contain another match. API failures propagate.
 Custom REST clients must preserve response `headers.link` to expose subsequent
-pages. A missing link is treated as a complete response.
+pages. A missing, empty, or whitespace-only link is treated as a complete
+response, whereas a malformed non-empty `Link` header fails closed (`null`)
+rather than treating a potentially truncated listing as complete.
 
 Track outcomes against the exact workflow revision, event, PR origin, actor association, and head SHA. Record run and artifact URLs, expected versus observed status, effective permissions, review author, and reviewed commit. Never record tokens, API keys, secret values, or unsanitized provider payloads.
 

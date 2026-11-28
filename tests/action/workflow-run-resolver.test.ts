@@ -388,6 +388,31 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
         link: '<https://api.github.com/p2>; rel="prev"; rel="next"',
       },
       {
+        label: "whitespace-only Link header",
+        link: "   \t ",
+      },
+    ])("completes on page 1 for valid non-next Link header ($label)", async ({ link }) => {
+      const match = makeMatchingPullRequest();
+      const { rest, pullsList } = createRestMock({
+        pullsList: async (params) =>
+          params.page === 2
+            ? { data: [{ ...match, number: 43 }] }
+            : { data: [match], headers: { link } },
+      });
+
+      const result = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: makeForkPullRequestWorkflowRun(),
+        rest,
+      });
+
+      expect(result).toBe(42);
+      expect(pullsList).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      {
         label: "missing opening angle bracket",
         link: 'https://api.github.com/p2; rel="next"',
       },
@@ -419,7 +444,15 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
         label: "empty parameter value",
         link: "<https://api.github.com/p2>; rel=",
       },
-    ])("ignores non-next or malformed Link header ($label)", async ({ link }) => {
+      {
+        label: "trailing comma after valid entry",
+        link: '<https://api.github.com/p1>; rel="prev", ',
+      },
+      {
+        label: "malformed second entry after valid rel=next",
+        link: '<https://api.github.com/p2>; rel="next", broken',
+      },
+    ])("fails closed with null on malformed non-empty Link header ($label)", async ({ link }) => {
       const match = makeMatchingPullRequest();
       const { rest, pullsList } = createRestMock({
         pullsList: async (params) =>
@@ -435,7 +468,7 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
         rest,
       });
 
-      expect(result).toBe(42);
+      expect(result).toBeNull();
       expect(pullsList).toHaveBeenCalledTimes(1);
     });
 

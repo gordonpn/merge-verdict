@@ -60,26 +60,29 @@ function readLinkParamValue(
   return pos === start ? null : { value: input.slice(start, pos), quoted: false, nextIndex: pos };
 }
 
-function hasNextLinkRelation(linkHeader: string | undefined): boolean {
+function parseNextLinkRelation(linkHeader: string | undefined): boolean | null {
   if (!linkHeader) {
     return false;
   }
   let pos = skipLinkWhitespace(linkHeader, 0);
+  if (pos >= linkHeader.length) {
+    return false;
+  }
+  let hasNext = false;
   while (pos < linkHeader.length) {
     if (linkHeader[pos] !== "<") {
-      return false;
+      return null;
     }
     const uriEnd = linkHeader.indexOf(">", pos + 1);
     if (uriEnd === -1) {
-      return false;
+      return null;
     }
     pos = skipLinkWhitespace(linkHeader, uriEnd + 1);
     let sawRel = false;
-    let entryHasNext = false;
 
     while (pos < linkHeader.length && linkHeader[pos] !== ",") {
       if (linkHeader[pos] !== ";") {
-        return false;
+        return null;
       }
       pos = skipLinkWhitespace(linkHeader, pos + 1);
       const nameStart = pos;
@@ -92,33 +95,35 @@ function hasNextLinkRelation(linkHeader: string | undefined): boolean {
       }
       const paramName = linkHeader.slice(nameStart, pos).toLowerCase();
       if (paramName.length === 0) {
-        return false;
+        return null;
       }
       pos = skipLinkWhitespace(linkHeader, pos);
       if (linkHeader[pos] === "=") {
         const parsed = readLinkParamValue(linkHeader, pos + 1);
         if (parsed === null) {
-          return false;
+          return null;
         }
         pos = skipLinkWhitespace(linkHeader, parsed.nextIndex);
         // RFC 8288 Section 3.3 honors only the first rel parameter per link-value.
         if (paramName === "rel" && !sawRel) {
           sawRel = true;
           const tokens = parsed.quoted ? parsed.value.trim().split(/\s+/) : [parsed.value];
-          entryHasNext = tokens.some((token) => token.toLowerCase() === "next");
+          if (tokens.some((token) => token.toLowerCase() === "next")) {
+            hasNext = true;
+          }
         }
       }
     }
 
-    if (entryHasNext) {
-      return true;
-    }
     if (pos >= linkHeader.length) {
-      return false;
+      return hasNext;
     }
     pos = skipLinkWhitespace(linkHeader, pos + 1);
+    if (pos >= linkHeader.length) {
+      return null;
+    }
   }
-  return false;
+  return hasNext;
 }
 
 interface ResolverPage<T> {
@@ -137,7 +142,11 @@ async function collectResolverPages<T>(
       return null;
     }
     items.push(...response.data);
-    if (!hasNextLinkRelation(response.headers?.link)) {
+    const hasNextPage = parseNextLinkRelation(response.headers?.link);
+    if (hasNextPage === null) {
+      return null;
+    }
+    if (!hasNextPage) {
       return items;
     }
     if (items.length >= MAX_CONNECTION_ITEMS) {
