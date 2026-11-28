@@ -34,10 +34,8 @@ const EXPLICIT_SEVERITY_MAP: Readonly<Record<string, Severity>> = {
 const VERDICT_TOKEN_START = /^[*_\x60~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)(?![A-Za-z0-9])/i;
 const VERDICT_HEADING_PREFIX = /^ {0,3}##[ \t]*Verdict\b(.*)$/i;
 const BLOCKQUOTE_LINE = /^ {0,3}>/;
-const BOLD_WRAPPED_VERDICT = /^ {0,3}\*\*Verdict:[ \t]*([^*\r\n]+?)\*\*[ \t]*$/i;
-const BOLD_LABEL_VERDICT = /^ {0,3}\*\*Verdict(?::\*\*|\*\*:)[ \t]*([^\r\n]+?)[ \t]*$/i;
-const UNDERSCORE_WRAPPED_VERDICT = /^ {0,3}__Verdict:[ \t]*((?:(?!__).)+?)__[ \t]*$/i;
-const UNDERSCORE_LABEL_VERDICT = /^ {0,3}__Verdict(?::__|__:)[ \t]*([^\r\n]+?)[ \t]*$/i;
+const BOLD_OR_UNDERSCORE_LABEL = /^(?:\*\*verdict(?::\*\*|\*\*:)|__verdict(?::__|__:))/i;
+const QUOTED_ATX_HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
 const EXACT_VERDICTS: Readonly<Record<string, RawVerdict>> = {
   BLOCK: "BLOCK",
   "REQUEST CHANGES": "REQUEST CHANGES",
@@ -77,16 +75,57 @@ function parseHeadingVerdictToken(raw: string): RawVerdict | null {
 }
 
 function parseBoldVerdictLine(line: string): RawVerdict | null {
-  const match =
-    BOLD_WRAPPED_VERDICT.exec(line) ??
-    BOLD_LABEL_VERDICT.exec(line) ??
-    UNDERSCORE_WRAPPED_VERDICT.exec(line) ??
-    UNDERSCORE_LABEL_VERDICT.exec(line);
-  if (!match?.[1]) {
+  // Exclude indented code blocks (4+ spaces or leading tab).
+  if (line.startsWith("\t") || line.startsWith("    ")) {
     return null;
   }
-  const clean = normalizeVerdictText(match[1]);
+  const trimmed = line.trim();
+  let rawToken: string | null = null;
+  for (const marker of ["**", "__"] as const) {
+    if (
+      trimmed.startsWith(marker) &&
+      trimmed.endsWith(marker) &&
+      trimmed.length > marker.length * 2
+    ) {
+      const inner = trimmed.slice(marker.length, -marker.length);
+      if (/^verdict:/i.test(inner)) {
+        rawToken = inner.slice("verdict:".length).trim();
+        break;
+      }
+    }
+  }
+  if (rawToken === null) {
+    const labelMatch = BOLD_OR_UNDERSCORE_LABEL.exec(trimmed);
+    if (!labelMatch) {
+      return null;
+    }
+    rawToken = trimmed.slice(labelMatch[0].length).trim();
+  }
+  if (rawToken.length === 0) {
+    return null;
+  }
+  const clean = normalizeVerdictText(rawToken);
   return Object.hasOwn(EXACT_VERDICTS, clean) ? (EXACT_VERDICTS[clean] ?? null) : null;
+}
+
+function stripBlockquotePrefix(line: string): string | null {
+  let pos = 0;
+  let sawMarker = false;
+  while (pos < line.length) {
+    let spaces = 0;
+    while (spaces < 3 && pos + spaces < line.length && line[pos + spaces] === " ") {
+      spaces += 1;
+    }
+    if (line[pos + spaces] !== ">") {
+      break;
+    }
+    sawMarker = true;
+    pos += spaces + 1;
+    if (line[pos] === " " || line[pos] === "\t") {
+      pos += 1;
+    }
+  }
+  return sawMarker ? line.slice(pos) : null;
 }
 
 function findNextNonBlankLineIndex(lines: readonly string[], startIndex: number): number | null {
@@ -176,24 +215,39 @@ function extractVerdict(body: string): VerdictExtraction {
   const verdicts = new Set<RawVerdict>();
   let hasUnrecognizedHeading = false;
   let fence: FenceState | null = null;
+  let inBlockquoteParagraph = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     if (fence) {
+      inBlockquoteParagraph = false;
       fence = nextFenceState(line, fence);
       continue;
     }
     const nextFence = nextFenceState(line, null);
     if (nextFence) {
+      inBlockquoteParagraph = false;
       fence = nextFence;
       continue;
     }
-    if (BLOCKQUOTE_LINE.test(line)) {
+    const quotedContent = stripBlockquotePrefix(line);
+    if (quotedContent !== null) {
+      const quotedTrimmed = quotedContent.trim();
+      inBlockquoteParagraph =
+        quotedTrimmed.length > 0 &&
+        !QUOTED_ATX_HEADING.test(quotedContent) &&
+        !HORIZONTAL_RULE.test(quotedContent) &&
+        !nextFenceState(quotedContent, null);
+      continue;
+    }
+    if (line.trim().length === 0) {
+      inBlockquoteParagraph = false;
       continue;
     }
 
     const headingMatch = VERDICT_HEADING_PREFIX.exec(line);
     if (headingMatch) {
+      inBlockquoteParagraph = false;
       const resolved = resolveHeadingVerdict(lines, i, headingMatch[1] ?? "");
       i = resolved.consumedLineIndex;
       if (resolved.qualified) {
@@ -202,6 +256,13 @@ function extractVerdict(body: string): VerdictExtraction {
         } else {
           hasUnrecognizedHeading = true;
         }
+      }
+      continue;
+    }
+
+    if (inBlockquoteParagraph) {
+      if (HORIZONTAL_RULE.test(line)) {
+        inBlockquoteParagraph = false;
       }
       continue;
     }

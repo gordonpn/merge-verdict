@@ -1356,6 +1356,7 @@ None.`,
     ["**Verdict**: BLOCK", "CHANGES_REQUESTED"],
     ["__Verdict: REQUEST_CHANGES__", "CHANGES_REQUESTED"],
     ["__Verdict:__ APPROVE", "APPROVE"],
+    ["__Verdict__: APPROVE", "APPROVE"],
   ] as const)("recognizes standalone bold verdict format %s", (verdictLine, expectedVerdict) => {
     const result = normalizeDeepSeekReviewer({
       headSha,
@@ -1378,6 +1379,26 @@ None.`,
     expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
   });
 
+  it("recognizes standalone bold verdict after a blockquote separated by a thematic break", () => {
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 707,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-11-28T10:06:00Z",
+          body: "> Quoted note\n---\n**Verdict: APPROVE**\n\n## Material Findings\n\nNone.",
+          bodyDigest: "bold-after-hr",
+        },
+      ],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("APPROVE");
+  });
+
   it.each([
     [
       "backtick code fence",
@@ -1388,7 +1409,15 @@ None.`,
       ["Summary of parser rules.", "", "~~~~markdown", "**Verdict: APPROVE**", "~~~~"].join("\n"),
     ],
     ["blockquote", "> **Verdict: APPROVE**\n\nQuoted example only."],
+    [
+      "lazy blockquote continuation",
+      ["> Example output:", "**Verdict: APPROVE**", "", "Summary without top-level verdict."].join(
+        "\n",
+      ),
+    ],
     ["inline prose", "Note **Verdict: APPROVE** here in a paragraph."],
+    ["indented code block", "    **Verdict: APPROVE**"],
+    ["empty bold label", "**Verdict:**"],
     ["trailing prose sentence", "**Verdict: Approve if tests pass**"],
   ] as const)(
     "ignores non-standalone bold verdict inside %s and falls back to check run",
