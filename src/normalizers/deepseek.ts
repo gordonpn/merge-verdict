@@ -31,26 +31,36 @@ const EXPLICIT_SEVERITY_MAP: Readonly<Record<string, Severity>> = {
   ADVISORY: "ADVISORY",
   INFO: "ADVISORY",
 };
-const VERDICT_TOKEN_LOOKAHEAD = String.raw`[*_\x60~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)(?![A-Za-z0-9])`;
-const QUALIFIED_VERDICT_PREFIX = String.raw`##\s*Verdict\b(?::|[ \t]*(?:\r?\n[ \t]*)+(?=${VERDICT_TOKEN_LOOKAHEAD})|[ \t]+(?=${VERDICT_TOKEN_LOOKAHEAD}))`;
-// Avoid /g on module-level patterns; selection and extraction stay stateless.
-const VERDICT_HEADING_PRESENT = new RegExp(QUALIFIED_VERDICT_PREFIX, "i");
-// Share heading qualification with selection and stop before nested Markdown headings.
-const VERDICT_HEADING_VALUE = new RegExp(
-  String.raw`${QUALIFIED_VERDICT_PREFIX}[ \t]*(?:\r?\n[ \t]*)*(?!#)([^\n\r]+)`,
-  "i",
-);
+const VERDICT_TOKEN_START = /^[*_\x60~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)(?![A-Za-z0-9])/i;
+const VERDICT_HEADING_PREFIX = /^ {0,3}##[ \t]*Verdict\b(.*)$/i;
+const BLOCKQUOTE_LINE = /^ {0,3}>/;
+const BOLD_WRAPPED_VERDICT = /^ {0,3}\*\*Verdict:[ \t]*([^*\r\n]+?)\*\*[ \t]*$/i;
+const BOLD_LABEL_VERDICT = /^ {0,3}\*\*Verdict(?::\*\*|\*\*:)[ \t]*([^\r\n]+?)[ \t]*$/i;
+const UNDERSCORE_WRAPPED_VERDICT = /^ {0,3}__Verdict:[ \t]*((?:(?!__).)+?)__[ \t]*$/i;
+const UNDERSCORE_LABEL_VERDICT = /^ {0,3}__Verdict(?::__|__:)[ \t]*([^\r\n]+?)[ \t]*$/i;
+const EXACT_VERDICTS: Readonly<Record<string, RawVerdict>> = {
+  BLOCK: "BLOCK",
+  "REQUEST CHANGES": "REQUEST CHANGES",
+  "APPROVE WITH MINOR FINDINGS": "APPROVE WITH MINOR FINDINGS",
+  APPROVE: "APPROVE",
+};
+
+type VerdictExtraction =
+  | { readonly kind: "verdict"; readonly rawVerdict: RawVerdict }
+  | { readonly kind: "unrecognized" }
+  | { readonly kind: "ambiguous" }
+  | { readonly kind: "none" };
 
 function isDeepSeekAuthor(login: string | null): boolean {
   return login !== null && DEEPSEEK_LOGINS.has(login.toLowerCase());
 }
 
-function extractRawVerdict(body: string): RawVerdict | null {
-  const match = body.match(VERDICT_HEADING_VALUE);
-  if (!match?.[1]) {
-    return null;
-  }
-  const clean = stripMarkdownPunctuation(match[1].replaceAll("_", " ")).toUpperCase();
+function normalizeVerdictText(raw: string): string {
+  return stripMarkdownPunctuation(raw.replaceAll("_", " ")).toUpperCase();
+}
+
+function parseHeadingVerdictToken(raw: string): RawVerdict | null {
+  const clean = normalizeVerdictText(raw);
   if (/^BLOCK\b/.test(clean)) {
     return "BLOCK";
   }
@@ -64,6 +74,154 @@ function extractRawVerdict(body: string): RawVerdict | null {
     return "APPROVE";
   }
   return null;
+}
+
+function parseBoldVerdictLine(line: string): RawVerdict | null {
+  const match =
+    BOLD_WRAPPED_VERDICT.exec(line) ??
+    BOLD_LABEL_VERDICT.exec(line) ??
+    UNDERSCORE_WRAPPED_VERDICT.exec(line) ??
+    UNDERSCORE_LABEL_VERDICT.exec(line);
+  if (!match?.[1]) {
+    return null;
+  }
+  const clean = normalizeVerdictText(match[1]);
+  return Object.hasOwn(EXACT_VERDICTS, clean) ? (EXACT_VERDICTS[clean] ?? null) : null;
+}
+
+function findNextNonBlankLineIndex(lines: readonly string[], startIndex: number): number | null {
+  for (let index = startIndex; index < lines.length; index++) {
+    if ((lines[index] ?? "").trim().length > 0) {
+      return index;
+    }
+  }
+  return null;
+}
+
+function resolveHeadingVerdict(
+  lines: readonly string[],
+  headingIndex: number,
+  rest: string,
+): {
+  readonly verdict: RawVerdict | null;
+  readonly qualified: boolean;
+  readonly consumedLineIndex: number;
+} {
+  if (rest.startsWith(":")) {
+    const afterColon = rest.slice(1).trim();
+    if (afterColon.length > 0) {
+      return {
+        verdict: afterColon.startsWith("#") ? null : parseHeadingVerdictToken(afterColon),
+        qualified: true,
+        consumedLineIndex: headingIndex,
+      };
+    }
+
+    const nextIndex = findNextNonBlankLineIndex(lines, headingIndex + 1);
+    if (nextIndex !== null) {
+      const nextLine = lines[nextIndex] ?? "";
+      const nextTrimmed = nextLine.trim();
+      if (
+        !nextTrimmed.startsWith("#") &&
+        !nextFenceState(nextLine, null) &&
+        !BLOCKQUOTE_LINE.test(nextLine)
+      ) {
+        return {
+          verdict: parseHeadingVerdictToken(nextTrimmed),
+          qualified: true,
+          consumedLineIndex: nextIndex,
+        };
+      }
+    }
+    return { verdict: null, qualified: true, consumedLineIndex: headingIndex };
+  }
+
+  const inline = rest.trim();
+  if (inline.length > 0) {
+    if (!VERDICT_TOKEN_START.test(inline)) {
+      return { verdict: null, qualified: false, consumedLineIndex: headingIndex };
+    }
+    return {
+      verdict: parseHeadingVerdictToken(inline),
+      qualified: true,
+      consumedLineIndex: headingIndex,
+    };
+  }
+
+  const nextIndex = findNextNonBlankLineIndex(lines, headingIndex + 1);
+  if (nextIndex !== null) {
+    const nextLine = lines[nextIndex] ?? "";
+    const nextTrimmed = nextLine.trim();
+    if (
+      !nextTrimmed.startsWith("#") &&
+      !nextFenceState(nextLine, null) &&
+      !BLOCKQUOTE_LINE.test(nextLine) &&
+      VERDICT_TOKEN_START.test(nextTrimmed)
+    ) {
+      return {
+        verdict: parseHeadingVerdictToken(nextTrimmed),
+        qualified: true,
+        consumedLineIndex: nextIndex,
+      };
+    }
+  }
+
+  return { verdict: null, qualified: false, consumedLineIndex: headingIndex };
+}
+
+function extractVerdict(body: string): VerdictExtraction {
+  const lines = body
+    .split("\n")
+    .map((rawLine) => (rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine));
+  const verdicts = new Set<RawVerdict>();
+  let hasUnrecognizedHeading = false;
+  let fence: FenceState | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (fence) {
+      fence = nextFenceState(line, fence);
+      continue;
+    }
+    const nextFence = nextFenceState(line, null);
+    if (nextFence) {
+      fence = nextFence;
+      continue;
+    }
+    if (BLOCKQUOTE_LINE.test(line)) {
+      continue;
+    }
+
+    const headingMatch = VERDICT_HEADING_PREFIX.exec(line);
+    if (headingMatch) {
+      const resolved = resolveHeadingVerdict(lines, i, headingMatch[1] ?? "");
+      i = resolved.consumedLineIndex;
+      if (resolved.qualified) {
+        if (resolved.verdict) {
+          verdicts.add(resolved.verdict);
+        } else {
+          hasUnrecognizedHeading = true;
+        }
+      }
+      continue;
+    }
+
+    const boldVerdict = parseBoldVerdictLine(line);
+    if (boldVerdict) {
+      verdicts.add(boldVerdict);
+    }
+  }
+
+  if (verdicts.size > 1) {
+    return { kind: "ambiguous" };
+  }
+  const [singleVerdict] = verdicts;
+  if (singleVerdict) {
+    return hasUnrecognizedHeading
+      ? { kind: "ambiguous" }
+      : { kind: "verdict", rawVerdict: singleVerdict };
+  }
+  return hasUnrecognizedHeading ? { kind: "unrecognized" } : { kind: "none" };
 }
 
 interface FenceState {
@@ -256,19 +414,43 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
  */
 export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecutionRecord {
   const { headSha } = input;
-  const matchingReviews =
-    input.reviews?.filter(
-      (r) => isDeepSeekAuthor(r.reviewerLogin) && r.body && VERDICT_HEADING_PRESENT.test(r.body),
-    ) ?? [];
-  const review = matchingReviews[matchingReviews.length - 1];
+  const matchingReviews: Array<{
+    readonly commitSha: string | null;
+    readonly body: string;
+    readonly extraction: Exclude<VerdictExtraction, { readonly kind: "none" }>;
+  }> = [];
+
+  for (const review of input.reviews ?? []) {
+    if (!isDeepSeekAuthor(review.reviewerLogin) || !review.body) {
+      continue;
+    }
+    const extraction = extractVerdict(review.body);
+    if (extraction.kind !== "none") {
+      matchingReviews.push({ commitSha: review.commitSha, body: review.body, extraction });
+    }
+  }
+
+  const selected = matchingReviews[matchingReviews.length - 1];
   const checkRun = input.checkRuns?.find((c) => DEEPSEEK_CHECK_NAMES.has(c.name.toLowerCase()));
   const checkRunConclusion = checkRun?.conclusion ?? null;
 
-  if (review?.body && review.commitSha === headSha) {
-    const evaluatedCommitSha = review.commitSha;
-    const rawVerdict = extractRawVerdict(review.body);
+  if (selected && selected.commitSha === headSha) {
+    const evaluatedCommitSha = selected.commitSha;
 
-    if (!rawVerdict) {
+    if (selected.extraction.kind === "ambiguous") {
+      return {
+        reviewerId: "deepseek-review",
+        reviewerName: "DeepSeek Review",
+        status: "FAILED",
+        evaluatedCommitSha,
+        isFresh: true,
+        verdict: "NONE",
+        findings: [],
+        checkRunConclusion,
+      };
+    }
+
+    if (selected.extraction.kind === "unrecognized") {
       return {
         reviewerId: "deepseek-review",
         reviewerName: "DeepSeek Review",
@@ -281,7 +463,8 @@ export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecu
       };
     }
 
-    const findings = parseMaterialFindings(review.body, rawVerdict);
+    const { rawVerdict } = selected.extraction;
+    const findings = parseMaterialFindings(selected.body, rawVerdict);
     const verdict: ReviewerVerdict =
       rawVerdict === "APPROVE" || rawVerdict === "APPROVE WITH MINOR FINDINGS"
         ? "APPROVE"
@@ -330,12 +513,12 @@ export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecu
     };
   }
 
-  if (review?.body) {
+  if (selected) {
     return {
       reviewerId: "deepseek-review",
       reviewerName: "DeepSeek Review",
       status: "STALE",
-      evaluatedCommitSha: review.commitSha,
+      evaluatedCommitSha: selected.commitSha,
       isFresh: false,
       verdict: "NONE",
       findings: [],
