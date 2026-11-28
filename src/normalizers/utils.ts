@@ -52,3 +52,44 @@ export function rateLimitCheckTimestamp(
     ? parseIsoTimestamp(checkRun.completedAt)
     : undefined;
 }
+
+/**
+ * Validated start and end line numbers for a review thread.
+ */
+export interface ThreadLineRange {
+  readonly startLineNumber?: number;
+  readonly lineNumber?: number;
+}
+
+function isPositiveIntegerLine(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+/**
+ * Resolves a review thread's line range without mixing current and original bounds.
+ *
+ * @param thread Review thread location fields.
+ * @returns Validated end lineNumber and optional multiline startLineNumber.
+ */
+export function resolveThreadLineRange(thread: {
+  readonly line: number | null;
+  readonly originalLine: number | null;
+  readonly startLine?: number | null;
+  readonly originalStartLine?: number | null;
+}): ThreadLineRange {
+  const useCurrent = isPositiveIntegerLine(thread.line);
+  const endLine = useCurrent
+    ? thread.line
+    : isPositiveIntegerLine(thread.originalLine)
+      ? thread.originalLine
+      : null;
+  if (endLine === null) {
+    return {};
+  }
+
+  const candidateStart = useCurrent ? thread.startLine : thread.originalStartLine;
+  if (isPositiveIntegerLine(candidateStart) && candidateStart < endLine) {
+    return { startLineNumber: candidateStart, lineNumber: endLine };
+  }
+  return { lineNumber: endLine };
+}

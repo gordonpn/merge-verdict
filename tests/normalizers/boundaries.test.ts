@@ -9,6 +9,7 @@ import { ReviewerExecutionRecordSchema } from "../../src/models/reviewer.js";
 import {
   codeRabbitNormalizer,
   codexNormalizer,
+  copilotNormalizer,
   deepSeekNormalizer,
   sourceryNormalizer,
 } from "../../src/normalizers/index.js";
@@ -52,7 +53,10 @@ function makeConversation(authorLogin: string, body: string): GitHubConversation
 
 function makeThread(
   authorLogin: string,
-  location: Pick<GitHubReviewThread, "path" | "line" | "originalLine" | "isOutdated">,
+  location: Pick<
+    GitHubReviewThread,
+    "path" | "line" | "originalLine" | "startLine" | "originalStartLine" | "isOutdated"
+  >,
 ): GitHubReviewThread {
   return {
     id: "boundary-thread",
@@ -66,9 +70,12 @@ function makeThread(
         body: markdown,
         bodyDigest: "comment-digest",
         path: location.path,
+        startLine: location.startLine ?? null,
         line: location.line,
+        originalStartLine: location.originalStartLine ?? null,
         originalLine: location.originalLine,
         commitSha: headSha,
+        originalCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         createdAt: timestamp,
         updatedAt: timestamp,
       },
@@ -78,43 +85,178 @@ function makeThread(
 
 const inlineAdapters = [
   { adapter: codeRabbitNormalizer, authorLogin: "coderabbitai[bot]" },
+  { adapter: copilotNormalizer, authorLogin: "copilot-pull-request-reviewer[bot]" },
   { adapter: sourceryNormalizer, authorLogin: "sourcery-ai[bot]" },
   { adapter: codexNormalizer, authorLogin: "chatgpt-codex-connector[bot]" },
 ];
 
-const locations = [
+const locations: {
+  readonly name: string;
+  readonly path: string | null;
+  readonly startLine?: number | null;
+  readonly line: number | null;
+  readonly originalStartLine?: number | null;
+  readonly originalLine: number | null;
+  readonly isOutdated: boolean;
+  readonly expectedStartLine: number | undefined;
+  readonly expectedLine: number | undefined;
+}[] = [
   {
-    name: "multiline finding's current ending line instead of its original line",
+    name: "multiline finding's current start and ending lines instead of its original lines",
     path: "src/new-name.ts",
+    startLine: 18,
     line: 25,
+    originalStartLine: 10,
     originalLine: 20,
     isOutdated: false,
+    expectedStartLine: 18,
     expectedLine: 25,
   },
   {
-    name: "deleted-file finding at its original line when the current line is absent",
+    name: "deleted-file multiline finding at its original start and end lines when current lines are absent",
     path: "src/deleted-file.ts",
+    startLine: null,
     line: null,
+    originalStartLine: 8,
     originalLine: 12,
     isOutdated: true,
+    expectedStartLine: 8,
     expectedLine: 12,
+  },
+  {
+    name: "original range without mixing stale current startLine when current line is null",
+    path: "src/deleted-file.ts",
+    startLine: 5,
+    line: null,
+    originalStartLine: 8,
+    originalLine: 12,
+    isOutdated: true,
+    expectedStartLine: 8,
+    expectedLine: 12,
+  },
+  {
+    name: "original line without mixing stale current startLine when originalStartLine is null",
+    path: "src/deleted-file.ts",
+    startLine: 5,
+    line: null,
+    originalStartLine: null,
+    originalLine: 12,
+    isOutdated: true,
+    expectedStartLine: undefined,
+    expectedLine: 12,
+  },
+  {
+    name: "current line without mixing originalStartLine when current startLine is null",
+    path: "src/current-file.ts",
+    startLine: null,
+    line: 25,
+    originalStartLine: 10,
+    originalLine: 20,
+    isOutdated: false,
+    expectedStartLine: undefined,
+    expectedLine: 25,
+  },
+  {
+    name: "single-line current finding without startLineNumber when startLine equals line",
+    path: "src/single-line.ts",
+    startLine: 25,
+    line: 25,
+    originalStartLine: 10,
+    originalLine: 20,
+    isOutdated: false,
+    expectedStartLine: undefined,
+    expectedLine: 25,
+  },
+  {
+    name: "single-line original finding without startLineNumber when originalStartLine equals originalLine",
+    path: "src/single-line-outdated.ts",
+    startLine: null,
+    line: null,
+    originalStartLine: 12,
+    originalLine: 12,
+    isOutdated: true,
+    expectedStartLine: undefined,
+    expectedLine: 12,
+  },
+  {
+    name: "current finding without startLineNumber when startLine is inverted above line",
+    path: "src/inverted-current.ts",
+    startLine: 30,
+    line: 25,
+    originalStartLine: 10,
+    originalLine: 20,
+    isOutdated: false,
+    expectedStartLine: undefined,
+    expectedLine: 25,
+  },
+  {
+    name: "original finding without startLineNumber when originalStartLine is inverted above originalLine",
+    path: "src/inverted-original.ts",
+    startLine: null,
+    line: null,
+    originalStartLine: 18,
+    originalLine: 12,
+    isOutdated: true,
+    expectedStartLine: undefined,
+    expectedLine: 12,
+  },
+  {
+    name: "current finding without startLineNumber when startLine is non-positive",
+    path: "src/non-positive-start.ts",
+    startLine: 0,
+    line: 25,
+    originalStartLine: null,
+    originalLine: 20,
+    isOutdated: false,
+    expectedStartLine: undefined,
+    expectedLine: 25,
   },
   {
     name: "file-level finding without fabricating a line number",
     path: "src/file-level.ts",
+    startLine: null,
     line: null,
+    originalStartLine: null,
     originalLine: null,
     isOutdated: false,
+    expectedStartLine: undefined,
     expectedLine: undefined,
   },
   {
     name: "general finding without fabricating a path or line number",
     path: null,
+    startLine: null,
     line: null,
+    originalStartLine: null,
     originalLine: null,
     isOutdated: false,
+    expectedStartLine: undefined,
     expectedLine: undefined,
   },
+  ...[0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY].flatMap((line) => [
+    {
+      name: `original range when current end line is invalid (${line})`,
+      path: "src/invalid-current.ts",
+      startLine: 2,
+      line,
+      originalStartLine: 8,
+      originalLine: 12,
+      isOutdated: false,
+      expectedStartLine: 8,
+      expectedLine: 12,
+    },
+    {
+      name: `file-level location when both end lines are invalid (${line})`,
+      path: "src/invalid-lines.ts",
+      startLine: 2,
+      line,
+      originalStartLine: 8,
+      originalLine: line,
+      isOutdated: false,
+      expectedStartLine: undefined,
+      expectedLine: undefined,
+    },
+  ]),
 ];
 
 describe.each(inlineAdapters)(
@@ -141,6 +283,7 @@ describe.each(inlineAdapters)(
       const finding = NormalizedFindingSchema.parse(result.findings[0]);
       expect(finding.threadId).toBe(thread.id);
       expect(finding.filePath).toBe(location.path ?? undefined);
+      expect(finding.startLineNumber).toBe(location.expectedStartLine);
       expect(finding.lineNumber).toBe(location.expectedLine);
       expect(finding.description).toBe(markdown);
       expect(finding.isResolved).toBe(false);
@@ -163,6 +306,46 @@ describe.each(inlineAdapters)(
     });
   },
 );
+
+describe("Copilot rawCommentUrl with multiline ranges", () => {
+  it("keeps rawCommentUrl anchored to comment line/originalLine without changing URL format", () => {
+    const currentThread = makeThread("copilot-pull-request-reviewer[bot]", {
+      path: "src/current.ts",
+      startLine: 18,
+      line: 25,
+      originalStartLine: 10,
+      originalLine: 20,
+      isOutdated: false,
+    });
+    const outdatedThread = makeThread("copilot-pull-request-reviewer[bot]", {
+      path: "src/deleted.ts",
+      startLine: null,
+      line: null,
+      originalStartLine: 8,
+      originalLine: 12,
+      isOutdated: true,
+    });
+
+    const result = copilotNormalizer.normalize({
+      headSha,
+      repository: "octocat/hello-world",
+      reviewThreads: [currentThread, outdatedThread],
+      reviews: [makeReview("copilot-pull-request-reviewer[bot]", "Review completed.")],
+    });
+
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings[0]?.startLineNumber).toBe(18);
+    expect(result.findings[0]?.lineNumber).toBe(25);
+    expect(result.findings[0]?.rawCommentUrl).toBe(
+      `https://github.com/octocat/hello-world/blob/${headSha}/src/current.ts#L25`,
+    );
+    expect(result.findings[1]?.startLineNumber).toBe(8);
+    expect(result.findings[1]?.lineNumber).toBe(12);
+    expect(result.findings[1]?.rawCommentUrl).toBe(
+      "https://github.com/octocat/hello-world/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/src/deleted.ts#L12",
+    );
+  });
+});
 
 describe("non-file review findings", () => {
   it("preserves a CodeRabbit outside-diff finding without a source location", () => {

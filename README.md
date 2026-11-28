@@ -15,6 +15,11 @@ Merge Verdict solves this reconciliation bottleneck. It acts as an automated ver
 
 The developer remains responsible for executing the merge. Automatic merging is explicitly out of scope.
 
+The standalone publisher exports `createOctokitApprovalClient` for authenticated
+Octokit review operations and `publishPullRequestApproval` for provider dispatch.
+Ownership attestation and deployment-specific capabilities remain caller supplied;
+see the [approval provider contract](docs/approval-providers.md).
+
 ## What Merge Verdict Does and Does Not Do
 
 ### What It Does

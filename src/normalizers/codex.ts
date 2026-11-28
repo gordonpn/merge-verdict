@@ -7,7 +7,7 @@ import type {
 } from "../models/reviewer.js";
 import type { Severity } from "../models/severity.js";
 import type { NormalizerInput, ReviewerNormalizer } from "./types.js";
-import { stripMarkdownPunctuation } from "./utils.js";
+import { resolveThreadLineRange, stripMarkdownPunctuation } from "./utils.js";
 
 const CODEX_LOGINS = new Set(["chatgpt-codex-connector", "chatgpt-codex-connector[bot]"]);
 
@@ -264,12 +264,13 @@ export function normalizeCodexReviewer(input: NormalizerInput): ReviewerExecutio
     const isBlocking =
       !thread.isResolved &&
       (severity === "BLOCKER" || severity === "HIGH" || severity === "MEDIUM");
+    const lineRange = resolveThreadLineRange(thread);
 
     const finding: NormalizedFinding = {
       id: thread.id,
       reviewerId: "chatgpt-codex-connector",
       threadId: thread.id,
-      title: extractCodexTitle(firstComment.body, thread.path, thread.line ?? thread.originalLine),
+      title: extractCodexTitle(firstComment.body, thread.path, lineRange.lineNumber ?? null),
       description: firstComment.body,
       severity,
       isBlocking,
@@ -278,9 +279,11 @@ export function normalizeCodexReviewer(input: NormalizerInput): ReviewerExecutio
     if (thread.path) {
       finding.filePath = thread.path;
     }
-    const lineNum = thread.line ?? thread.originalLine;
-    if (typeof lineNum === "number" && lineNum > 0) {
-      finding.lineNumber = lineNum;
+    if (lineRange.startLineNumber !== undefined) {
+      finding.startLineNumber = lineRange.startLineNumber;
+    }
+    if (lineRange.lineNumber !== undefined) {
+      finding.lineNumber = lineRange.lineNumber;
     }
     if (thread.resolvedByLogin) {
       finding.resolvedBy = thread.resolvedByLogin;

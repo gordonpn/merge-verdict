@@ -78,4 +78,61 @@ describe("NormalizedFindingSchema", () => {
     const nonInteger = { ...validFinding, lineNumber: 12.34 };
     expect(() => NormalizedFindingSchema.parse(nonInteger)).toThrow();
   });
+
+  it("validates startLineNumber boundaries relative to lineNumber", () => {
+    const multiline = NormalizedFindingSchema.parse({
+      ...validFinding,
+      startLineNumber: 10,
+      lineNumber: 42,
+    });
+    expect(multiline.startLineNumber).toBe(10);
+    expect(multiline.lineNumber).toBe(42);
+
+    const equalBounds = NormalizedFindingSchema.parse({
+      ...validFinding,
+      startLineNumber: 42,
+      lineNumber: 42,
+    });
+    expect(equalBounds.startLineNumber).toBe(42);
+
+    expect(() =>
+      NormalizedFindingSchema.parse({
+        ...validFinding,
+        startLineNumber: 10,
+        lineNumber: undefined,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      NormalizedFindingSchema.parse({
+        ...validFinding,
+        startLineNumber: 43,
+        lineNumber: 42,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      NormalizedFindingSchema.parse({
+        ...validFinding,
+        startLineNumber: 0,
+        lineNumber: 42,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      NormalizedFindingSchema.parse({
+        ...validFinding,
+        startLineNumber: -3,
+        lineNumber: 42,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      NormalizedFindingSchema.parse({
+        ...validFinding,
+        startLineNumber: 10.5,
+        lineNumber: 42,
+      }),
+    ).toThrow();
+  });
 });

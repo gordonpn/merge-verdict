@@ -10,7 +10,9 @@ query ReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: Str
             login
           }
           path
+          startLine
           line
+          originalStartLine
           originalLine
           comments(first: 100) {
             nodes {
@@ -20,7 +22,9 @@ query ReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: Str
                 login
               }
               path
+              startLine
               line
+              originalStartLine
               originalLine
               createdAt
               updatedAt
