@@ -2,6 +2,14 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-26: Bound relay dispatch request lifetime
+
+- Decision: Abort a GitHub workflow-dispatch request after four seconds using the runtime's `AbortSignal.timeout` API. Preserve rejection through the existing completion promise and `ctx.waitUntil`.
+- Rationale: A stalled fetch otherwise prevents later windows for the same PR from dispatching. Four seconds leaves one second of scheduling headroom after the maximum 25-second debounce window within the 30-second background lifetime. This bounds one request without introducing a new dependency or retry policy.
+- Rejected alternatives: Leaving network duration unbounded permits indefinite queue stalls; a custom timer duplicates a native API; automatic retries add requests and can exceed the background lifetime.
+- Evidence and limits: A regression test reproduces the missing signal, verifies the four-second budget and rejection propagation. Prior serialized windows can still delay later dispatches under sustained traffic. Unit tests and Node consumers do not establish Cloudflare delivery or a hosted latency guarantee.
+- Origin: [Optional relay](https://github.com/gordonpn/merge-verdict/issues/5), [worker component](https://github.com/gordonpn/merge-verdict/pull/181).
+
 ## 2026-11-26: Preserve bounded approval pagination across Link parameter variants
 
 - Decision: Recognize the `next` relation independently of Link parameter order, optional whitespace, quoting, casing, and multiple relation tokens, while retaining the existing page cap and no-header overflow probe.
