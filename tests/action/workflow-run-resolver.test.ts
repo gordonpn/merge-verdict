@@ -280,7 +280,7 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
     it.each([
       {
         label: "reordered unquoted rel=NEXT",
-        link: '<https://api.github.com/p2>; title="p2"; rel=NEXT',
+        link: "<https://api.github.com/p2>; title=page2 ; rel=NEXT",
       },
       {
         label: "quoted multi-token rel",
@@ -423,6 +423,10 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
       {
         label: "stray token after closing angle bracket",
         link: '<https://api.github.com/p2> foo; rel="next"',
+      },
+      {
+        label: "quoted parameter runs to end of header",
+        link: '<https://api.github.com/p2>; title="unclosed',
       },
       {
         label: "unclosed quoted parameter value",
