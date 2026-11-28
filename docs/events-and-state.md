@@ -22,6 +22,8 @@ The following events are directly supported by GitHub Actions workflows and will
 
 Check and workflow completion events with zero or multiple associated PRs are skipped to avoid ambiguous routing. Use `workflow_dispatch` with an explicit PR number for these cases. Fork and comment-triggered reviewer runs with empty PR associations remain tracked in #169.
 
+For `issue_comment`, `issue.pull_request` contains links rather than the PR head repository. Human edits or deletions of known publisher-bot conversation comments intentionally refresh both same-repository and fork PRs. This path executes trusted default-branch code and collects the target PR and protected-base policy through the API; it does not execute PR-head code. The same-repository restriction on review events addresses their fork-token write limitation and does not apply to conversation events.
+
 ### 1.2. The Thread-Resolution Gap: `pull_request_review_thread`
 
 **Verified Platform Limitation**: GitHub Webhooks includes a `pull_request_review_thread` event (with actions `resolved` and `unresolved`), which fires whenever a developer or bot clicks "Resolve conversation" or "Unresolve conversation" on an inline comment thread.

@@ -655,6 +655,60 @@ describe("runAction end-to-end orchestration", () => {
     );
   });
 
+  it.each(["edited", "deleted"])(
+    "refreshes a fork PR after a human %s a bot conversation comment with only a PR link",
+    async (action) => {
+      const fixture = createPullRequestFixture({ isFork: true });
+      const collectPullRequest = vi.fn().mockResolvedValue(fixture);
+      const checks = createChecksFixture();
+      writeFileSync(
+        eventFile,
+        JSON.stringify({
+          action,
+          repository: { full_name: fixture.repository },
+          issue: {
+            number: fixture.pullRequestNumber,
+            pull_request: {
+              url: "https://api.github.com/repos/gordonpn/merge-verdict/pulls/42",
+              html_url: "https://github.com/gordonpn/merge-verdict/pull/42",
+            },
+          },
+          sender: { login: "maintainer" },
+          comment: { user: { login: "github-actions[bot]" } },
+        }),
+      );
+
+      const result = await runAction({
+        env: baseEnv({
+          GITHUB_EVENT_NAME: "issue_comment",
+          GITHUB_ACTOR: "maintainer",
+          GITHUB_SHA: fixture.baseSha,
+        }),
+        collector: { collectPullRequest },
+        checksClient: checks.client,
+        codeEvidenceSatisfied: true,
+      });
+
+      expect(result.verdict).toBe("PASS");
+      expect(result.headSha).toBe(fixture.headSha);
+      expect(result.snapshot?.baseSha).toBe(fixture.baseSha);
+      expect(collectPullRequest).toHaveBeenCalledWith({
+        owner: "gordonpn",
+        repo: "merge-verdict",
+        pullRequestNumber: fixture.pullRequestNumber,
+        configPath: ".github/merge-verdict.yml",
+      });
+      expect(checks.client.getHeadSha).toHaveBeenCalledWith({
+        owner: "gordonpn",
+        repo: "merge-verdict",
+        pullNumber: fixture.pullRequestNumber,
+      });
+      expect(checks.createCheckRun).toHaveBeenCalledWith(
+        expect.objectContaining({ headSha: fixture.headSha, conclusion: "success" }),
+      );
+    },
+  );
+
   it.each(["neutral", "skipped"] as const)(
     "permits a protected policy's explicit %s check conclusion",
     async (conclusion) => {

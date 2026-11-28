@@ -267,8 +267,9 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
       pullHeadRepo.length > 0 && baseRepo.length > 0 && pullHeadRepo !== baseRepo;
     const isHumanActor =
       actor.length > 0 && !isBotLogin(actor) && (senderLogin === "" || !isBotLogin(senderLogin));
-    // Allow same-repo human edits or deletions of bot comments (e.g. PR-Agent summaries) to refresh.
-    // On GitHub, only repo collaborators/maintainers can edit or delete github-actions[bot] comments.
+    // Inline review comments carry head repository identity, so exclude known cross-repo forks.
+    // Conversation comments carry only a PR link; human edits/deletions intentionally refresh
+    // both same-repo and fork PRs through trusted runner code and API-collected base policy.
     const isHumanRefresh =
       (action === "edited" || action === "deleted") && isHumanActor && !isCrossRepoFork;
     if (isSelfBotLogin(commentLogin) && !isHumanRefresh) {
