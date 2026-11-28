@@ -20,6 +20,11 @@ An optional signed webhook relay handles thread-only resolution changes. Its
 defines the allowlist, fixed-window debounce, and delivery limits. Local tests do
 not establish a deployed relay or a hosted delivery latency guarantee.
 
+The standalone publisher exports `createOctokitApprovalClient` for authenticated
+Octokit review operations and `publishPullRequestApproval` for provider dispatch.
+Ownership attestation and deployment-specific capabilities remain caller supplied;
+see the [approval provider contract](docs/approval-providers.md).
+
 ## What Merge Verdict Does and Does Not Do
 
 ### What It Does

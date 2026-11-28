@@ -31,6 +31,27 @@ The adapter supplies authenticated GitHub operations; no Octokit instance, crede
 - `requestCopilotReview` is optional and deployment-specific. Supply it only if a documented, supported, authenticated capability exists for the deployment. It must arrange review of the supplied current head, validate any head precondition, and honor the optional resolved effort or reject it explicitly. This repository assumes no GitHub REST endpoint or effort parameter exists. Without this capability, an absent Copilot approval returns `failed`; existing Copilot approvals can still be verified.
 - `verifyBranchProtectionRecognition` is optional. It must establish whether the supplied active review ID on the supplied current head actually qualifies under repository review rules and settings, including reviewer eligibility and Code Owner constraints. Return `unknown` when evidence is incomplete. A configured review count or a bot approval response alone is insufficient.
 
+## Octokit adapter
+
+`createOctokitApprovalClient(octokit, options)` adapts the existing authenticated
+Octokit client's pull request endpoints. `publishPullRequestApproval(provider,
+client, input)` dispatches to the provider factory. Neither enables Action runtime
+integration or establishes live branch-protection recognition.
+
+Review lists are bounded to `maxReviewPages` (default 10), with 100 reviews per
+page. An explicit next relation at the bound fails closed. Without Link headers,
+a full final page requires one extra empty-page probe without a next relation to
+establish completeness.
+Link relation parameters may precede or follow other parameters, use optional
+whitespace and quotes, and contain multiple case-insensitive relation tokens. Malformed review
+payloads and truncated lists throw instead of supplying partial approval evidence.
+
+Ownership requires an exact `expectedAuthor` match (default `merge-verdict[bot]`)
+and an `isOwnedReview` callback returning true. Missing attestation authorizes no
+dismissal. `dismissMessage` must be non-empty; `maxReviewPages` must be a positive
+integer. Optional Copilot request and recognition hooks retain the trusted-client
+requirements above.
+
 ## Lifecycle limits
 
 Strategies are stateless. They do not serialize concurrent invocations, persist ownership, request retries, invalidate checks, resolve risk tiers, or revalidate the full review digest. A new blocking finding on an unchanged SHA still requires the bridge and publisher invalidation lifecycle. A head change after submission can leave an old-SHA review behind; the result is `failed` and the integration must perform owned-review cleanup. Use the factory for lifecycle dismissal; the strategy functions also suppress emission unless PASS and explicit eligibility are supplied.

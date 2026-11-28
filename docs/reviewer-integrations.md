@@ -93,7 +93,16 @@ Unknown diagnostic wording remains `FAILED` until its meaning is verified.
 
 ### 2.5. PR-Agent
 
-- **Identity**: Repository GitHub Actions workflow (`.github/workflows/pr-agent.yml`) using `The-PR-Agent/pr-agent`.
+- **Identity**: Repository GitHub Actions workflow (`.github/workflows/pr-agent.yml`) using `docker://pragent/pr-agent` (`The-PR-Agent/pr-agent`).
+- **Runtime Image Pinning**:
+  - `.github/workflows/pr-agent.yml` pins the runtime container image by immutable OCI digest (`docker://pragent/pr-agent@sha256:548e894a88071180832b2f4233f734d0acd0db1a879e2fcbaa70bac8b8372ebe`), corresponding to upstream release tag `0.50.0-github_action` built by `The-PR-Agent/pr-agent/.github/workflows/publish.yml@refs/tags/v0.50.0` (verified via SLSA provenance attestation).
+  - **Invocation Contract**: The [pinned wrapper metadata](https://github.com/The-PR-Agent/pr-agent/blob/e673a02076ce09a4726c3d0c3cc85780e59ca52b/action.yaml) declares no outputs, entrypoint override, or arguments. Its only inputs are optional artifact context inputs, unused by this workflow. The `github_action` image starts `pr_agent.servers.github_action_runner`; it reads the dotted environment settings directly. Downstream publication consumes the host file sink and `steps.pr_agent.outcome`, not action outputs. [Hosted run 45549723891](https://github.com/gordonpn/merge-verdict/actions/runs/45549723891) exercised the pinned digest, persistent state, publication, and provenance upload.
+  - **Digest-Update Procedure**:
+    1. Resolve the release tag digest (formatted as `sha256:<hex>`): `docker buildx imagetools inspect pragent/pr-agent:<version>-github_action --format '{{.Manifest.Digest}}'`.
+    2. Verify its GitHub Artifact Attestation: `gh attestation verify "oci://index.docker.io/pragent/pr-agent@<digest>" --repo The-PR-Agent/pr-agent --signer-workflow The-PR-Agent/pr-agent/.github/workflows/publish.yml --source-ref "refs/tags/v<version>"`.
+    3. Update `.github/workflows/pr-agent.yml` with `docker://pragent/pr-agent@<digest>` and the tag comment. Update this section's pinned digest, release tag, source/provenance relationship, and invocation evidence to match the verified image.
+    4. Run `just lint-workflows` and `just check-docs`.
+    5. Confirm hosted `runner / pr-agent` produces valid provenance before merging.
 - **Artifacts Emitted**:
   - PR conversation comments with marker `<!-- pr-agent:review:full -->` and persistent state marker `<!-- pr-agent-review-state:v1 -->`.
   - Markdown tables detailing ticket compliance when enabled (`PR_REVIEWER.REQUIRE_TICKET_ANALYSIS_REVIEW`).
@@ -228,6 +237,29 @@ export const ReviewSnapshotSchema = z.object({
 });
 export type ReviewSnapshot = z.infer<typeof ReviewSnapshotSchema>;
 ```
+
+### Finding locations and source links
+
+The runtime finding schema in `src/models/finding.ts` accepts an optional positive
+integer `startLineNumber`. It requires a positive integer `lineNumber` and cannot
+exceed that ending line. CodeRabbit, Copilot, Sourcery, and Codex preserve a
+multiline start only when it is strictly below the end. They select a valid
+current end and its current start together, otherwise a valid original end and
+its original start, without mixing the two ranges. Missing or invalid ends leave
+the finding visible without a line number.
+
+`rawCommentUrl` retains its existing source-link contract. In particular, Copilot
+uses the path, commit identity, and ending line from the same comment, independent
+of the thread's range. The URL anchors only the ending line; consumers should use
+`startLineNumber` and `lineNumber` for the normalized range.
+
+The collector exposes GraphQL `changedFiles` entries with `path` and nullable
+`changeType` alongside the existing `changedFilePaths`. The additive fields remain
+optional for existing typed callers; omitted range/change-type fields in legacy
+collector payloads become null. This does not provide REST `previous_filename`
+rename mappings. Issue #26 remains open for that remaining rename requirement
+and its literal 100% normalizer coverage requirement; historical provenance stays
+coordinated with #77.
 
 ## 4. Distinguishing Facts from Assumptions
 
