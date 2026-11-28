@@ -2,6 +2,14 @@
 
 This document records non-obvious engineering and implementation decisions made in Merge Verdict, ordered newest first. Major architectural decisions that are expensive to reverse are promoted to formal Architecture Decision Records under `docs/adr/`.
 
+## 2026-11-28: Preserve concerns when DeepSeek verdicts conflict
+
+- Decision: Keep a conflicting current-head review failed while parsing its material findings with the existing blocking-verdict defaults. Prefer qualifying current-head reviews before stale submissions, and match bold verdict values without stripping code or strike delimiters.
+- Rationale: Dropping findings from a failed optional reviewer removes concerns from the policy's existing all-reviewer finding checks. Conservative parsing retains explicit severity and keeps concerns unresolved without changing optional-reviewer policy.
+- Rejected alternatives: Broadening the global policy for all optional reviewer statuses changes unrelated adapters; discarding findings or selecting an earlier approval loses current review evidence.
+- Evidence and limits: Regression tests reproduce code-span approval, consumed labeled bold values, stale selection, prose section lookup, list continuations and an optional conflicting review containing a HIGH finding. These tests do not establish hosted recognition of an unmerged normalizer.
+- Origin: [Bold verdict normalization](https://github.com/gordonpn/merge-verdict/issues/190), [normalizer review](https://github.com/gordonpn/merge-verdict/pull/191).
+
 ## 2026-11-26: Bound relay dispatch request lifetime
 
 - Decision: Abort a GitHub workflow-dispatch request after four seconds using the runtime's `AbortSignal.timeout` API. Preserve rejection through the existing completion promise and `ctx.waitUntil`.

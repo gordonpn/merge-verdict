@@ -34,6 +34,7 @@ const EXPLICIT_SEVERITY_MAP: Readonly<Record<string, Severity>> = {
 const VERDICT_TOKEN_START = /^[*_\x60~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)(?![A-Za-z0-9])/i;
 const VERDICT_HEADING_PREFIX = /^ {0,3}##[ \t]*Verdict\b(.*)$/i;
 const BLOCKQUOTE_LINE = /^ {0,3}>/;
+const LIST_ITEM_LINE = /^ {0,3}(?:[-+*]|\d+[.)])[ \t]+/;
 const BOLD_OR_UNDERSCORE_LABEL = /^(?:\*\*verdict(?::\*\*|\*\*:)|__verdict(?::__|__:))/i;
 const QUOTED_ATX_HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
 const EXACT_VERDICTS: Readonly<Record<string, RawVerdict>> = {
@@ -104,7 +105,7 @@ function parseBoldVerdictLine(line: string): RawVerdict | null {
   if (rawToken.length === 0) {
     return null;
   }
-  const clean = normalizeVerdictText(rawToken);
+  const clean = rawToken.toUpperCase().replaceAll("_", " ");
   return Object.hasOwn(EXACT_VERDICTS, clean) ? (EXACT_VERDICTS[clean] ?? null) : null;
 }
 
@@ -163,10 +164,11 @@ function resolveHeadingVerdict(
       if (
         !nextTrimmed.startsWith("#") &&
         !nextFenceState(nextLine, null) &&
-        !BLOCKQUOTE_LINE.test(nextLine)
+        !BLOCKQUOTE_LINE.test(nextLine) &&
+        !LIST_ITEM_LINE.test(nextLine)
       ) {
         return {
-          verdict: parseHeadingVerdictToken(nextTrimmed),
+          verdict: parseBoldVerdictLine(nextLine) ?? parseHeadingVerdictToken(nextTrimmed),
           qualified: true,
           consumedLineIndex: nextIndex,
         };
@@ -215,39 +217,39 @@ function extractVerdict(body: string): VerdictExtraction {
   const verdicts = new Set<RawVerdict>();
   let hasUnrecognizedHeading = false;
   let fence: FenceState | null = null;
-  let inBlockquoteParagraph = false;
+  let inNestedParagraph = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     if (fence) {
-      inBlockquoteParagraph = false;
+      inNestedParagraph = false;
       fence = nextFenceState(line, fence);
       continue;
     }
     const nextFence = nextFenceState(line, null);
     if (nextFence) {
-      inBlockquoteParagraph = false;
+      inNestedParagraph = false;
       fence = nextFence;
       continue;
     }
-    const quotedContent = stripBlockquotePrefix(line);
-    if (quotedContent !== null) {
-      const quotedTrimmed = quotedContent.trim();
-      inBlockquoteParagraph =
-        quotedTrimmed.length > 0 &&
-        !QUOTED_ATX_HEADING.test(quotedContent) &&
-        !HORIZONTAL_RULE.test(quotedContent) &&
-        !nextFenceState(quotedContent, null);
+    const nestedContent = stripBlockquotePrefix(line) ?? (LIST_ITEM_LINE.test(line) ? line : null);
+    if (nestedContent !== null) {
+      const nestedTrimmed = nestedContent.trim();
+      inNestedParagraph =
+        nestedTrimmed.length > 0 &&
+        !QUOTED_ATX_HEADING.test(nestedContent) &&
+        !HORIZONTAL_RULE.test(nestedContent) &&
+        !nextFenceState(nestedContent, null);
       continue;
     }
     if (line.trim().length === 0) {
-      inBlockquoteParagraph = false;
+      inNestedParagraph = false;
       continue;
     }
 
     const headingMatch = VERDICT_HEADING_PREFIX.exec(line);
     if (headingMatch) {
-      inBlockquoteParagraph = false;
+      inNestedParagraph = false;
       const resolved = resolveHeadingVerdict(lines, i, headingMatch[1] ?? "");
       i = resolved.consumedLineIndex;
       if (resolved.qualified) {
@@ -260,9 +262,9 @@ function extractVerdict(body: string): VerdictExtraction {
       continue;
     }
 
-    if (inBlockquoteParagraph) {
+    if (inNestedParagraph) {
       if (HORIZONTAL_RULE.test(line)) {
-        inBlockquoteParagraph = false;
+        inNestedParagraph = false;
       }
       continue;
     }
@@ -327,12 +329,11 @@ function trimBlankLines(lines: readonly string[]): string[] {
 }
 
 function extractMaterialFindingsSection(body: string): string | null {
-  const marker = "Material Findings";
-  const markerIndex = body.toLowerCase().indexOf(marker.toLowerCase());
-  if (markerIndex === -1) {
+  const heading = /^ {0,3}#{2,3}[ \t]+Material Findings\b/im.exec(body);
+  if (!heading) {
     return null;
   }
-  const afterMarker = body.slice(markerIndex + marker.length);
+  const afterMarker = body.slice(heading.index + heading[0].length);
   const lines = afterMarker.split("\n");
   const sectionLines: string[] = [];
   let isFirstLine = true;
@@ -491,7 +492,9 @@ export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecu
     }
   }
 
-  const selected = matchingReviews[matchingReviews.length - 1];
+  const headReviews = matchingReviews.filter((review) => review.commitSha === headSha);
+  const selected =
+    headReviews[headReviews.length - 1] ?? matchingReviews[matchingReviews.length - 1];
   const checkRun = input.checkRuns?.find((c) => DEEPSEEK_CHECK_NAMES.has(c.name.toLowerCase()));
   const checkRunConclusion = checkRun?.conclusion ?? null;
 
@@ -506,7 +509,7 @@ export function normalizeDeepSeekReviewer(input: NormalizerInput): ReviewerExecu
         evaluatedCommitSha,
         isFresh: true,
         verdict: "NONE",
-        findings: [],
+        findings: parseMaterialFindings(selected.body, "BLOCK"),
         checkRunConclusion,
       };
     }

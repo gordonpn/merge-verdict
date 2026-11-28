@@ -31,6 +31,126 @@ describe("normalizeDeepSeekReviewer", () => {
     };
   }
 
+  function makeVerdictReview(body: string): GitHubReviewSubmission {
+    return { ...makeSubsectionReview("BLOCK", "## Missing Verification"), body };
+  }
+
+  it.each(["**Verdict:** `APPROVE`", "__Verdict:__ ~~APPROVE~~", "**Verdict:** _APPROVE_"])(
+    "rejects code or strike delimiters in a bold verdict value: %s",
+    (body) => {
+      const review = makeVerdictReview(body);
+
+      const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+      expect(result.status).toBe("PENDING");
+      expect(result.verdict).toBe("NONE");
+    },
+  );
+
+  it.each(["## Verdict:", "## Verdict :", "## Verdict"])(
+    "preserves a labeled bold blocking value following %s",
+    (heading) => {
+      const review = makeVerdictReview(`${heading}\n\n**Verdict: BLOCK**`);
+
+      const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+      expect(result.status).toBe("COMPLETED");
+      expect(result.verdict).toBe("CHANGES_REQUESTED");
+    },
+  );
+
+  it("retains the latest qualifying head review when an older revision posts later", () => {
+    const blocking = makeVerdictReview("## Verdict: BLOCK");
+    const stale = { ...makeVerdictReview("**Verdict: APPROVE**"), commitSha: "a".repeat(40) };
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [blocking, stale] });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.evaluatedCommitSha).toBe(headSha);
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+  });
+
+  it.each(["##", "###"])("finds the actual %s Material Findings heading after prose", (level) => {
+    const review = makeVerdictReview(
+      `**Verdict: REQUEST CHANGES**\n\nSee the Material Findings below.\n\n${level} Material Findings\n\n* HIGH - Retain this concern.`,
+    );
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(
+      result.findings.map((finding) => [finding.title, finding.severity, finding.isBlocking]),
+    ).toEqual([["HIGH - Retain this concern.", "HIGH", true]]);
+  });
+
+  it("preserves blocking findings from a conflicting optional review in policy", () => {
+    const review = makeVerdictReview(
+      "## Verdict: BLOCK\n\n**Verdict: APPROVE**\n\n## Material Findings\n\n* HIGH - Retain this concern.",
+    );
+    const reviewer = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+    const snapshot = createReviewSnapshot({
+      repository: "owner/repo",
+      pullRequestNumber: 190,
+      headSha,
+      baseSha: "base",
+      isDraft: false,
+      capturedAt: "2026-11-28T10:16:00Z",
+      unresolvedThreadCount: 0,
+      blockingDecisionCount: 0,
+      checkRuns: {},
+      reviewers: { "deepseek-review": reviewer },
+    });
+    const config = { ...createDefaultConfig(), requiredChecks: [], requiredReviewers: [] };
+
+    const result = evaluatePolicy({
+      snapshot,
+      config,
+      finalSnapshot: { headSha, stateFingerprint: snapshot.stateFingerprint },
+      executionErrors: [],
+      repositoryRules: [],
+      codeEvidenceSatisfied: true,
+    });
+
+    expect(reviewer.status).toBe("FAILED");
+    expect(
+      reviewer.findings.map((finding) => [
+        finding.severity,
+        finding.isBlocking,
+        finding.isResolved,
+      ]),
+    ).toEqual([["HIGH", true, false]]);
+    expect(result.verdict).toBe("FAIL");
+  });
+
+  it.each([
+    "- Example output:\n  **Verdict: APPROVE**",
+    "1. Example output:\n   **Verdict: APPROVE**",
+  ])("ignores a verdict continuing a list item: %s", (body) => {
+    const review = makeVerdictReview(body);
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.status).toBe("PENDING");
+    expect(result.verdict).toBe("NONE");
+  });
+
+  it("recognizes a top-level verdict after a blank line ends a list paragraph", () => {
+    const review = makeVerdictReview("- Example output\n\n**Verdict: APPROVE**");
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("APPROVE");
+  });
+
+  it("does not consume a list marker as a multiline verdict value", () => {
+    const review = makeVerdictReview("## Verdict:\n\n- Example output:\n  **Verdict: APPROVE**");
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("COMMENTED");
+  });
+
   it.each([
     [
       "APPROVE",
@@ -1511,7 +1631,17 @@ None.`,
       expect(reviewer.evaluatedCommitSha).toBe(headSha);
       expect(reviewer.isFresh).toBe(true);
       expect(reviewer.verdict).toBe("NONE");
-      expect(reviewer.findings).toEqual([]);
+      expect(reviewer.findings).toEqual([
+        {
+          id: "deepseek_finding_1",
+          reviewerId: "deepseek-review",
+          title: "Ambiguous finding.",
+          description: "Ambiguous finding.",
+          severity: "BLOCKER",
+          isBlocking: true,
+          isResolved: false,
+        },
+      ]);
       expect(reviewer.checkRunConclusion).toBe("success");
       expect(ReviewerExecutionRecordSchema.safeParse(reviewer).success).toBe(true);
 
