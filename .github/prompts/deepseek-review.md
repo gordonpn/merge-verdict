@@ -36,7 +36,7 @@ Act as a skeptical correctness reviewer. Assume the implementation may be subtly
 # Output
 
 - **Verdict:** APPROVE / APPROVE WITH MINOR FINDINGS / REQUEST CHANGES / BLOCK
-- **Material Findings:** `None.` when no defect is confirmed; otherwise use one bullet (`- SEVERITY: ...`) or numbered level-three subsection (`### 1. SEVERITY: ...`) per finding, and prefix each finding with an explicit severity (`BLOCKER:`, `HIGH:`, `MEDIUM:`, `LOW:`, or `ADVISORY:`) followed by evidence, failure scenario, and smallest robust fix. Keep speculative, unverified, or "no fix required" observations out of `Material Findings` and place them under `Unverified Assumptions` or `Missing Verification`.
+- **Material Findings:** `None.` when no defect is confirmed; otherwise choose one format for the entire `Material Findings` section: either one bullet (`- SEVERITY: ...`) per finding or one numbered level-three subsection (`### 1. SEVERITY: ...`) per finding. Do not mix finding formats within a section; bullets beneath a numbered subsection are supporting detail, not separate findings. Prefix each finding with an explicit severity (`BLOCKER:`, `HIGH:`, `MEDIUM:`, `LOW:`, or `ADVISORY:`) followed by evidence, failure scenario, and smallest robust fix. Keep speculative, unverified, or "no fix required" observations out of `Material Findings` and place them under `Unverified Assumptions` or `Missing Verification`.
 - **Unverified Assumptions**
 - **Missing Verification**
 - **ADR / Documentation Impact**
