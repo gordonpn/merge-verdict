@@ -330,6 +330,27 @@ describe("repository and pull request number extraction", () => {
 
     expect(
       extractPullRequestNumber(undefined, {
+        workflow_run: { pull_requests: [{ number: 88 }] },
+      }),
+    ).toBe(88);
+
+    expect(
+      extractPullRequestNumber(undefined, {
+        workflow_run: { pull_requests: [{ number: 88 }, { number: 89 }] },
+      }),
+    ).toBeNull();
+
+    expect(
+      extractPullRequestNumber(undefined, {
+        workflow_run: { pull_requests: [] },
+      }),
+    ).toBeNull();
+
+    expect(extractPullRequestNumber("0", { pull_request: { number: 99 } })).toBeNull();
+    expect(extractPullRequestNumber("-1", { pull_request: { number: 99 } })).toBeNull();
+
+    expect(
+      extractPullRequestNumber(undefined, {
         check_run: { pull_requests: [{}] },
       }),
     ).toBeNull();
@@ -346,6 +367,28 @@ describe("repository and pull request number extraction", () => {
 });
 
 describe("isSelfTriggeredEvent loop prevention", () => {
+  it.each([
+    ["github-actions[bot]", "maintainer", true],
+    ["maintainer", "other-app[bot]", true],
+    ["", "maintainer", true],
+    ["maintainer", undefined, false],
+  ] as const)(
+    "checks both actor %s and sender %s on bot-comment refreshes",
+    (actor, sender, skipped) => {
+      expect(
+        isSelfTriggeredEvent({
+          eventName: "issue_comment",
+          actor,
+          payload: {
+            action: "deleted",
+            ...(sender ? { sender: { login: sender } } : {}),
+            comment: { user: { login: "github-actions[bot]" } },
+          },
+        }).skipped,
+      ).toBe(skipped);
+    },
+  );
+
   it.each(["merge-verdict[bot]", "github-actions[bot]"])(
     "skips events triggered by %s",
     (botActor) => {
@@ -413,6 +456,91 @@ describe("isSelfTriggeredEvent loop prevention", () => {
         },
       }).skipped,
     ).toBe(false);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "gordonpn",
+        payload: {
+          action: "edited",
+          sender: { login: "gordonpn" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(false);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "gordonpn",
+        payload: {
+          action: "deleted",
+          sender: { login: "gordonpn" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(false);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "github-actions[bot]",
+        payload: {
+          action: "edited",
+          sender: { login: "github-actions[bot]" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(true);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "github-actions[bot]",
+        payload: {
+          action: "deleted",
+          sender: { login: "github-actions[bot]" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(true);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "other-app[bot]",
+        payload: {
+          action: "edited",
+          sender: { login: "other-app[bot]" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(true);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "issue_comment",
+        actor: "",
+        payload: {
+          action: "deleted",
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(true);
+
+    expect(
+      isSelfTriggeredEvent({
+        eventName: "pull_request_review_comment",
+        actor: "fork-contributor",
+        payload: {
+          action: "edited",
+          repository: { full_name: "gordonpn/merge-verdict" },
+          pull_request: { head: { repo: { full_name: "fork-contributor/merge-verdict" } } },
+          sender: { login: "fork-contributor" },
+          comment: { user: { login: "github-actions[bot]" } },
+        },
+      }).skipped,
+    ).toBe(true);
   });
 
   it("skips check_run events for the merge-verdict check run", () => {
@@ -425,6 +553,37 @@ describe("isSelfTriggeredEvent loop prevention", () => {
     });
     expect(result.skipped).toBe(true);
     expect(result.reason).toContain("merge-verdict");
+
+    const runnerCheckResult = isSelfTriggeredEvent({
+      eventName: "check_run",
+      actor: "octocat",
+      payload: {
+        check_run: { name: "runner / merge-verdict" },
+      },
+    });
+    expect(runnerCheckResult.skipped).toBe(true);
+    expect(runnerCheckResult.reason).toContain("runner / merge-verdict");
+  });
+
+  it("skips workflow_run events for merge-verdict while allowing parent CI workflows", () => {
+    const selfRun = isSelfTriggeredEvent({
+      eventName: "workflow_run",
+      actor: "octocat",
+      payload: {
+        workflow_run: { name: "merge-verdict" },
+      },
+    });
+    expect(selfRun.skipped).toBe(true);
+    expect(selfRun.reason).toContain("merge-verdict");
+
+    const parentCiRun = isSelfTriggeredEvent({
+      eventName: "workflow_run",
+      actor: "octocat",
+      payload: {
+        workflow_run: { name: "ci" },
+      },
+    });
+    expect(parentCiRun.skipped).toBe(false);
   });
 
   it("allows human-triggered workflow_dispatch and third-party check_run events", () => {
@@ -479,6 +638,76 @@ describe("runAction end-to-end orchestration", () => {
       ...overrides,
     };
   }
+
+  it("evaluates the API PR head under pull_request_target even when GITHUB_SHA is the base", async () => {
+    const fixture = createPullRequestFixture({ isFork: true });
+    const collectPullRequest = vi.fn().mockResolvedValue(fixture);
+    const result = await runAction({
+      env: baseEnv({ GITHUB_EVENT_NAME: "pull_request_target", GITHUB_SHA: fixture.baseSha }),
+      collector: { collectPullRequest },
+      codeEvidenceSatisfied: true,
+    });
+    expect(result.headSha).toBe(fixture.headSha);
+    expect(result.snapshot?.headSha).toBe(fixture.headSha);
+    expect(result.snapshot?.baseSha).toBe(fixture.baseSha);
+    expect(collectPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ pullRequestNumber: 42 }),
+    );
+  });
+
+  it.each(["edited", "deleted"])(
+    "refreshes a fork PR after a human %s a bot conversation comment with only a PR link",
+    async (action) => {
+      const fixture = createPullRequestFixture({ isFork: true });
+      const collectPullRequest = vi.fn().mockResolvedValue(fixture);
+      const checks = createChecksFixture();
+      writeFileSync(
+        eventFile,
+        JSON.stringify({
+          action,
+          repository: { full_name: fixture.repository },
+          issue: {
+            number: fixture.pullRequestNumber,
+            pull_request: {
+              url: "https://api.github.com/repos/gordonpn/merge-verdict/pulls/42",
+              html_url: "https://github.com/gordonpn/merge-verdict/pull/42",
+            },
+          },
+          sender: { login: "maintainer" },
+          comment: { user: { login: "github-actions[bot]" } },
+        }),
+      );
+
+      const result = await runAction({
+        env: baseEnv({
+          GITHUB_EVENT_NAME: "issue_comment",
+          GITHUB_ACTOR: "maintainer",
+          GITHUB_SHA: fixture.baseSha,
+        }),
+        collector: { collectPullRequest },
+        checksClient: checks.client,
+        codeEvidenceSatisfied: true,
+      });
+
+      expect(result.verdict).toBe("PASS");
+      expect(result.headSha).toBe(fixture.headSha);
+      expect(result.snapshot?.baseSha).toBe(fixture.baseSha);
+      expect(collectPullRequest).toHaveBeenCalledWith({
+        owner: "gordonpn",
+        repo: "merge-verdict",
+        pullRequestNumber: fixture.pullRequestNumber,
+        configPath: ".github/merge-verdict.yml",
+      });
+      expect(checks.client.getHeadSha).toHaveBeenCalledWith({
+        owner: "gordonpn",
+        repo: "merge-verdict",
+        pullNumber: fixture.pullRequestNumber,
+      });
+      expect(checks.createCheckRun).toHaveBeenCalledWith(
+        expect.objectContaining({ headSha: fixture.headSha, conclusion: "success" }),
+      );
+    },
+  );
 
   it.each(["neutral", "skipped"] as const)(
     "permits a protected policy's explicit %s check conclusion",

@@ -119,6 +119,11 @@ function isSelfBotLogin(login: string | undefined | null): boolean {
   return SELF_BOT_ACTORS.some((bot) => bot.toLowerCase() === normalized);
 }
 
+function isBotLogin(login: string): boolean {
+  const normalized = login.trim().toLowerCase();
+  return isSelfBotLogin(normalized) || normalized.endsWith("[bot]");
+}
+
 /**
  * Reads a GitHub Actions input from environment variables without external dependencies.
  * Supports both hyphenated (`INPUT_GITHUB-TOKEN`) and underscored (`INPUT_GITHUB_TOKEN`) forms.
@@ -214,13 +219,26 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
   if (eventName === "check_run") {
     const checkRun = asRecord(payload?.check_run);
     const checkName = typeof checkRun?.name === "string" ? checkRun.name.trim() : "";
+    const normalizedCheckName = checkName.toLowerCase();
     if (
-      checkName.toLowerCase() === requiredCheckName ||
-      checkName.toLowerCase() === "merge-verdict"
+      normalizedCheckName === requiredCheckName ||
+      normalizedCheckName === "merge-verdict" ||
+      normalizedCheckName === "runner / merge-verdict"
     ) {
       return {
         skipped: true,
         reason: `Ignored check_run event for self check "${checkName}".`,
+      };
+    }
+  }
+
+  if (eventName === "workflow_run") {
+    const workflowRun = asRecord(payload?.workflow_run);
+    const workflowName = typeof workflowRun?.name === "string" ? workflowRun.name.trim() : "";
+    if (workflowName.toLowerCase() === "merge-verdict") {
+      return {
+        skipped: true,
+        reason: `Ignored workflow_run event for self workflow "${workflowName}".`,
       };
     }
   }
@@ -236,8 +254,25 @@ export function isSelfTriggeredEvent(context: SelfTriggerContext): SelfTriggerRe
   }
 
   if (eventName === "issue_comment" || eventName === "pull_request_review_comment") {
+    const action = typeof payload?.action === "string" ? payload.action.trim().toLowerCase() : "";
     const commentLogin = getNestedString(asRecord(payload?.comment), "user", "login");
-    if (isSelfBotLogin(commentLogin)) {
+    const senderLogin = getNestedString(payload, "sender", "login");
+    const pullHeadRepo = getNestedString(
+      asRecord(asRecord(payload?.pull_request)?.head),
+      "repo",
+      "full_name",
+    );
+    const baseRepo = getNestedString(payload, "repository", "full_name");
+    const isCrossRepoFork =
+      pullHeadRepo.length > 0 && baseRepo.length > 0 && pullHeadRepo !== baseRepo;
+    const isHumanActor =
+      actor.length > 0 && !isBotLogin(actor) && (senderLogin === "" || !isBotLogin(senderLogin));
+    // Inline review comments carry head repository identity, so exclude known cross-repo forks.
+    // Conversation comments carry only a PR link; human edits/deletions intentionally refresh
+    // both same-repo and fork PRs through trusted runner code and API-collected base policy.
+    const isHumanRefresh =
+      (action === "edited" || action === "deleted") && isHumanActor && !isCrossRepoFork;
+    if (isSelfBotLogin(commentLogin) && !isHumanRefresh) {
       return {
         skipped: true,
         reason: `Ignored ${eventName} event authored by "${commentLogin}".`,
@@ -354,11 +389,13 @@ export function extractPullRequestNumber(
     return parsePositiveSafeInteger(issue.number);
   }
 
-  const checkRun = asRecord(payload.check_run);
-  if (Array.isArray(checkRun?.pull_requests) && checkRun.pull_requests.length === 1) {
-    const firstPr = asRecord(checkRun.pull_requests[0]);
-    if (firstPr?.number !== undefined && firstPr.number !== null) {
-      return parsePositiveSafeInteger(firstPr.number);
+  for (const runKey of ["check_run", "workflow_run"] as const) {
+    const runRecord = asRecord(payload[runKey]);
+    if (Array.isArray(runRecord?.pull_requests) && runRecord.pull_requests.length === 1) {
+      const firstPr = asRecord(runRecord.pull_requests[0]);
+      if (firstPr?.number !== undefined && firstPr.number !== null) {
+        return parsePositiveSafeInteger(firstPr.number);
+      }
     }
   }
 

@@ -178,8 +178,8 @@ sequenceDiagram
     participant LLM as Optional LLM (DeepSeek)
 
     Dev->>GH: Push commit or update review thread
-    GH->>WF: Trigger workflow (pull_request / review)
-    WF->>WF: Acquire PR concurrency lock (cancel-in-progress)
+    GH->>WF: Trigger workflow (pull_request_target / review / workflow_run)
+    WF->>WF: Acquire PR concurrency lock (serialized queue; cancel-in-progress optional)
     WF->>GH: Fast Invalidation: set check run in_progress / non-passing
     WF->>Core: Invoke verification engine
 
