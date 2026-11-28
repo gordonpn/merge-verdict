@@ -4,8 +4,11 @@ import type {
   GitHubCheckRun,
   GitHubReviewSubmission,
 } from "../../src/collector/github-collector.js";
+import { createDefaultConfig } from "../../src/models/config.js";
 import { ReviewerExecutionRecordSchema } from "../../src/models/reviewer.js";
+import { createReviewSnapshot } from "../../src/models/snapshot.js";
 import { deepSeekNormalizer, normalizeDeepSeekReviewer } from "../../src/normalizers/deepseek.js";
+import { evaluatePolicy } from "../../src/policy/evaluator.js";
 
 describe("normalizeDeepSeekReviewer", () => {
   const headSha = "6ad1952e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c";
@@ -140,6 +143,12 @@ describe("normalizeDeepSeekReviewer", () => {
       "Informational only.",
       "### 8. Low-level socket leak left unguarded",
       "Cleanup omitted on error path.",
+      "### 9. High latency under load when retrying",
+      "Retry backoff grows unbounded.",
+      "### 10. Info disclosure check skipped in mock",
+      "Mock helper omits sanitization.",
+      "### 11. HIGH severity bug without delimiter",
+      "No delimiter after severity token.",
     ].join("\n");
 
     const requestChanges = normalizeDeepSeekReviewer({
@@ -162,6 +171,32 @@ describe("normalizeDeepSeekReviewer", () => {
       ["ADVISORY", false, false],
       ["ADVISORY", false, false],
       ["HIGH", true, false],
+      ["HIGH", true, false],
+      ["HIGH", true, false],
+      ["HIGH", true, false],
+    ]);
+
+    const blockReview = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          ...makeSubsectionReview("BLOCK", "## Missing Verification"),
+          body: [
+            "## Verdict: BLOCK",
+            "",
+            "## Material Findings",
+            "",
+            "* High latency under load when retrying",
+            "* Info disclosure check skipped in mock",
+          ].join("\n"),
+          bodyDigest: "explicit-severities-block",
+        },
+      ],
+    });
+
+    expect(blockReview.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual([
+      ["BLOCKER", true, false],
+      ["BLOCKER", true, false],
     ]);
 
     const minorApproval = normalizeDeepSeekReviewer({
@@ -1167,5 +1202,83 @@ None.`,
     expect(result.isFresh).toBe(true);
     expect(result.evaluatedCommitSha).toBe(headSha);
     expect(result.verdict).toBe("NONE");
+  });
+
+  it("keeps LOW and ADVISORY findings open under REQUEST CHANGES for downstream policy thresholds", () => {
+    const reviewer = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          ...makeSubsectionReview("REQUEST CHANGES", "## Missing Verification"),
+          body: [
+            "## Verdict: REQUEST CHANGES",
+            "",
+            "## Material Findings",
+            "",
+            "* [LOW] Clarify error message wording",
+            "* [ADVISORY] Consider documenting default timeout",
+          ].join("\n"),
+          bodyDigest: "policy-is-resolved-contract",
+        },
+      ],
+    });
+
+    const snapshot = createReviewSnapshot({
+      repository: "owner/repo",
+      pullRequestNumber: 189,
+      headSha,
+      baseSha: "base",
+      isDraft: false,
+      capturedAt: "2026-11-27T00:00:00Z",
+      unresolvedThreadCount: 0,
+      blockingDecisionCount: 0,
+      checkRuns: {},
+      reviewers: { "deepseek-review": reviewer },
+    });
+    const baseConfig = createDefaultConfig();
+    const defaultConfig = {
+      ...baseConfig,
+      requiredReviewers: ["deepseek-review"],
+      allowAdvisoryExemptions: true,
+    };
+    const finalSnapshot = { headSha, stateFingerprint: snapshot.stateFingerprint };
+
+    const defaultEvaluation = evaluatePolicy({
+      snapshot,
+      config: defaultConfig,
+      finalSnapshot,
+      executionErrors: [],
+      repositoryRules: [],
+      codeEvidenceSatisfied: true,
+    });
+    const lowThresholdEvaluation = evaluatePolicy({
+      snapshot,
+      config: defaultConfig,
+      finalSnapshot,
+      executionErrors: [],
+      repositoryRules: [],
+      codeEvidenceSatisfied: true,
+      blockingSeverityThreshold: "LOW",
+    });
+    const strictAdvisoryEvaluation = evaluatePolicy({
+      snapshot,
+      config: { ...defaultConfig, allowAdvisoryExemptions: false },
+      finalSnapshot,
+      executionErrors: [],
+      repositoryRules: [],
+      codeEvidenceSatisfied: true,
+    });
+
+    expect(defaultEvaluation.reasons.filter((r) => r.condition === 3)).toEqual([]);
+    expect(defaultEvaluation.reasons.filter((r) => r.condition === 4)).toEqual([
+      { condition: 4, outcome: "FAIL", code: "CHANGES_REQUESTED", subject: "deepseek-review" },
+    ]);
+    expect(lowThresholdEvaluation.reasons.filter((r) => r.condition === 3)).toEqual([
+      { condition: 3, outcome: "FAIL", code: "UNRESOLVED_FINDING", subject: "deepseek_finding_1" },
+    ]);
+    expect(strictAdvisoryEvaluation.reasons.filter((r) => r.condition === 3)).toEqual([
+      { condition: 3, outcome: "FAIL", code: "UNRESOLVED_FINDING", subject: "deepseek_finding_1" },
+      { condition: 3, outcome: "FAIL", code: "UNRESOLVED_FINDING", subject: "deepseek_finding_2" },
+    ]);
   });
 });

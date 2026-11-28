@@ -155,17 +155,15 @@ function extractExplicitSeverity(findingText: string): Severity | null {
   return rawToken ? (EXPLICIT_SEVERITY_MAP[rawToken.toUpperCase()] ?? null) : null;
 }
 
+const DEFAULT_SEVERITY_BY_VERDICT: Readonly<Record<RawVerdict, Severity>> = {
+  BLOCK: "BLOCKER",
+  "REQUEST CHANGES": "HIGH",
+  "APPROVE WITH MINOR FINDINGS": "LOW",
+  APPROVE: "MEDIUM",
+};
+
 function defaultSeverityForVerdict(rawVerdict: RawVerdict): Severity {
-  switch (rawVerdict) {
-    case "BLOCK":
-      return "BLOCKER";
-    case "REQUEST CHANGES":
-      return "HIGH";
-    case "APPROVE WITH MINOR FINDINGS":
-      return "LOW";
-    case "APPROVE":
-      return "MEDIUM";
-  }
+  return DEFAULT_SEVERITY_BY_VERDICT[rawVerdict];
 }
 
 function parseMaterialFindings(body: string, rawVerdict: RawVerdict): NormalizedFinding[] {
@@ -242,6 +240,7 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
       description: entry.join("\n"),
       severity,
       isBlocking,
+      // Keep findings open under blocking verdicts so policy thresholds and check reports can still inspect LOW/ADVISORY items.
       isResolved: !isBlockingVerdict,
     });
   }
