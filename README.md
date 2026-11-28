@@ -99,6 +99,8 @@ packaging are implemented separately. Generated `dist/` artifacts remain ignored
 
 ## Documentation Index
 
+DeepSeek normalization accepts supported heading and standalone bold verdicts, prefers current-head evidence, and preserves unresolved material findings when verdicts conflict. See the [reviewer integration contract](docs/reviewer-integrations.md) for formatting boundaries and fail-closed behavior.
+
 The exported `resolveWorkflowRunPullRequestNumber` helper resolves one unambiguous
 PR from direct references, fork head coordinates, or allowlisted comment-run
 artifacts. REST lookups inspect up to 10 pages and 1000 items and return `null`

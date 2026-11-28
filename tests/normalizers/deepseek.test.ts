@@ -31,6 +31,126 @@ describe("normalizeDeepSeekReviewer", () => {
     };
   }
 
+  function makeVerdictReview(body: string): GitHubReviewSubmission {
+    return { ...makeSubsectionReview("BLOCK", "## Missing Verification"), body };
+  }
+
+  it.each(["**Verdict:** `APPROVE`", "__Verdict:__ ~~APPROVE~~", "**Verdict:** _APPROVE_"])(
+    "rejects code or strike delimiters in a bold verdict value: %s",
+    (body) => {
+      const review = makeVerdictReview(body);
+
+      const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+      expect(result.status).toBe("PENDING");
+      expect(result.verdict).toBe("NONE");
+    },
+  );
+
+  it.each(["## Verdict:", "## Verdict :", "## Verdict"])(
+    "preserves a labeled bold blocking value following %s",
+    (heading) => {
+      const review = makeVerdictReview(`${heading}\n\n**Verdict: BLOCK**`);
+
+      const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+      expect(result.status).toBe("COMPLETED");
+      expect(result.verdict).toBe("CHANGES_REQUESTED");
+    },
+  );
+
+  it("retains the latest qualifying head review when an older revision posts later", () => {
+    const blocking = makeVerdictReview("## Verdict: BLOCK");
+    const stale = { ...makeVerdictReview("**Verdict: APPROVE**"), commitSha: "a".repeat(40) };
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [blocking, stale] });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.evaluatedCommitSha).toBe(headSha);
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+  });
+
+  it.each(["##", "###"])("finds the actual %s Material Findings heading after prose", (level) => {
+    const review = makeVerdictReview(
+      `**Verdict: REQUEST CHANGES**\n\nSee the Material Findings below.\n\n${level} Material Findings\n\n* HIGH - Retain this concern.`,
+    );
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(
+      result.findings.map((finding) => [finding.title, finding.severity, finding.isBlocking]),
+    ).toEqual([["HIGH - Retain this concern.", "HIGH", true]]);
+  });
+
+  it("preserves blocking findings from a conflicting optional review in policy", () => {
+    const review = makeVerdictReview(
+      "## Verdict: BLOCK\n\n**Verdict: APPROVE**\n\n## Material Findings\n\n* HIGH - Retain this concern.",
+    );
+    const reviewer = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+    const snapshot = createReviewSnapshot({
+      repository: "owner/repo",
+      pullRequestNumber: 190,
+      headSha,
+      baseSha: "base",
+      isDraft: false,
+      capturedAt: "2026-11-28T10:16:00Z",
+      unresolvedThreadCount: 0,
+      blockingDecisionCount: 0,
+      checkRuns: {},
+      reviewers: { "deepseek-review": reviewer },
+    });
+    const config = { ...createDefaultConfig(), requiredChecks: [], requiredReviewers: [] };
+
+    const result = evaluatePolicy({
+      snapshot,
+      config,
+      finalSnapshot: { headSha, stateFingerprint: snapshot.stateFingerprint },
+      executionErrors: [],
+      repositoryRules: [],
+      codeEvidenceSatisfied: true,
+    });
+
+    expect(reviewer.status).toBe("FAILED");
+    expect(
+      reviewer.findings.map((finding) => [
+        finding.severity,
+        finding.isBlocking,
+        finding.isResolved,
+      ]),
+    ).toEqual([["HIGH", true, false]]);
+    expect(result.verdict).toBe("FAIL");
+  });
+
+  it.each([
+    "- Example output:\n  **Verdict: APPROVE**",
+    "1. Example output:\n   **Verdict: APPROVE**",
+  ])("ignores a verdict continuing a list item: %s", (body) => {
+    const review = makeVerdictReview(body);
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.status).toBe("PENDING");
+    expect(result.verdict).toBe("NONE");
+  });
+
+  it("recognizes a top-level verdict after a blank line ends a list paragraph", () => {
+    const review = makeVerdictReview("- Example output\n\n**Verdict: APPROVE**");
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("APPROVE");
+  });
+
+  it("does not consume a list marker as a multiline verdict value", () => {
+    const review = makeVerdictReview("## Verdict:\n\n- Example output:\n  **Verdict: APPROVE**");
+
+    const result = normalizeDeepSeekReviewer({ headSha, reviews: [review] });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("COMMENTED");
+  });
+
   it.each([
     [
       "APPROVE",
@@ -1296,5 +1416,318 @@ None.`,
       { condition: 3, outcome: "FAIL", code: "UNRESOLVED_FINDING", subject: "deepseek_finding_1" },
       { condition: 3, outcome: "FAIL", code: "UNRESOLVED_FINDING", subject: "deepseek_finding_2" },
     ]);
+  });
+
+  it("replays sanitized bold-verdict fixture with succeeding check run as CHANGES_REQUESTED", () => {
+    const body = readFileSync(
+      new URL("../fixtures/deepseek/bold-verdict.md", import.meta.url),
+      "utf8",
+    );
+    const checkRuns: GitHubCheckRun[] = [
+      {
+        id: 133062762501,
+        name: "runner / deepseek-review",
+        status: "completed",
+        conclusion: "success",
+        commitSha: headSha,
+        startedAt: "2026-11-28T10:00:00Z",
+        completedAt: "2026-11-28T10:01:00Z",
+        detailsUrl: null,
+        output: { title: null, summary: null, text: null },
+      },
+    ];
+    const reviews: GitHubReviewSubmission[] = [
+      {
+        id: 701,
+        reviewerLogin: "github-actions[bot]",
+        state: "COMMENTED",
+        commitSha: headSha,
+        submittedAt: "2026-11-28T10:00:50Z",
+        body,
+        bodyDigest: "bold-verdict-fixture",
+      },
+    ];
+
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      checkRuns,
+      reviewThreads: [],
+      reviews,
+      conversationComments: [],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.isFresh).toBe(true);
+    expect(result.evaluatedCommitSha).toBe(headSha);
+    expect(result.verdict).toBe("CHANGES_REQUESTED");
+    expect(result.checkRunConclusion).toBe("success");
+    expect(result.findings.map((f) => [f.severity, f.isBlocking, f.isResolved])).toEqual([
+      ["HIGH", true, false],
+      ["MEDIUM", true, false],
+      ["LOW", false, false],
+      ["ADVISORY", false, false],
+    ]);
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it.each([
+    ["**Verdict: APPROVE**", "APPROVE"],
+    ["**Verdict:** APPROVE WITH MINOR FINDINGS", "APPROVE"],
+    ["**Verdict**: BLOCK", "CHANGES_REQUESTED"],
+    ["__Verdict: REQUEST_CHANGES__", "CHANGES_REQUESTED"],
+    ["__Verdict:__ APPROVE", "APPROVE"],
+    ["__Verdict__: APPROVE", "APPROVE"],
+  ] as const)("recognizes standalone bold verdict format %s", (verdictLine, expectedVerdict) => {
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 702,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-11-28T10:05:00Z",
+          body: `${verdictLine}\n\n## Material Findings\n\nNone.`,
+          bodyDigest: `bold-${verdictLine}`,
+        },
+      ],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.isFresh).toBe(true);
+    expect(result.verdict).toBe(expectedVerdict);
+    expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("recognizes standalone bold verdict after a blockquote separated by a thematic break", () => {
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          id: 707,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-11-28T10:06:00Z",
+          body: "> Quoted note\n---\n**Verdict: APPROVE**\n\n## Material Findings\n\nNone.",
+          bodyDigest: "bold-after-hr",
+        },
+      ],
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verdict).toBe("APPROVE");
+  });
+
+  it.each([
+    [
+      "backtick code fence",
+      ["Summary of parser rules.", "", "```markdown", "**Verdict: APPROVE**", "```"].join("\n"),
+    ],
+    [
+      "tilde code fence",
+      ["Summary of parser rules.", "", "~~~~markdown", "**Verdict: APPROVE**", "~~~~"].join("\n"),
+    ],
+    ["blockquote", "> **Verdict: APPROVE**\n\nQuoted example only."],
+    [
+      "lazy blockquote continuation",
+      ["> Example output:", "**Verdict: APPROVE**", "", "Summary without top-level verdict."].join(
+        "\n",
+      ),
+    ],
+    ["inline prose", "Note **Verdict: APPROVE** here in a paragraph."],
+    ["indented code block", "    **Verdict: APPROVE**"],
+    ["empty bold label", "**Verdict:**"],
+    ["trailing prose sentence", "**Verdict: Approve if tests pass**"],
+  ] as const)(
+    "ignores non-standalone bold verdict inside %s and falls back to check run",
+    (_label, body) => {
+      const checkRuns: GitHubCheckRun[] = [
+        {
+          id: 133062762502,
+          name: "runner / deepseek-review",
+          status: "completed",
+          conclusion: "success",
+          commitSha: headSha,
+          startedAt: "2026-11-28T10:10:00Z",
+          completedAt: "2026-11-28T10:11:00Z",
+          detailsUrl: null,
+          output: { title: null, summary: null, text: null },
+        },
+      ];
+
+      const result = normalizeDeepSeekReviewer({
+        headSha,
+        checkRuns,
+        reviews: [
+          {
+            id: 703,
+            reviewerLogin: "github-actions[bot]",
+            state: "COMMENTED",
+            commitSha: headSha,
+            submittedAt: "2026-11-28T10:10:50Z",
+            body,
+            bodyDigest: "bold-negative-control",
+          },
+        ],
+      });
+
+      expect(result.status).toBe("SKIPPED");
+      expect(result.isFresh).toBe(true);
+      expect(result.evaluatedCommitSha).toBe(headSha);
+      expect(result.verdict).toBe("NONE");
+      expect(result.findings).toEqual([]);
+      expect(ReviewerExecutionRecordSchema.safeParse(result).success).toBe(true);
+    },
+  );
+
+  it.each([
+    ["two bold verdicts", "**Verdict: APPROVE**\n\n**Verdict: REQUEST CHANGES**"],
+    ["heading and bold verdict", "## Verdict: APPROVE\n\n**Verdict: BLOCK**"],
+  ] as const)(
+    "fails closed when review body has conflicting verdicts (%s) even after an earlier approval",
+    (_label, conflictingBody) => {
+      const checkRuns: GitHubCheckRun[] = [
+        {
+          id: 133062762503,
+          name: "runner / deepseek-review",
+          status: "completed",
+          conclusion: "success",
+          commitSha: headSha,
+          startedAt: "2026-11-28T10:15:00Z",
+          completedAt: "2026-11-28T10:16:00Z",
+          detailsUrl: null,
+          output: { title: null, summary: null, text: null },
+        },
+      ];
+      const reviews: GitHubReviewSubmission[] = [
+        {
+          id: 704,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-11-28T10:14:00Z",
+          body: "**Verdict: APPROVE**\n\n## Material Findings\nNone.",
+          bodyDigest: "earlier-approve",
+        },
+        {
+          id: 705,
+          reviewerLogin: "github-actions[bot]",
+          state: "COMMENTED",
+          commitSha: headSha,
+          submittedAt: "2026-11-28T10:15:50Z",
+          body: `${conflictingBody}\n\n## Material Findings\n* Ambiguous finding.`,
+          bodyDigest: "conflicting-verdicts",
+        },
+      ];
+
+      const reviewer = normalizeDeepSeekReviewer({
+        headSha,
+        checkRuns,
+        reviews,
+      });
+
+      expect(reviewer.status).toBe("FAILED");
+      expect(reviewer.evaluatedCommitSha).toBe(headSha);
+      expect(reviewer.isFresh).toBe(true);
+      expect(reviewer.verdict).toBe("NONE");
+      expect(reviewer.findings).toEqual([
+        {
+          id: "deepseek_finding_1",
+          reviewerId: "deepseek-review",
+          title: "Ambiguous finding.",
+          description: "Ambiguous finding.",
+          severity: "BLOCKER",
+          isBlocking: true,
+          isResolved: false,
+        },
+      ]);
+      expect(reviewer.checkRunConclusion).toBe("success");
+      expect(ReviewerExecutionRecordSchema.safeParse(reviewer).success).toBe(true);
+
+      const snapshot = createReviewSnapshot({
+        repository: "owner/repo",
+        pullRequestNumber: 190,
+        headSha,
+        baseSha: "base",
+        isDraft: false,
+        capturedAt: "2026-11-28T10:16:00Z",
+        unresolvedThreadCount: 0,
+        blockingDecisionCount: 0,
+        checkRuns: {},
+        reviewers: { "deepseek-review": reviewer },
+      });
+      const baseConfig = createDefaultConfig();
+      const evaluation = evaluatePolicy({
+        snapshot,
+        config: {
+          ...baseConfig,
+          requiredReviewers: ["deepseek-review"],
+        },
+        finalSnapshot: { headSha, stateFingerprint: snapshot.stateFingerprint },
+        executionErrors: [],
+        repositoryRules: [],
+        codeEvidenceSatisfied: true,
+      });
+
+      expect(evaluation.verdict).toBe("ERROR");
+      expect(evaluation.verdict).not.toBe("PASS");
+      expect(evaluation.reasons).toContainEqual({
+        condition: 2,
+        outcome: "ERROR",
+        code: "REVIEWER_EXECUTION_FAILED",
+        subject: "deepseek-review",
+      });
+    },
+  );
+
+  it("treats stale bold-verdict review on older commit SHA as STALE without check run and SKIPPED with succeeding head check run", () => {
+    const olderSha = "1111111111111111111111111111111111111111";
+    const staleReviews: GitHubReviewSubmission[] = [
+      {
+        id: 706,
+        reviewerLogin: "github-actions[bot]",
+        state: "COMMENTED",
+        commitSha: olderSha,
+        submittedAt: "2026-11-28T09:00:00Z",
+        body: "**Verdict: APPROVE**\n\n## Material Findings\nNone.",
+        bodyDigest: "stale-bold-review",
+      },
+    ];
+
+    const withoutCheckRun = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: staleReviews,
+    });
+
+    expect(withoutCheckRun.status).toBe("STALE");
+    expect(withoutCheckRun.isFresh).toBe(false);
+    expect(withoutCheckRun.evaluatedCommitSha).toBe(olderSha);
+    expect(withoutCheckRun.verdict).toBe("NONE");
+    expect(ReviewerExecutionRecordSchema.safeParse(withoutCheckRun).success).toBe(true);
+
+    const withHeadCheckRun = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: staleReviews,
+      checkRuns: [
+        {
+          id: 133062762504,
+          name: "runner / deepseek-review",
+          status: "completed",
+          conclusion: "success",
+          commitSha: headSha,
+          startedAt: "2026-11-28T10:20:00Z",
+          completedAt: "2026-11-28T10:21:00Z",
+          detailsUrl: null,
+          output: { title: null, summary: null, text: null },
+        },
+      ],
+    });
+
+    expect(withHeadCheckRun.status).toBe("SKIPPED");
+    expect(withHeadCheckRun.isFresh).toBe(true);
+    expect(withHeadCheckRun.evaluatedCommitSha).toBe(headSha);
+    expect(withHeadCheckRun.verdict).toBe("NONE");
+    expect(ReviewerExecutionRecordSchema.safeParse(withHeadCheckRun).success).toBe(true);
   });
 });
