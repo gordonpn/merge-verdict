@@ -21,7 +21,7 @@ const FENCE_OPENING = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const FENCE_CLOSING = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const HORIZONTAL_RULE = /^ {0,3}(?:[-*_][ \t]*){3,}$/;
 const EXPLICIT_SEVERITY_PREFIX =
-  /^(?:\[(BLOCKER|CRITICAL|HIGH|MEDIUM|LOW|ADVISORY|INFO)\](?::|[^\S\r\n]+|[-\u2013\u2014])|\*\*(BLOCKER|CRITICAL|HIGH|MEDIUM|LOW|ADVISORY|INFO)\*\*(?::|[^\S\r\n]*[-\u2013\u2014]|[^\S\r\n]+)|(BLOCKER|CRITICAL|HIGH|MEDIUM|LOW|ADVISORY|INFO)(?::|[^\S\r\n]+[-\u2013\u2014]))/i;
+  /^(?:\[(BLOCKER|CRITICAL|HIGH|MEDIUM|LOW|ADVISORY|INFO)\](?::|[^\S\r\n]+|[-\u2013\u2014])|\*\*(BLOCKER|CRITICAL|HIGH|MEDIUM|LOW|ADVISORY|INFO):?\*\*(?::|[^\S\r\n]*[-\u2013\u2014]|[^\S\r\n]+)|(BLOCKER|CRITICAL|HIGH|MEDIUM|LOW|ADVISORY|INFO)(?::|[^\S\r\n]+[-\u2013\u2014]))/i;
 const EXPLICIT_SEVERITY_MAP: Readonly<Record<string, Severity>> = {
   BLOCKER: "BLOCKER",
   CRITICAL: "BLOCKER",

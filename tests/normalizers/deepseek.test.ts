@@ -225,6 +225,22 @@ describe("normalizeDeepSeekReviewer", () => {
     ]);
   });
 
+  it.each(["**LOW:**", "**LOW**:"])("preserves the bold %s severity label", (label) => {
+    const result = normalizeDeepSeekReviewer({
+      headSha,
+      reviews: [
+        {
+          ...makeSubsectionReview("REQUEST CHANGES", "## Missing Verification"),
+          body: `## Verdict: REQUEST CHANGES\n\n## Material Findings\n\n- ${label} Clarify error wording`,
+        },
+      ],
+    });
+
+    expect(
+      result.findings.map((finding) => [finding.severity, finding.isBlocking, finding.isResolved]),
+    ).toEqual([["LOW", false, false]]);
+  });
+
   it.each([" ", "\u00a0", "\u3000"])("handles long %j prefixes and Unicode titles", (spacing) => {
     const body = readFileSync(
       new URL("../fixtures/deepseek/whitespace-heading.md", import.meta.url),
