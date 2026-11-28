@@ -117,6 +117,7 @@ jobs:
           PR_REVIEWER.PERSISTENT_FINDING_STATE: "true"
           PR_REVIEWER.NUM_MAX_FINDINGS: "10"
           PR_REVIEWER.MAX_PREVIOUS_FINDINGS_CHARS: "0"
+          PR_REVIEWER.EXTRA_INSTRUCTIONS: "Report only concrete correctness, security, data-loss, or contract defects in key_issues_to_review. Do not list confirmed-safe behavior, documented tradeoffs, or speculative confirm/verify observations as key issues."
           PUSH_OUTPUTS.ENABLE: "true"
           PUSH_OUTPUTS.CHANNELS: '["file"]'
           PUSH_OUTPUTS.TOOLS: '["review"]'

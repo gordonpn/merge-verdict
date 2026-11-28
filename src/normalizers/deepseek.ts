@@ -20,6 +20,17 @@ const NUMBERED_FINDING_HEADING = /^###[^\S\r\n]+\d+\.[^\S\r\n]+(\S[^\r\n]*)$/;
 const FENCE_OPENING = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const FENCE_CLOSING = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const HORIZONTAL_RULE = /^ {0,3}(?:[-*_][ \t]*){3,}$/;
+const EXPLICIT_SEVERITY_PREFIX =
+  /^(?:\[(BLOCKER|CRITICAL|HIGH|MEDIUM|LOW|ADVISORY|INFO)\](?::|[^\S\r\n]+|[-\u2013\u2014])|\*\*(BLOCKER|CRITICAL|HIGH|MEDIUM|LOW|ADVISORY|INFO)\*\*(?::|[^\S\r\n]*[-\u2013\u2014]|[^\S\r\n]+)|(BLOCKER|CRITICAL|HIGH|MEDIUM|LOW|ADVISORY|INFO)(?::|[^\S\r\n]+[-\u2013\u2014]))/i;
+const EXPLICIT_SEVERITY_MAP: Readonly<Record<string, Severity>> = {
+  BLOCKER: "BLOCKER",
+  CRITICAL: "BLOCKER",
+  HIGH: "HIGH",
+  MEDIUM: "MEDIUM",
+  LOW: "LOW",
+  ADVISORY: "ADVISORY",
+  INFO: "ADVISORY",
+};
 const VERDICT_TOKEN_LOOKAHEAD = String.raw`[*_\x60~]*(?:BLOCK|REQUEST[_ ]CHANGES|APPROVE)(?![A-Za-z0-9])`;
 const QUALIFIED_VERDICT_PREFIX = String.raw`##\s*Verdict\b(?::|[ \t]*(?:\r?\n[ \t]*)+(?=${VERDICT_TOKEN_LOOKAHEAD})|[ \t]+(?=${VERDICT_TOKEN_LOOKAHEAD}))`;
 // Avoid /g on module-level patterns; selection and extraction stay stateless.
@@ -138,6 +149,25 @@ function parseBulletLine(line: string): string | null {
   return null;
 }
 
+function extractExplicitSeverity(findingText: string): Severity | null {
+  const match = EXPLICIT_SEVERITY_PREFIX.exec(findingText.trim());
+  const rawToken = match?.[1] ?? match?.[2] ?? match?.[3];
+  return rawToken ? (EXPLICIT_SEVERITY_MAP[rawToken.toUpperCase()] ?? null) : null;
+}
+
+function defaultSeverityForVerdict(rawVerdict: RawVerdict): Severity {
+  switch (rawVerdict) {
+    case "BLOCK":
+      return "BLOCKER";
+    case "REQUEST CHANGES":
+      return "HIGH";
+    case "APPROVE WITH MINOR FINDINGS":
+      return "LOW";
+    case "APPROVE":
+      return "MEDIUM";
+  }
+}
+
 function parseMaterialFindings(body: string, rawVerdict: RawVerdict): NormalizedFinding[] {
   const sectionText = extractMaterialFindingsSection(body);
   if (!sectionText) {
@@ -189,6 +219,8 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
     if (bullet) entries.push([bullet]);
   }
   const findings: NormalizedFinding[] = [];
+  const defaultSeverity = defaultSeverityForVerdict(rawVerdict);
+  const isBlockingVerdict = rawVerdict === "BLOCK" || rawVerdict === "REQUEST CHANGES";
   let index = 1;
 
   for (const rawEntry of entries) {
@@ -199,19 +231,9 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
       continue;
     }
 
-    let severity: Severity = "MEDIUM";
-    let isBlocking = false;
-
-    if (rawVerdict === "BLOCK") {
-      severity = "BLOCKER";
-      isBlocking = true;
-    } else if (rawVerdict === "REQUEST CHANGES") {
-      severity = "HIGH";
-      isBlocking = true;
-    } else if (rawVerdict === "APPROVE WITH MINOR FINDINGS") {
-      severity = "LOW";
-      isBlocking = false;
-    }
+    const severity = extractExplicitSeverity(findingText) ?? defaultSeverity;
+    const isBlocking =
+      isBlockingVerdict && (severity === "BLOCKER" || severity === "HIGH" || severity === "MEDIUM");
 
     findings.push({
       id: `deepseek_finding_${index++}`,
@@ -220,7 +242,7 @@ function parseMaterialFindings(body: string, rawVerdict: RawVerdict): Normalized
       description: entry.join("\n"),
       severity,
       isBlocking,
-      isResolved: !isBlocking,
+      isResolved: !isBlockingVerdict,
     });
   }
 
