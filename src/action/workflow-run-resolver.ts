@@ -9,9 +9,117 @@ const PULLS_LIST_PAGE_SIZE = 100;
 const ARTIFACTS_LIST_PAGE_SIZE = 100;
 const MAX_CONNECTION_PAGES = 10;
 const MAX_CONNECTION_ITEMS = 1000;
-// Match complete relation tokens without depending on Link parameter order.
-const NEXT_LINK_RELATION_PATTERN =
-  /;\s*rel\s*=\s*(?:"(?:[^"]*\s)?next(?:\s[^"]*)?"|next)(?=\s*(?:;|,|$))/i;
+
+function skipLinkWhitespace(input: string, index: number): number {
+  let pos = index;
+  while (pos < input.length && (input[pos] === " " || input[pos] === "\t")) {
+    pos += 1;
+  }
+  return pos;
+}
+
+function readLinkParamValue(
+  input: string,
+  index: number,
+): { readonly value: string; readonly quoted: boolean; readonly nextIndex: number } | null {
+  let pos = skipLinkWhitespace(input, index);
+  if (input[pos] === '"') {
+    pos += 1;
+    let value = "";
+    while (pos < input.length) {
+      const ch = input[pos];
+      if (ch === '"') {
+        return { value, quoted: true, nextIndex: pos + 1 };
+      }
+      if (ch === "\\") {
+        pos += 1;
+        if (pos >= input.length) {
+          return null;
+        }
+        value += input[pos];
+        pos += 1;
+        continue;
+      }
+      value += ch;
+      pos += 1;
+    }
+    return null;
+  }
+
+  const start = pos;
+  while (pos < input.length) {
+    const ch = input[pos];
+    if (ch === ";" || ch === "," || ch === " " || ch === "\t") {
+      break;
+    }
+    if (ch === '"') {
+      return null;
+    }
+    pos += 1;
+  }
+  return pos === start ? null : { value: input.slice(start, pos), quoted: false, nextIndex: pos };
+}
+
+function hasNextLinkRelation(linkHeader: string | undefined): boolean {
+  if (!linkHeader) {
+    return false;
+  }
+  let pos = skipLinkWhitespace(linkHeader, 0);
+  while (pos < linkHeader.length) {
+    if (linkHeader[pos] !== "<") {
+      return false;
+    }
+    const uriEnd = linkHeader.indexOf(">", pos + 1);
+    if (uriEnd === -1) {
+      return false;
+    }
+    pos = skipLinkWhitespace(linkHeader, uriEnd + 1);
+    let sawRel = false;
+    let entryHasNext = false;
+
+    while (pos < linkHeader.length && linkHeader[pos] !== ",") {
+      if (linkHeader[pos] !== ";") {
+        return false;
+      }
+      pos = skipLinkWhitespace(linkHeader, pos + 1);
+      const nameStart = pos;
+      while (pos < linkHeader.length) {
+        const ch = linkHeader[pos];
+        if (ch === "=" || ch === ";" || ch === "," || ch === " " || ch === "\t") {
+          break;
+        }
+        pos += 1;
+      }
+      const paramName = linkHeader.slice(nameStart, pos).toLowerCase();
+      if (paramName.length === 0) {
+        return false;
+      }
+      pos = skipLinkWhitespace(linkHeader, pos);
+      if (linkHeader[pos] === "=") {
+        const parsed = readLinkParamValue(linkHeader, pos + 1);
+        if (parsed === null) {
+          return false;
+        }
+        pos = skipLinkWhitespace(linkHeader, parsed.nextIndex);
+        // RFC 8288 Section 3.3 honors only the first rel parameter per link-value.
+        if (paramName === "rel" && !sawRel) {
+          sawRel = true;
+          const tokens = parsed.quoted ? parsed.value.trim().split(/\s+/) : [parsed.value];
+          entryHasNext = tokens.some((token) => token.toLowerCase() === "next");
+        }
+      }
+    }
+
+    if (entryHasNext) {
+      return true;
+    }
+    if (pos >= linkHeader.length) {
+      return false;
+    }
+    pos = skipLinkWhitespace(linkHeader, pos + 1);
+  }
+  return false;
+}
 
 interface ResolverPage<T> {
   readonly data: readonly T[];
@@ -29,8 +137,7 @@ async function collectResolverPages<T>(
       return null;
     }
     items.push(...response.data);
-    const hasNextPage = NEXT_LINK_RELATION_PATTERN.test(response.headers?.link ?? "");
-    if (!hasNextPage) {
+    if (!hasNextLinkRelation(response.headers?.link)) {
       return items;
     }
     if (items.length >= MAX_CONNECTION_ITEMS) {

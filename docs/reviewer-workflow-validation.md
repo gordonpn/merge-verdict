@@ -57,9 +57,11 @@ review evidence or authorize approval. DeepSeek's job guard requires
 creation, excluding ordinary issue comments.
 
 Both REST lookups follow pagination for at most 10 pages and 1000 items, matching
-the collector's resource limits. Next-page detection matches the RFC 8288 `next`
-relation token case-insensitively across parameter ordering, quoting, and
-multi-token relations. Incomplete listings return `null` even if a candidate was
+the collector's resource limits. Next-page detection parses `Link` parameters
+outside URI brackets and quoted parameter values, ignoring `rel=next` text
+inside URLs or quoted values, and matches the RFC 8288 `next` relation token
+case-insensitively across parameter ordering, quoting, and multi-token
+relations. Incomplete listings return `null` even if a candidate was
 already found; a later page could contain another match. API failures propagate.
 Custom REST clients must preserve response `headers.link` to expose subsequent
 pages. A missing link is treated as a complete response.

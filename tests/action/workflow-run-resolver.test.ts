@@ -290,6 +290,14 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
         label: "mixed-case REL attribute and token",
         link: '<https://api.github.com/p2>; REL="Next"',
       },
+      {
+        label: "comma inside quoted parameter before next link",
+        link: '<https://api.github.com/p1>; title="a, b"; rel="prev", <https://api.github.com/p2>; title="c; rel=prev"; rel=NEXT',
+      },
+      {
+        label: "valueless parameter before rel=next",
+        link: '<https://api.github.com/p2>; foo; rel="next"',
+      },
     ])(
       "follows RFC 8288 next Link variant ($label) for sole match and ambiguity detection",
       async ({ link }) => {
@@ -360,6 +368,75 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
 
       expect(matchedResult).toBe(42);
       expect(matchedPageOne.pullsList).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      {
+        label: "escaped quote with fake rel=next in title",
+        link: '<https://api.github.com/items?page=1>; title="a; rel=\\"next\\""; rel="prev"',
+      },
+      {
+        label: "unquoted fake rel=next inside quoted title",
+        link: '<https://api.github.com/items?page=1>; title="x; rel=next"; rel="last"',
+      },
+      {
+        label: "fake rel=next inside URI brackets",
+        link: '<https://api.github.com/items?q=;rel=next>; rel="prev"',
+      },
+      {
+        label: "duplicate rel parameters where only second is next",
+        link: '<https://api.github.com/p2>; rel="prev"; rel="next"',
+      },
+      {
+        label: "missing opening angle bracket",
+        link: 'https://api.github.com/p2; rel="next"',
+      },
+      {
+        label: "unclosed angle bracket",
+        link: '<https://api.github.com/p2; rel="next"',
+      },
+      {
+        label: "stray token after closing angle bracket",
+        link: '<https://api.github.com/p2> foo; rel="next"',
+      },
+      {
+        label: "unclosed quoted parameter value",
+        link: '<https://api.github.com/p2>; title="unclosed; rel="next"',
+      },
+      {
+        label: "trailing backslash in quoted parameter value",
+        link: '<https://api.github.com/p2>; title="bad\\',
+      },
+      {
+        label: "empty parameter name",
+        link: "<https://api.github.com/p2>; =next",
+      },
+      {
+        label: "quote inside unquoted parameter value",
+        link: '<https://api.github.com/p2>; rel=foo"bar',
+      },
+      {
+        label: "empty parameter value",
+        link: "<https://api.github.com/p2>; rel=",
+      },
+    ])("ignores non-next or malformed Link header ($label)", async ({ link }) => {
+      const match = makeMatchingPullRequest();
+      const { rest, pullsList } = createRestMock({
+        pullsList: async (params) =>
+          params.page === 2
+            ? { data: [{ ...match, number: 43 }] }
+            : { data: [match], headers: { link } },
+      });
+
+      const result = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: makeForkPullRequestWorkflowRun(),
+        rest,
+      });
+
+      expect(result).toBe(42);
+      expect(pullsList).toHaveBeenCalledTimes(1);
     });
 
     it("resolves a target on page 2 after an empty page 1 and returns null when empty pages hit the 10-page cap", async () => {
