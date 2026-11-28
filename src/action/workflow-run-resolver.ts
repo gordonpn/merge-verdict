@@ -9,6 +9,9 @@ const PULLS_LIST_PAGE_SIZE = 100;
 const ARTIFACTS_LIST_PAGE_SIZE = 100;
 const MAX_CONNECTION_PAGES = 10;
 const MAX_CONNECTION_ITEMS = 1000;
+// Match complete relation tokens without depending on Link parameter order.
+const NEXT_LINK_RELATION_PATTERN =
+  /;\s*rel\s*=\s*(?:"(?:[^"]*\s)?next(?:\s[^"]*)?"|next)(?=\s*(?:;|,|$))/i;
 
 interface ResolverPage<T> {
   readonly data: readonly T[];
@@ -26,7 +29,7 @@ async function collectResolverPages<T>(
       return null;
     }
     items.push(...response.data);
-    const hasNextPage = /<[^>]+>;\s*rel="next"/.test(response.headers?.link ?? "");
+    const hasNextPage = NEXT_LINK_RELATION_PATTERN.test(response.headers?.link ?? "");
     if (!hasNextPage) {
       return items;
     }
@@ -298,7 +301,7 @@ async function resolveIssueCommentPullRequestNumber(
 
   const matchedPrNumbers = new Set<number>();
   for (const artifact of artifacts) {
-    if (artifact.expired === true || typeof artifact.name !== "string") {
+    if (artifact.expired !== false || typeof artifact.name !== "string") {
       continue;
     }
     if (!artifact.name.startsWith(artifactPrefix)) {
@@ -334,6 +337,15 @@ export async function resolveWorkflowRunPullRequestNumber(
   const workflowRun = input.workflowRun;
   if (owner === null || repo === null || workflowRun == null) {
     return null;
+  }
+
+  const expectedRepo = `${owner}/${repo}`.toLowerCase();
+  const rawRunRepo = workflowRun.repository?.full_name;
+  if (rawRunRepo !== undefined && rawRunRepo !== null) {
+    const runRepo = normalizeNonEmptyString(rawRunRepo);
+    if (runRepo === null || runRepo.toLowerCase() !== expectedRepo) {
+      return null;
+    }
   }
 
   const directResult = resolveDirectPullRequestNumber(workflowRun.pull_requests);

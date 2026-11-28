@@ -168,6 +168,59 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
       expect(pullsList).not.toHaveBeenCalled();
       expect(listWorkflowRunArtifacts).not.toHaveBeenCalled();
     });
+
+    it.each([
+      { label: "mismatched repository.full_name", repository: { full_name: "other/repo" } },
+      { label: "blank repository.full_name", repository: { full_name: "  " } },
+    ])(
+      "returns null without API calls for direct pull_requests when $label",
+      async ({ repository }) => {
+        const { rest, pullsList, listWorkflowRunArtifacts } = createRestMock();
+
+        const prNumber = await resolveWorkflowRunPullRequestNumber({
+          owner: "octocat",
+          repo: "hello-world",
+          workflowRun: {
+            id: 503,
+            event: "pull_request",
+            repository,
+            pull_requests: [{ number: 42 }],
+          },
+          rest,
+        });
+
+        expect(prNumber).toBeNull();
+        expect(pullsList).not.toHaveBeenCalled();
+        expect(listWorkflowRunArtifacts).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      {
+        label: "case-insensitive repository match",
+        repository: { full_name: "Octocat/Hello-World" },
+      },
+      { label: "omitted repository", repository: undefined },
+      { label: "null repository.full_name", repository: { full_name: null } },
+    ])("resolves direct pull_requests when $label", async ({ repository }) => {
+      const { rest, pullsList, listWorkflowRunArtifacts } = createRestMock();
+
+      const prNumber = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: {
+          id: 504,
+          event: "pull_request",
+          repository,
+          pull_requests: [{ number: 42 }],
+        },
+        rest,
+      });
+
+      expect(prNumber).toBe(42);
+      expect(pullsList).not.toHaveBeenCalled();
+      expect(listWorkflowRunArtifacts).not.toHaveBeenCalled();
+    });
   });
 
   describe("fork pull_request workflow_run resolution", () => {
@@ -222,6 +275,169 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
 
       expect(result).toBeNull();
       expect(pullsList).toHaveBeenCalledTimes(10);
+    });
+
+    it.each([
+      {
+        label: "reordered unquoted rel=NEXT",
+        link: '<https://api.github.com/p2>; title="p2"; rel=NEXT',
+      },
+      {
+        label: "quoted multi-token rel",
+        link: '<https://api.github.com/p2>; rel="prev next"',
+      },
+      {
+        label: "mixed-case REL attribute and token",
+        link: '<https://api.github.com/p2>; REL="Next"',
+      },
+    ])(
+      "follows RFC 8288 next Link variant ($label) for sole match and ambiguity detection",
+      async ({ link }) => {
+        const match = makeMatchingPullRequest();
+
+        const soleRest = createRestMock({
+          pullsList: async (params) =>
+            params.page === 2 ? { data: [match] } : { data: [], headers: { link } },
+        });
+        const soleResult = await resolveWorkflowRunPullRequestNumber({
+          owner: "octocat",
+          repo: "hello-world",
+          workflowRun: makeForkPullRequestWorkflowRun(),
+          rest: soleRest.rest,
+        });
+        expect(soleResult).toBe(42);
+        expect(soleRest.pullsList).toHaveBeenCalledTimes(2);
+
+        const ambiguousRest = createRestMock({
+          pullsList: async (params) =>
+            params.page === 2
+              ? { data: [{ ...match, number: 43 }] }
+              : { data: [match], headers: { link } },
+        });
+        const ambiguousResult = await resolveWorkflowRunPullRequestNumber({
+          owner: "octocat",
+          repo: "hello-world",
+          workflowRun: makeForkPullRequestWorkflowRun(),
+          rest: ambiguousRest.rest,
+        });
+        expect(ambiguousResult).toBeNull();
+        expect(ambiguousRest.pullsList).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    it('does not advance to page 2 for non-next relation token rel="next-page"', async () => {
+      const match = makeMatchingPullRequest();
+      const emptyPageOne = createRestMock({
+        pullsList: async (params) =>
+          params.page === 2
+            ? { data: [match] }
+            : { data: [], headers: { link: '<https://api.github.com/p2>; rel="next-page"' } },
+      });
+
+      const emptyResult = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: makeForkPullRequestWorkflowRun(),
+        rest: emptyPageOne.rest,
+      });
+
+      expect(emptyResult).toBeNull();
+      expect(emptyPageOne.pullsList).toHaveBeenCalledTimes(1);
+
+      const matchedPageOne = createRestMock({
+        pullsList: async (params) =>
+          params.page === 2
+            ? { data: [{ ...match, number: 43 }] }
+            : { data: [match], headers: { link: '<https://api.github.com/p2>; rel="next-page"' } },
+      });
+
+      const matchedResult = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: makeForkPullRequestWorkflowRun(),
+        rest: matchedPageOne.rest,
+      });
+
+      expect(matchedResult).toBe(42);
+      expect(matchedPageOne.pullsList).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolves a target on page 2 after an empty page 1 and returns null when empty pages hit the 10-page cap", async () => {
+      const pageTwoMatch = createRestMock({
+        pullsList: async (params) =>
+          params.page === 2
+            ? { data: [makeMatchingPullRequest()] }
+            : { data: [], headers: { link: '<https://api.github.com/p2>; rel="next"' } },
+      });
+
+      expect(
+        await resolveWorkflowRunPullRequestNumber({
+          owner: "octocat",
+          repo: "hello-world",
+          workflowRun: makeForkPullRequestWorkflowRun(),
+          rest: pageTwoMatch.rest,
+        }),
+      ).toBe(42);
+      expect(pageTwoMatch.pullsList).toHaveBeenCalledTimes(2);
+
+      const cappedEmpty = createRestMock({
+        pullsList: async () => ({
+          data: [],
+          headers: { link: '<https://api.github.com/next>; rel="next"' },
+        }),
+      });
+
+      expect(
+        await resolveWorkflowRunPullRequestNumber({
+          owner: "octocat",
+          repo: "hello-world",
+          workflowRun: makeForkPullRequestWorkflowRun(),
+          rest: cappedEmpty.rest,
+        }),
+      ).toBeNull();
+      expect(cappedEmpty.pullsList).toHaveBeenCalledTimes(10);
+    });
+
+    it.each([
+      { label: "mismatched repository.full_name", repository: { full_name: "other/repo" } },
+      { label: "blank repository.full_name", repository: { full_name: "  " } },
+    ])(
+      "returns null without calling pulls.list for fork pull_request when $label",
+      async ({ repository }) => {
+        const { rest, pullsList } = createRestMock();
+
+        const prNumber = await resolveWorkflowRunPullRequestNumber({
+          owner: "octocat",
+          repo: "hello-world",
+          workflowRun: makeForkPullRequestWorkflowRun({ repository }),
+          rest,
+        });
+
+        expect(prNumber).toBeNull();
+        expect(pullsList).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      {
+        label: "case-insensitive repository match",
+        repository: { full_name: "Octocat/Hello-World" },
+      },
+      { label: "omitted repository", repository: undefined },
+    ])("resolves fork pull_request when $label", async ({ repository }) => {
+      const { rest, pullsList } = createRestMock({
+        pullsList: async () => ({ data: [makeMatchingPullRequest()] }),
+      });
+
+      const prNumber = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: makeForkPullRequestWorkflowRun({ repository }),
+        rest,
+      });
+
+      expect(prNumber).toBe(42);
+      expect(pullsList).toHaveBeenCalledTimes(1);
     });
     it("queries open PRs by forkOwner:headBranch and returns the single exact case-insensitive SHA and head repo match", async () => {
       const headSha = "aBcDeF0123456789aBcDeF0123456789aBcDeF01";
@@ -611,6 +827,8 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
       for (const artifacts of [
         [],
         [{ name: "deepseek-review-target-pr-42", expired: true }],
+        [{ name: "deepseek-review-target-pr-42", expired: undefined }],
+        [{ name: "deepseek-review-target-pr-42", expired: null }],
         [{ name: "pr-agent-review-provenance-pr-42", expired: false }],
         [{ name: "deepseek-review-target-pr-0", expired: false }],
         [{ name: "deepseek-review-target-pr-042", expired: false }],
@@ -630,6 +848,30 @@ describe("resolveWorkflowRunPullRequestNumber", () => {
 
         expect(prNumber).toBeNull();
       }
+    });
+
+    it("ignores expired: true, expired: undefined, and expired: null artifacts when an expired: false artifact exists", async () => {
+      const { rest } = createRestMock({
+        listWorkflowRunArtifacts: async () => ({
+          data: {
+            artifacts: [
+              { name: "deepseek-review-target-pr-10", expired: true },
+              { name: "deepseek-review-target-pr-11", expired: undefined },
+              { name: "deepseek-review-target-pr-12", expired: null },
+              { name: "deepseek-review-target-pr-42", expired: false },
+            ],
+          },
+        }),
+      });
+
+      const prNumber = await resolveWorkflowRunPullRequestNumber({
+        owner: "octocat",
+        repo: "hello-world",
+        workflowRun: makeIssueCommentWorkflowRun(),
+        rest,
+      });
+
+      expect(prNumber).toBe(42);
     });
 
     it("returns null when multiple distinct unexpired PR artifacts exist (ambiguous)", async () => {
